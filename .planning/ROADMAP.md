@@ -35,6 +35,13 @@
 
 **Estimation:** Small (quick depth = 1-3 plans per phase)
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Configuración base del bot (estructura, dependencias, handlers básicos)
+- [ ] 01-02-PLAN.md — Procesamiento de video (descarga, ffmpeg, envío como video note)
+- [ ] 01-03-PLAN.md — Manejo de errores, logging y documentación
+
 ---
 
 ### Phase 2: Error Handling & Configuration
