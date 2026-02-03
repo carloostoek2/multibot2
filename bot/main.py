@@ -4,24 +4,13 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 from bot.config import BOT_TOKEN
+from bot.handlers import start, handle_video
 
 # Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a welcome message when the command /start is issued."""
-    await update.message.reply_text("Envíame un video y lo convertiré en nota de video")
-
-
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle video messages sent by users."""
-    logger.info("Video received from user %s", update.effective_user.id)
-    await update.message.reply_text("Video recibido, procesando...")
-    # Actual video processing will be implemented in Plan 02
 
 
 def main() -> None:
