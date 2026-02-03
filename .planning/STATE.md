@@ -16,7 +16,7 @@ Bot básico que recibe videos y los convierte a video notes
 
 ## Active Plans
 
-(None yet)
+- 01-01: Bot Foundation (COMPLETE)
 
 ## Blockers
 
@@ -27,6 +27,9 @@ Bot básico que recibe videos y los convierte a video notes
 - Usar python-telegram-bot como framework
 - ffmpeg para procesamiento de video
 - Procesamiento síncrono para simplificar MVP
+- Usar python-telegram-bot v20+ con API async/await
+- Validar BOT_TOKEN en tiempo de importación para fallo temprano
+- Separar configuración en módulo dedicado (bot/config.py)
 
 ## Project Reference
 
@@ -36,4 +39,4 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 **Current focus:** Phase 1 — Core Video Processing
 
 ---
-*Last updated: 2025-02-03 after initialization*
+*Last updated: 2026-02-03 after completing 01-01*
