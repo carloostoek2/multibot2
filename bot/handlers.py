@@ -86,7 +86,7 @@ async def _process_video_with_timeout(
     logger.info(f"Sending video note to user {user_id}")
     try:
         with open(output_path, "rb") as video_file:
-            await update.message.reply_video_note(video=video_file)
+            await update.message.reply_video_note(video_note=video_file)
         logger.info(f"Video note sent successfully to user {user_id}")
     except Exception as e:
         logger.error(f"Failed to send video note to user {user_id}: {e}")
