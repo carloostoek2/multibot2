@@ -1,10 +1,11 @@
 """Main module for the Telegram bot."""
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from bot.config import BOT_TOKEN
 from bot.handlers import start, handle_video
+from bot.error_handler import error_handler
 
 # Enable logging
 logging.basicConfig(
@@ -21,6 +22,10 @@ def main() -> None:
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
+
+    # Add global error handler
+    application.add_error_handler(error_handler)
+    logger.info("Error handler registered")
 
     # Run the bot until the user presses Ctrl-C
     logger.info("Starting bot...")
