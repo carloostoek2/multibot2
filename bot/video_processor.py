@@ -73,8 +73,9 @@ class VideoProcessor:
             "-preset", "medium",  # Encoding speed/compression tradeoff
             "-crf", "23",  # Quality (lower = better, 23 is default)
             "-pix_fmt", "yuv420p",  # Pixel format for compatibility
+            "-c:a", "aac",  # Audio codec
+            "-b:a", "128k",  # Audio bitrate
             "-movflags", "+faststart",  # Web optimization
-            "-an",  # Remove audio (video notes don't have audio)
             str(self.output_path),  # Output file
         ]
 
