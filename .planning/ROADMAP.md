@@ -44,6 +44,24 @@ Plans:
 
 ---
 
+### Phase 1.1: Expandir procesamiento de video (INSERTED)
+
+**Goal:** Cambio de formato, extracción de audio, dividir y unir archivos
+**Depends on:** Phase 1
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 1.1 to break down)
+
+**Details:**
+Nuevas funcionalidades avanzadas de procesamiento de video:
+- Cambio de formato entre diferentes tipos de archivo
+- Extracción de audio de videos
+- Dividir videos en segmentos
+- Unir múltiples archivos de video
+
+---
+
 ### Phase 2: Error Handling & Configuration
 
 **Goal:** Manejo de errores robusto y configuración básica

@@ -66,5 +66,10 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 **Core value:** El usuario envía un video y recibe inmediatamente una nota de video circular, sin fricción ni pasos intermedios.
 **Current focus:** Phase 1 COMPLETE - Bot is production-ready, awaiting human verification before Phase 2 (Deployment)
 
+## Accumulated Context
+
+### Roadmap Evolution
+- Phase 1.1 inserted after Phase 1: Expandir procesamiento de video - Cambio de formato, extracción de audio, dividir y unir archivos (URGENT)
+
 ---
 *Last updated: 2026-02-03 after completing 01-03*
