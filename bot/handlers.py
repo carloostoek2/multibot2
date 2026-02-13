@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from telegram import Update
 from telegram.ext import ContextTypes
+from telegram.error import NetworkError, TimedOut
 
 from bot.temp_manager import TempManager
 from bot.video_processor import VideoProcessor
@@ -20,11 +21,37 @@ from bot.error_handler import (
     VideoJoinError,
     handle_processing_error,
 )
+from bot.config import config
 
 logger = logging.getLogger(__name__)
 
-# Timeout for video processing (60 seconds)
-PROCESSING_TIMEOUT = 60
+async def _download_with_retry(file, destination_path: str, max_retries: int = 3) -> bool:
+    """Download file with retry logic for transient failures.
+
+    Args:
+        file: Telegram file object to download
+        destination_path: Path to save the file
+        max_retries: Maximum number of retry attempts
+
+    Returns:
+        True if download succeeded
+
+    Raises:
+        NetworkError, TimedOut: If all retries exhausted
+    """
+    for attempt in range(max_retries):
+        try:
+            await file.download_to_drive(destination_path)
+            return True
+        except (NetworkError, TimedOut) as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Download attempt {attempt + 1} failed, retrying...")
+                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+            else:
+                logger.error(f"Download failed after {max_retries} attempts: {e}")
+                raise
+    return False
+
 
 
 async def _process_video_with_timeout(
@@ -61,7 +88,7 @@ async def _process_video_with_timeout(
     logger.info(f"Downloading video from user {user_id}")
     try:
         file = await video.get_file()
-        await file.download_to_drive(input_path)
+        await _download_with_retry(file, input_path)
         logger.info(f"Video downloaded to {input_path}")
     except Exception as e:
         logger.error(f"Failed to download video for user {user_id}: {e}")
@@ -79,7 +106,7 @@ async def _process_video_with_timeout(
                 str(input_path),
                 str(output_path)
             ),
-            timeout=PROCESSING_TIMEOUT
+            timeout=config.PROCESSING_TIMEOUT
         )
 
         if not success:
@@ -265,7 +292,7 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
             logger.info(f"Downloading video from user {user_id} for format conversion")
             try:
                 file = await video.get_file()
-                await file.download_to_drive(input_path)
+                await _download_with_retry(file, input_path)
                 logger.info(f"Video downloaded to {input_path}")
             except Exception as e:
                 logger.error(f"Failed to download video for user {user_id}: {e}")
@@ -278,7 +305,7 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
                 converter = FormatConverter(str(input_path), str(output_path))
                 success = await asyncio.wait_for(
                     loop.run_in_executor(None, converter.convert, output_format),
-                    timeout=PROCESSING_TIMEOUT
+                    timeout=config.PROCESSING_TIMEOUT
                 )
 
                 if not success:
@@ -381,7 +408,7 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
             logger.info(f"Downloading video from user {user_id} for audio extraction")
             try:
                 file = await video.get_file()
-                await file.download_to_drive(input_path)
+                await _download_with_retry(file, input_path)
                 logger.info(f"Video downloaded to {input_path}")
             except Exception as e:
                 logger.error(f"Failed to download video for user {user_id}: {e}")
@@ -394,7 +421,7 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
                 extractor = AudioExtractor(str(input_path), str(output_path))
                 success = await asyncio.wait_for(
                     loop.run_in_executor(None, extractor.extract, output_format),
-                    timeout=PROCESSING_TIMEOUT
+                    timeout=config.PROCESSING_TIMEOUT
                 )
 
                 if not success:
@@ -440,9 +467,7 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
                     logger.warning(f"Could not delete processing message: {e}")
 
 
-# Constants for split command
-MAX_SEGMENTS = 10
-MIN_SEGMENT_DURATION = 5
+# Default segment duration for split command
 DEFAULT_SEGMENT_DURATION = 60
 
 
@@ -486,9 +511,9 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
             if len(args) >= 2:
                 try:
                     split_value = int(args[1])
-                    if split_value < MIN_SEGMENT_DURATION:
+                    if split_value < config.MIN_SEGMENT_SECONDS:
                         await update.message.reply_text(
-                            f"La duración mínima es {MIN_SEGMENT_DURATION} segundos."
+                            f"La duración mínima es {config.MIN_SEGMENT_SECONDS} segundos."
                         )
                         return
                 except ValueError:
@@ -507,9 +532,9 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                             "El número de partes debe ser al menos 1."
                         )
                         return
-                    if split_value > MAX_SEGMENTS:
+                    if split_value > config.MAX_SEGMENTS:
                         await update.message.reply_text(
-                            f"El máximo de partes es {MAX_SEGMENTS}."
+                            f"El máximo de partes es {config.MAX_SEGMENTS}."
                         )
                         return
                 except ValueError:
@@ -530,7 +555,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 split_value = int(args[0])
                 if split_value < MIN_SEGMENT_DURATION:
                     await update.message.reply_text(
-                        f"La duración mínima es {MIN_SEGMENT_DURATION} segundos."
+                        f"La duración mínima es {config.MIN_SEGMENT_SECONDS} segundos."
                     )
                     return
             except ValueError:
@@ -567,7 +592,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info(f"Downloading video from user {user_id} for splitting")
             try:
                 file = await video.get_file()
-                await file.download_to_drive(input_path)
+                await _download_with_retry(file, input_path)
                 logger.info(f"Video downloaded to {input_path}")
             except Exception as e:
                 logger.error(f"Failed to download video for user {user_id}: {e}")
@@ -590,7 +615,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     if expected_segments > MAX_SEGMENTS:
                         await update.message.reply_text(
                             f"El video generaría demasiadas partes ({expected_segments}). "
-                            f"Intenta con una duración mayor (máximo {MAX_SEGMENTS} partes)."
+                            f"Intenta con una duración mayor (máximo {config.MAX_SEGMENTS} partes)."
                         )
                         if processing_message:
                             try:
@@ -601,19 +626,19 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
                     segments = await asyncio.wait_for(
                         loop.run_in_executor(None, splitter.split_by_duration, split_value),
-                        timeout=PROCESSING_TIMEOUT
+                        timeout=config.PROCESSING_TIMEOUT
                     )
                 else:  # split_mode == "parts"
                     segments = await asyncio.wait_for(
                         loop.run_in_executor(None, splitter.split_by_parts, split_value),
-                        timeout=PROCESSING_TIMEOUT
+                        timeout=config.PROCESSING_TIMEOUT
                     )
 
                     # Check if we got too many segments (shouldn't happen due to validation in split_by_parts)
                     if len(segments) > MAX_SEGMENTS:
                         await update.message.reply_text(
                             f"El video generaría demasiadas partes ({len(segments)}). "
-                            f"Intenta con menos partes (máximo {MAX_SEGMENTS})."
+                            f"Intenta con menos partes (máximo {config.MAX_SEGMENTS})."
                         )
                         if processing_message:
                             try:
@@ -690,10 +715,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     logger.warning(f"Could not delete processing message: {e}")
 
 
-# Constants for join command
-JOIN_MIN_VIDEOS = 2
-JOIN_MAX_VIDEOS = 10
-JOIN_SESSION_TIMEOUT = 300  # 5 minutes in seconds
+# Note: Join command configuration now uses bot.config values
 
 
 async def handle_join_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -756,7 +778,7 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Check session timeout
     current_time = asyncio.get_event_loop().time()
-    if current_time - session["last_activity"] > JOIN_SESSION_TIMEOUT:
+    if current_time - session["last_activity"] > config.JOIN_SESSION_TIMEOUT:
         logger.info(f"Join session expired for user {user_id}")
         # Clean up expired session
         session["temp_mgr"].cleanup()
@@ -770,9 +792,9 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     session["last_activity"] = current_time
 
     # Check if we've reached the maximum
-    if len(session["videos"]) >= JOIN_MAX_VIDEOS:
+    if len(session["videos"]) >= config.JOIN_MAX_VIDEOS:
         await update.message.reply_text(
-            f"Máximo {JOIN_MAX_VIDEOS} videos permitidos.\n"
+            f"Máximo {config.JOIN_MAX_VIDEOS} videos permitidos.\n"
             "Usa /done para unir o /cancel para cancelar."
         )
         return
@@ -806,7 +828,7 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.info(f"Downloading video {video_index} for join session, user {user_id}")
         try:
             file = await video.get_file()
-            await file.download_to_drive(input_path)
+            await _download_with_retry(file, input_path)
             logger.info(f"Video downloaded to {input_path}")
         except Exception as e:
             logger.error(f"Failed to download video for user {user_id}: {e}")
@@ -838,8 +860,8 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text(
                 f"Video {video_count} agregado. Envía más videos o usa /done para unir."
             )
-        elif video_count < JOIN_MIN_VIDEOS:
-            remaining = JOIN_MIN_VIDEOS - video_count
+        elif video_count < config.JOIN_MIN_VIDEOS:
+            remaining = config.JOIN_MIN_VIDEOS - video_count
             await update.message.reply_text(
                 f"Video {video_count} agregado. Necesitas {remaining} video(s) más para unir."
             )
@@ -847,7 +869,7 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text(
                 f"Video {video_count} agregado. "
                 f"Tienes {video_count} video(s). "
-                f"Envía más (máx. {JOIN_MAX_VIDEOS}) o usa /done para unir."
+                f"Envía más (máx. {config.JOIN_MAX_VIDEOS}) o usa /done para unir."
             )
 
     except Exception as e:
@@ -884,7 +906,7 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # Check session timeout
     current_time = asyncio.get_event_loop().time()
-    if current_time - session["last_activity"] > JOIN_SESSION_TIMEOUT:
+    if current_time - session["last_activity"] > config.JOIN_SESSION_TIMEOUT:
         logger.info(f"Join session expired for user {user_id}")
         session["temp_mgr"].cleanup()
         context.user_data.pop("join_session", None)
@@ -895,9 +917,9 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     # Check minimum videos
     video_count = len(session["videos"])
-    if video_count < JOIN_MIN_VIDEOS:
+    if video_count < config.JOIN_MIN_VIDEOS:
         await update.message.reply_text(
-            f"Necesitas al menos {JOIN_MIN_VIDEOS} videos para unir. "
+            f"Necesitas al menos {config.JOIN_MIN_VIDEOS} videos para unir. "
             f"Actualmente tienes {video_count}."
         )
         return
@@ -930,7 +952,7 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             loop = asyncio.get_event_loop()
             success = await asyncio.wait_for(
                 loop.run_in_executor(None, joiner.join_videos),
-                timeout=PROCESSING_TIMEOUT * 2  # Double timeout for joining
+                timeout=config.JOIN_TIMEOUT  # Dedicated join timeout (120s default)
             )
 
             if not success:
