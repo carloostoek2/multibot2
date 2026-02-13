@@ -9,6 +9,13 @@ from typing import Callable, Any
 
 from telegram import Update
 from telegram.ext import ContextTypes
+from telegram.error import (
+    NetworkError,
+    TimedOut,
+    BadRequest,
+    RetryAfter,
+    TelegramError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +94,12 @@ ERROR_MESSAGES = {
     VideoSplitError: "No pude dividir el video. Verifica que el archivo sea válido.",
     VideoJoinError: "No pude unir los videos. Verifica que los archivos sean válidos.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
+    # Telegram API errors
+    NetworkError: "Error de conexión. Por favor intenta de nuevo.",
+    TimedOut: "La operación tardó demasiado. Intenta con un archivo más pequeño.",
+    BadRequest: "Solicitud inválida. Verifica el archivo e intenta de nuevo.",
+    RetryAfter: "Demasiadas solicitudes. Por favor espera un momento.",
+    TelegramError: "Error de Telegram. Por favor intenta de nuevo.",
 }
 
 DEFAULT_ERROR_MESSAGE = "Ocurrió un error inesperado. Por favor intenta de nuevo."
@@ -105,16 +118,28 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     error = context.error
     user_id = update.effective_user.id if update.effective_user else "unknown"
 
-    # Log the full error for debugging
-    logger.exception(f"Error handling update for user {user_id}: {error}")
-
     # Determine user-friendly message based on error type
     user_message = DEFAULT_ERROR_MESSAGE
+    is_telegram_error = isinstance(error, TelegramError)
 
     for error_type, message in ERROR_MESSAGES.items():
         if isinstance(error, error_type):
             user_message = message
             break
+
+    # Log with appropriate level based on error type
+    if isinstance(error, (NetworkError, TimedOut)):
+        # Transient errors - log as warning
+        logger.warning(f"Transient Telegram error for user {user_id}: {error}")
+    elif isinstance(error, BadRequest):
+        # User errors - log as info
+        logger.info(f"Bad request from user {user_id}: {error}")
+    elif is_telegram_error:
+        # Other Telegram errors - log as error
+        logger.error(f"Telegram error for user {user_id}: {error}")
+    else:
+        # Internal errors - log full exception
+        logger.exception(f"Error handling update for user {user_id}: {error}")
 
     # Send message to user if we have a chat to reply to
     if update and update.effective_message:
@@ -163,14 +188,28 @@ async def handle_processing_error(
         error: The exception that occurred
         user_id: ID of the user for logging
     """
-    logger.exception(f"Processing error for user {user_id}: {error}")
-
     # Determine appropriate message
     user_message = DEFAULT_ERROR_MESSAGE
+    is_telegram_error = isinstance(error, TelegramError)
+
     for error_type, message in ERROR_MESSAGES.items():
         if isinstance(error, error_type):
             user_message = message
             break
+
+    # Log with appropriate level based on error type
+    if isinstance(error, (NetworkError, TimedOut)):
+        # Transient errors - log as warning
+        logger.warning(f"Transient Telegram error for user {user_id}: {error}")
+    elif isinstance(error, BadRequest):
+        # User errors - log as info
+        logger.info(f"Bad request from user {user_id}: {error}")
+    elif is_telegram_error:
+        # Other Telegram errors - log as error
+        logger.error(f"Telegram error for user {user_id}: {error}")
+    else:
+        # Internal errors - log full exception
+        logger.exception(f"Processing error for user {user_id}: {error}")
 
     if update and update.effective_message:
         try:
