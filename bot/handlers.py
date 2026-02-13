@@ -1,6 +1,7 @@
 """Telegram bot handlers for video processing."""
 import asyncio
 import logging
+import uuid
 from pathlib import Path
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -25,13 +26,14 @@ from bot.config import config
 
 logger = logging.getLogger(__name__)
 
-async def _download_with_retry(file, destination_path: str, max_retries: int = 3) -> bool:
+async def _download_with_retry(file, destination_path: str, max_retries: int = 3, correlation_id: str = None) -> bool:
     """Download file with retry logic for transient failures.
 
     Args:
         file: Telegram file object to download
         destination_path: Path to save the file
         max_retries: Maximum number of retry attempts
+        correlation_id: Optional correlation ID for request tracing
 
     Returns:
         True if download succeeded
@@ -39,16 +41,18 @@ async def _download_with_retry(file, destination_path: str, max_retries: int = 3
     Raises:
         NetworkError, TimedOut: If all retries exhausted
     """
+    cid = correlation_id or "no-cid"
     for attempt in range(max_retries):
         try:
             await file.download_to_drive(destination_path)
+            logger.info(f"[{cid}] Video downloaded to {destination_path}")
             return True
         except (NetworkError, TimedOut) as e:
             if attempt < max_retries - 1:
-                logger.warning(f"Download attempt {attempt + 1} failed, retrying...")
+                logger.warning(f"[{cid}] Download attempt {attempt + 1} failed, retrying...")
                 await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
             else:
-                logger.error(f"Download failed after {max_retries} attempts: {e}")
+                logger.error(f"[{cid}] Download failed after {max_retries} attempts: {e}")
                 raise
     return False
 
@@ -57,7 +61,8 @@ async def _download_with_retry(file, destination_path: str, max_retries: int = 3
 async def _process_video_with_timeout(
     update: Update,
     temp_mgr: TempManager,
-    user_id: int
+    user_id: int,
+    correlation_id: str = None
 ) -> None:
     """Process video with timeout handling.
 
@@ -68,12 +73,14 @@ async def _process_video_with_timeout(
         update: Telegram update object
         temp_mgr: TempManager instance for file handling
         user_id: ID of the user sending the video
+        correlation_id: Optional correlation ID for request tracing
 
     Raises:
         DownloadError: If video download fails
         FFmpegError: If video processing fails
         ProcessingTimeoutError: If processing times out
     """
+    cid = correlation_id or "no-cid"
     # Get video from message
     video = update.message.video
 
@@ -85,17 +92,16 @@ async def _process_video_with_timeout(
     output_path = temp_mgr.get_temp_path(output_filename)
 
     # Download video to temp file
-    logger.info(f"Downloading video from user {user_id}")
+    logger.info(f"[{cid}] Downloading video from user {user_id}")
     try:
         file = await video.get_file()
-        await _download_with_retry(file, input_path)
-        logger.info(f"Video downloaded to {input_path}")
+        await _download_with_retry(file, input_path, correlation_id=cid)
     except Exception as e:
-        logger.error(f"Failed to download video for user {user_id}: {e}")
+        logger.error(f"[{cid}] Failed to download video for user {user_id}: {e}")
         raise DownloadError("No pude descargar el video") from e
 
     # Process video with timeout
-    logger.info(f"Processing video for user {user_id}")
+    logger.info(f"[{cid}] Processing video for user {user_id}")
     try:
         # Use asyncio.wait_for to enforce timeout
         loop = asyncio.get_event_loop()
@@ -110,21 +116,21 @@ async def _process_video_with_timeout(
         )
 
         if not success:
-            logger.error(f"Video processing failed for user {user_id}")
+            logger.error(f"[{cid}] Video processing failed for user {user_id}")
             raise FFmpegError("El procesamiento de video falló")
 
     except asyncio.TimeoutError as e:
-        logger.error(f"Video processing timed out for user {user_id}")
+        logger.error(f"[{cid}] Video processing timed out for user {user_id}")
         raise ProcessingTimeoutError("El video tardó demasiado en procesarse") from e
 
     # Send as video note
-    logger.info(f"Sending video note to user {user_id}")
+    logger.info(f"[{cid}] Sending video note to user {user_id}")
     try:
         with open(output_path, "rb") as video_file:
             await update.message.reply_video_note(video_note=video_file)
-        logger.info(f"Video note sent successfully to user {user_id}")
+        logger.info(f"[{cid}] Video note sent successfully to user {user_id}")
     except Exception as e:
-        logger.error(f"Failed to send video note to user {user_id}: {e}")
+        logger.error(f"[{cid}] Failed to send video note to user {user_id}: {e}")
         raise
 
 
@@ -139,7 +145,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context: Telegram context object
     """
     user_id = update.effective_user.id
-    logger.info(f"Video received from user {user_id}")
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Video received from user {user_id}")
 
     # Send "processing" message to user
     processing_message = None
@@ -148,22 +155,23 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "Procesando tu video... "
         )
     except Exception as e:
-        logger.warning(f"Could not send processing message to user {user_id}: {e}")
+        logger.warning(f"[{correlation_id}] Could not send processing message to user {user_id}: {e}")
 
     # Use TempManager as context manager for automatic cleanup
     with TempManager() as temp_mgr:
         try:
-            await _process_video_with_timeout(update, temp_mgr, user_id)
+            await _process_video_with_timeout(update, temp_mgr, user_id, correlation_id)
 
             # Delete processing message on success
             if processing_message:
                 try:
                     await processing_message.delete()
                 except Exception as e:
-                    logger.warning(f"Could not delete processing message: {e}")
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
 
         except (DownloadError, FFmpegError, ProcessingTimeoutError) as e:
             # Handle known processing errors
+            logger.error(f"[{correlation_id}] Processing error: {e}")
             await handle_processing_error(update, e, user_id)
 
             # Delete processing message on error
@@ -171,11 +179,11 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 try:
                     await processing_message.delete()
                 except Exception as e:
-                    logger.warning(f"Could not delete processing message: {e}")
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
 
         except Exception as e:
             # Handle unexpected errors
-            logger.exception(f"Unexpected error processing video for user {user_id}: {e}")
+            logger.exception(f"[{correlation_id}] Unexpected error processing video for user {user_id}: {e}")
             await handle_processing_error(update, e, user_id)
 
             # Delete processing message on error
@@ -183,10 +191,10 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 try:
                     await processing_message.delete()
                 except Exception as e:
-                    logger.warning(f"Could not delete processing message: {e}")
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
 
         # TempManager cleanup happens automatically on context exit (finally behavior)
-        logger.debug(f"Cleanup completed for user {user_id}")
+        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
