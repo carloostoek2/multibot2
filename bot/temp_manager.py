@@ -1,12 +1,17 @@
 """Temporary file manager for video processing."""
+import glob
 import os
 import shutil
 import tempfile
+import time
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Set
 
 logger = logging.getLogger(__name__)
+
+# Global set to track active TempManager instances
+active_temp_managers: Set['TempManager'] = set()
 
 
 class TempManager:
@@ -20,6 +25,10 @@ class TempManager:
         """Create a unique temporary directory."""
         self.temp_dir = tempfile.mkdtemp(prefix="videonote_")
         self._tracked_files: List[str] = []
+
+        # Register in active managers set
+        active_temp_managers.add(self)
+
         logger.debug(f"Created temp directory: {self.temp_dir}")
 
     def get_temp_path(self, filename: str) -> str:
@@ -93,6 +102,12 @@ class TempManager:
         Handles cases where files might be locked or inaccessible.
         Also clears the tracked files list.
         """
+        # Unregister from active managers
+        try:
+            active_temp_managers.discard(self)
+        except Exception:
+            pass
+
         if os.path.exists(self.temp_dir):
             try:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -109,3 +124,47 @@ class TempManager:
         """Exit context manager - always cleanup."""
         self.cleanup()
         return False  # Don't suppress exceptions
+
+
+def cleanup_old_temp_directories(max_age_hours: int = 24) -> int:
+    """Remove old temporary directories on startup.
+
+    Scans for videonote_* directories in the system temp directory
+    and removes those older than the specified age.
+
+    Args:
+        max_age_hours: Remove directories older than this many hours
+
+    Returns:
+        Number of directories removed
+    """
+    temp_dir = tempfile.gettempdir()
+    pattern = os.path.join(temp_dir, "videonote_*")
+
+    current_time = time.time()
+    max_age_seconds = max_age_hours * 3600
+
+    removed_count = 0
+    for dir_path in glob.glob(pattern):
+        try:
+            dir_time = os.path.getctime(dir_path)
+            age_seconds = current_time - dir_time
+
+            if age_seconds > max_age_seconds:
+                shutil.rmtree(dir_path, ignore_errors=True)
+                removed_count += 1
+                logger.info(f"Removed old temp directory: {dir_path} (age: {age_seconds/3600:.1f} hours)")
+        except Exception as e:
+            logger.warning(f"Failed to check/remove old temp directory {dir_path}: {e}")
+
+    if removed_count > 0:
+        logger.info(f"Cleaned up {removed_count} old temporary directories")
+
+    return removed_count
+
+
+# Clean up old temp directories on module import (startup)
+try:
+    cleanup_old_temp_directories()
+except Exception as e:
+    logger.warning(f"Failed to cleanup old temp directories on startup: {e}")
