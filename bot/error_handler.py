@@ -61,6 +61,14 @@ class AudioExtractionError(VideoProcessingError):
         super().__init__(self.message)
 
 
+class VideoSplitError(VideoProcessingError):
+    """Exception raised when video splitting fails."""
+
+    def __init__(self, message: str = "No pude dividir el video"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -68,6 +76,7 @@ ERROR_MESSAGES = {
     ProcessingTimeoutError: "El video tardó demasiado en procesarse. Intenta con uno más corto.",
     FormatConversionError: "No pude convertir el formato del video. Verifica que el formato sea válido.",
     AudioExtractionError: "No pude extraer el audio del video. Intenta con otro archivo.",
+    VideoSplitError: "No pude dividir el video. Verifica que el archivo sea válido.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
 }
 
