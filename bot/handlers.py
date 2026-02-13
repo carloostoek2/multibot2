@@ -123,6 +123,7 @@ async def _process_video_with_timeout(
 
     # Process video with timeout
     logger.info(f"[{cid}] Processing video for user {user_id}")
+    logger.debug(f"[{cid}] Processing with timeout: {config.PROCESSING_TIMEOUT}s")
     try:
         # Use asyncio.wait_for to enforce timeout
         loop = asyncio.get_event_loop()
@@ -172,6 +173,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Validate file size before downloading
     video = update.message.video
     if video.file_size:
+        logger.debug(f"[{correlation_id}] Video file size: {video.file_size} bytes")
         is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
