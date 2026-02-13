@@ -9,6 +9,7 @@ from bot.temp_manager import TempManager
 from bot.video_processor import VideoProcessor
 from bot.format_processor import FormatConverter, AudioExtractor
 from bot.split_processor import VideoSplitter
+from bot.join_processor import VideoJoiner
 from bot.error_handler import (
     DownloadError,
     FFmpegError,
@@ -16,6 +17,7 @@ from bot.error_handler import (
     FormatConversionError,
     AudioExtractionError,
     VideoSplitError,
+    VideoJoinError,
     handle_processing_error,
 )
 
@@ -173,7 +175,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Comandos disponibles:\n"
         "/convert <formato> - Convierte un video a otro formato (mp4, avi, mov, mkv, webm)\n"
         "/extract_audio <formato> - Extrae el audio de un video (mp3, aac, wav, ogg)\n"
-        "/split [duration|parts] <valor> - Divide un video en segmentos"
+        "/split [duration|parts] <valor> - Divide un video en segmentos\n"
+        "/join - Une múltiples videos en uno solo"
     )
 
 
@@ -685,3 +688,332 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     await processing_message.delete()
                 except Exception as e:
                     logger.warning(f"Could not delete processing message: {e}")
+
+
+# Constants for join command
+JOIN_MIN_VIDEOS = 2
+JOIN_MAX_VIDEOS = 10
+JOIN_SESSION_TIMEOUT = 300  # 5 minutes in seconds
+
+
+async def handle_join_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /join command to start a video join session.
+
+    Usage: /join - Start a session to collect videos for joining
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    logger.info(f"Join command received from user {user_id}")
+
+    # Check if there's already an active session
+    if context.user_data.get("join_session"):
+        await update.message.reply_text(
+            "Ya tienes una sesión de unión activa. "
+            f"Tienes {len(context.user_data['join_session']['videos'])} video(s) agregados.\n\n"
+            "Envía más videos o usa /done para unir, /cancel para cancelar."
+        )
+        return
+
+    # Initialize join session
+    context.user_data["join_session"] = {
+        "videos": [],
+        "temp_mgr": TempManager(),
+        "last_activity": asyncio.get_event_loop().time(),
+    }
+
+    await update.message.reply_text(
+        "🎬 *Modo unión de videos activado*\n\n"
+        "Envíame los videos que quieres unir (máximo 10).\n"
+        "Los videos se unirán en el orden en que los envíes.\n\n"
+        "Comandos disponibles:\n"
+        "• /done - Unir todos los videos\n"
+        "• /cancel - Cancelar la sesión\n\n"
+        "Envía el primer video:",
+        parse_mode="Markdown"
+    )
+
+
+async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle video messages during an active join session.
+
+    Downloads each video and tracks it in the user's join session.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+
+    # Check if there's an active join session
+    session = context.user_data.get("join_session")
+    if not session:
+        # No active session, let the default video handler process it
+        await handle_video(update, context)
+        return
+
+    # Check session timeout
+    current_time = asyncio.get_event_loop().time()
+    if current_time - session["last_activity"] > JOIN_SESSION_TIMEOUT:
+        logger.info(f"Join session expired for user {user_id}")
+        # Clean up expired session
+        session["temp_mgr"].cleanup()
+        context.user_data.pop("join_session", None)
+        await update.message.reply_text(
+            "La sesión expiró. Usa /join para comenzar de nuevo."
+        )
+        return
+
+    # Update last activity
+    session["last_activity"] = current_time
+
+    # Check if we've reached the maximum
+    if len(session["videos"]) >= JOIN_MAX_VIDEOS:
+        await update.message.reply_text(
+            f"Máximo {JOIN_MAX_VIDEOS} videos permitidos.\n"
+            "Usa /done para unir o /cancel para cancelar."
+        )
+        return
+
+    # Get video from message
+    video = update.message.video
+    if not video:
+        await update.message.reply_text(
+            "Por favor envía un video válido."
+        )
+        return
+
+    # Send processing message
+    processing_message = None
+    try:
+        processing_message = await update.message.reply_text(
+            f"Descargando video {len(session['videos']) + 1}..."
+        )
+    except Exception as e:
+        logger.warning(f"Could not send processing message to user {user_id}: {e}")
+
+    try:
+        temp_mgr = session["temp_mgr"]
+
+        # Generate safe filename
+        video_index = len(session["videos"]) + 1
+        input_filename = f"join_{user_id}_video{video_index:02d}_{video.file_unique_id}.mp4"
+        input_path = temp_mgr.get_temp_path(input_filename)
+
+        # Download video
+        logger.info(f"Downloading video {video_index} for join session, user {user_id}")
+        try:
+            file = await video.get_file()
+            await file.download_to_drive(input_path)
+            logger.info(f"Video downloaded to {input_path}")
+        except Exception as e:
+            logger.error(f"Failed to download video for user {user_id}: {e}")
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception:
+                    pass
+            await update.message.reply_text(
+                "No pude descargar el video. Intenta con otro archivo."
+            )
+            return
+
+        # Track the video
+        session["videos"].append(str(input_path))
+        temp_mgr.track_file(str(input_path))
+
+        video_count = len(session["videos"])
+
+        # Delete processing message
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+
+        # Send confirmation
+        if video_count == 1:
+            await update.message.reply_text(
+                f"Video {video_count} agregado. Envía más videos o usa /done para unir."
+            )
+        elif video_count < JOIN_MIN_VIDEOS:
+            remaining = JOIN_MIN_VIDEOS - video_count
+            await update.message.reply_text(
+                f"Video {video_count} agregado. Necesitas {remaining} video(s) más para unir."
+            )
+        else:
+            await update.message.reply_text(
+                f"Video {video_count} agregado. "
+                f"Tienes {video_count} video(s). "
+                f"Envía más (máx. {JOIN_MAX_VIDEOS}) o usa /done para unir."
+            )
+
+    except Exception as e:
+        logger.exception(f"Unexpected error handling join video for user {user_id}: {e}")
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+        await update.message.reply_text(
+            "Ocurrió un error procesando el video. Intenta de nuevo."
+        )
+
+
+async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /done command to complete video joining.
+
+    Joins all collected videos and sends the result.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    logger.info(f"Join done command received from user {user_id}")
+
+    # Check if there's an active join session
+    session = context.user_data.get("join_session")
+    if not session:
+        await update.message.reply_text(
+            "No hay una sesión de unión activa. Usa /join para comenzar."
+        )
+        return
+
+    # Check session timeout
+    current_time = asyncio.get_event_loop().time()
+    if current_time - session["last_activity"] > JOIN_SESSION_TIMEOUT:
+        logger.info(f"Join session expired for user {user_id}")
+        session["temp_mgr"].cleanup()
+        context.user_data.pop("join_session", None)
+        await update.message.reply_text(
+            "La sesión expiró. Usa /join para comenzar de nuevo."
+        )
+        return
+
+    # Check minimum videos
+    video_count = len(session["videos"])
+    if video_count < JOIN_MIN_VIDEOS:
+        await update.message.reply_text(
+            f"Necesitas al menos {JOIN_MIN_VIDEOS} videos para unir. "
+            f"Actualmente tienes {video_count}."
+        )
+        return
+
+    # Send processing message
+    processing_message = None
+    try:
+        processing_message = await update.message.reply_text(
+            f"Uniendo {video_count} videos... Esto puede tomar un momento."
+        )
+    except Exception as e:
+        logger.warning(f"Could not send processing message to user {user_id}: {e}")
+
+    temp_mgr = session["temp_mgr"]
+
+    try:
+        # Generate output path
+        output_filename = f"joined_{user_id}_{int(asyncio.get_event_loop().time())}.mp4"
+        output_path = temp_mgr.get_temp_path(output_filename)
+
+        # Create VideoJoiner and add all videos
+        logger.info(f"Starting video join for user {user_id} with {video_count} videos")
+        joiner = VideoJoiner(str(output_path))
+
+        for video_path in session["videos"]:
+            joiner.add_video(video_path)
+
+        # Join videos with timeout
+        try:
+            loop = asyncio.get_event_loop()
+            success = await asyncio.wait_for(
+                loop.run_in_executor(None, joiner.join_videos),
+                timeout=PROCESSING_TIMEOUT * 2  # Double timeout for joining
+            )
+
+            if not success:
+                logger.error(f"Video joining failed for user {user_id}")
+                raise VideoJoinError("No pude unir los videos")
+
+        except asyncio.TimeoutError as e:
+            logger.error(f"Video joining timed out for user {user_id}")
+            raise ProcessingTimeoutError("La unión de videos tardó demasiado") from e
+
+        # Send joined video
+        logger.info(f"Sending joined video to user {user_id}")
+        try:
+            with open(output_path, "rb") as video_file:
+                await update.message.reply_video(
+                    video=video_file,
+                    caption=f"Video unido ({video_count} partes)"
+                )
+            logger.info(f"Joined video sent successfully to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send joined video to user {user_id}: {e}")
+            raise
+
+        # Delete processing message on success
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception as e:
+                logger.warning(f"Could not delete processing message: {e}")
+
+        # Clean up session
+        temp_mgr.cleanup()
+        context.user_data.pop("join_session", None)
+
+    except (VideoJoinError, ProcessingTimeoutError) as e:
+        await handle_processing_error(update, e, user_id)
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+        # Clean up session on error
+        temp_mgr.cleanup()
+        context.user_data.pop("join_session", None)
+
+    except Exception as e:
+        logger.exception(f"Unexpected error joining videos for user {user_id}: {e}")
+        await handle_processing_error(update, e, user_id)
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+        # Clean up session on error
+        temp_mgr.cleanup()
+        context.user_data.pop("join_session", None)
+
+
+async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /cancel command to cancel a join session.
+
+    Clears session data and cleans up temporary files.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    logger.info(f"Join cancel command received from user {user_id}")
+
+    # Check if there's an active join session
+    session = context.user_data.get("join_session")
+    if not session:
+        await update.message.reply_text(
+            "No hay una sesión de unión activa."
+        )
+        return
+
+    # Clean up temp files
+    video_count = len(session["videos"])
+    session["temp_mgr"].cleanup()
+    context.user_data.pop("join_session", None)
+
+    await update.message.reply_text(
+        f"Sesión cancelada. {video_count} video(s) descartados."
+    )
