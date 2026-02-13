@@ -26,6 +26,11 @@ Expandir capacidades del bot para manejar conversiones de formato, extracción d
   - AudioExtractor class with MP3, AAC, WAV, OGG support
   - /convert and /extract_audio Telegram commands
   - Spanish error messages and comprehensive logging
+- **01.1-02**: Video Splitting - COMPLETE
+  - VideoSplitter class with split_by_duration and split_by_parts methods
+  - /split command with duration and parts modes
+  - Max 10 segments, min 5 seconds per segment constraints
+  - Progress messages during segment sending
 
 ## Blockers
 
@@ -49,6 +54,9 @@ Expandir capacidades del bot para manejar conversiones de formato, extracción d
 - **D01.1-01-02**: Support both direct video messages and reply-to-video patterns
 - **D01.1-01-03**: Default to mp3 for audio extraction when no format specified
 - **D01.1-01-04**: Use -movflags +faststart for all video conversions
+- **D01.1-02-01**: Use ffmpeg segment muxer for fast splitting without re-encoding
+- **D01.1-02-02**: Calculate expected segments before splitting to enforce limits
+- **D01.1-02-03**: Send segments as separate video messages with part number captions
 
 ## Progress
 
@@ -57,15 +65,15 @@ Phase 1: Core Video Processing
 [████████████████████] 100% (3/3 plans complete)
 
 Phase 1.1: Expandir procesamiento de video
-[██████████░░░░░░░░░░] 33% (1/3 plans complete)
+[████████████████░░░░] 67% (2/3 plans complete)
   - 01.1-01: Format Conversion and Audio Extraction ✓
-  - 01.1-02: Video Splitting (pending)
+  - 01.1-02: Video Splitting ✓
   - 01.1-03: Video Joining (pending)
 
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 4/7 plans complete (57%)
+Overall: 5/7 plans complete (71%)
 ```
 
 ## Project Reference
@@ -80,6 +88,7 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 ### Roadmap Evolution
 - Phase 1.1 inserted after Phase 1: Expandir procesamiento de video - Cambio de formato, extracción de audio, dividir y unir archivos (URGENT)
 - Phase 1.1 Plan 01 complete: Format conversion and audio extraction working
+- Phase 1.1 Plan 02 complete: Video splitting with /split command working
 
 ---
-*Last updated: 2026-02-13 after completing 01.1-01*
+*Last updated: 2026-02-13 after completing 01.1-02*
