@@ -102,6 +102,8 @@ Enhance error handling with structured exceptions, comprehensive configuration m
 - **D02-04-01**: Use module-level cleanup on import for automatic startup cleanup
 - **D02-04-02**: Use set for active manager tracking (explicit lifecycle management)
 - **D02-04-03**: Cleanup on SIGINT/SIGTERM only (SIGKILL cannot be caught)
+- **D02-05-01**: Config validation handles invalid LOG_LEVEL (fail-fast behavior)
+- **D02-05-02**: Correlation IDs required for all operational log messages
 
 ## Progress
 
@@ -116,16 +118,17 @@ Phase 1.1: Expandir procesamiento de video
   - 01.1-03: Video Joining ✓
 
 Phase 02: Error Handling and Configuration
-[████████████████████] 100% (4/4 plans complete)
+[████████████████████] 100% (5/5 plans complete)
   - 02-01: Enhanced Bot Configuration ✓
   - 02-02: Pre-processing Validation ✓
   - 02-03: Telegram API Error Handling ✓
   - 02-04: Startup Cleanup and Graceful Shutdown ✓
+  - 02-05: Configurable Logging Levels ✓
 
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 10/10 plans complete (100%)
+Overall: 11/11 plans complete (100%)
 ```
 
 ## Project Reference
@@ -146,6 +149,7 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 - Phase 02 Plan 02 complete: Pre-processing validation with file size, integrity, and disk space checks
 - Phase 02 Plan 03 complete: Telegram API error handling with retry logic and correlation IDs
 - Phase 02 Plan 04 complete: Startup cleanup and graceful shutdown with signal handlers
+- Phase 02 Plan 05 complete: Configurable logging levels via LOG_LEVEL environment variable
 
 ---
-*Last updated: 2026-02-13 after completing 02-04*
+*Last updated: 2026-02-13 after completing 02-05*
