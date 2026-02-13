@@ -83,6 +83,15 @@ Nuevas funcionalidades avanzadas de procesamiento de video:
 
 **Estimation:** Small
 
+**Plans:** 5 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Configuration Enhancement (BotConfig dataclass, env vars, validation)
+- [ ] 02-02-PLAN.md — Pre-processing Validation (file size, video integrity, disk space)
+- [ ] 02-03-PLAN.md — Enhanced Error Handling (Telegram API errors, retry logic, correlation IDs)
+- [ ] 02-04-PLAN.md — Startup Cleanup and Graceful Shutdown (orphaned temp cleanup, signal handlers)
+- [ ] 02-05-PLAN.md — Logging Enhancement (configurable log levels, standardized logging)
+
 ---
 
 ## Requirement Traceability
@@ -115,4 +124,4 @@ Nuevas funcionalidades avanzadas de procesamiento de video:
 
 ---
 
-*Last updated: 2025-02-03 after roadmap creation*
+*Last updated: 2026-02-13 after Phase 02 planning*
