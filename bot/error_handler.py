@@ -17,6 +17,9 @@ from telegram.error import (
     TelegramError,
 )
 
+# Import ValidationError from validators for error handling
+from bot.validators import ValidationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,6 +97,7 @@ ERROR_MESSAGES = {
     VideoSplitError: "No pude dividir el video. Verifica que el archivo sea válido.",
     VideoJoinError: "No pude unir los videos. Verifica que los archivos sean válidos.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
+    ValidationError: "El archivo no es válido. Verifica que sea un video correcto.",
     # Telegram API errors
     NetworkError: "Error de conexión. Por favor intenta de nuevo.",
     TimedOut: "La operación tardó demasiado. Intenta con un archivo más pequeño.",
