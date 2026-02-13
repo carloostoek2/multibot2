@@ -1,14 +1,17 @@
 """Main module for the Telegram bot."""
 import logging
+import signal
+import sys
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from bot.config import BOT_TOKEN
+from bot.config import config
 from bot.handlers import (
     start, handle_video, handle_convert_command, handle_extract_audio_command,
     handle_split_command, handle_join_start, handle_join_done, handle_join_cancel
 )
 from bot.error_handler import error_handler
+from bot.temp_manager import active_temp_managers
 
 # Enable logging
 logging.basicConfig(
@@ -17,10 +20,40 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully.
+
+    Cleans up any active temp managers before exiting to prevent
+    orphaned temporary directories.
+    """
+    signal_name = signal.Signals(signum).name
+    logger.info(f"Received signal {signal_name} ({signum}), shutting down gracefully...")
+
+    # Cleanup any active temp managers
+    cleanup_count = 0
+    for temp_mgr in list(active_temp_managers):
+        try:
+            temp_mgr.cleanup()
+            cleanup_count += 1
+        except Exception as e:
+            logger.warning(f"Error during temp manager cleanup: {e}")
+
+    if cleanup_count > 0:
+        logger.info(f"Cleaned up {cleanup_count} active temp managers")
+
+    logger.info("Shutdown complete")
+    sys.exit(0)
+
+
 def main() -> None:
     """Start the bot."""
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    logger.info("Signal handlers registered for graceful shutdown")
+
     # Create the Application and pass it your bot's token
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(config.BOT_TOKEN).build()
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
