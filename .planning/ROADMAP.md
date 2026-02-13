@@ -48,10 +48,12 @@ Plans:
 
 **Goal:** Cambio de formato, extracción de audio, dividir y unir archivos
 **Depends on:** Phase 1
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 1.1 to break down)
+- [ ] 01.1-01-PLAN.md — Format conversion and audio extraction (/convert, /extract_audio commands)
+- [ ] 01.1-02-PLAN.md — Video splitting functionality (/split command)
+- [ ] 01.1-03-PLAN.md — Video joining/concatenation (/join command with collection flow)
 
 **Details:**
 Nuevas funcionalidades avanzadas de procesamiento de video:
