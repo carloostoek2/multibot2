@@ -43,6 +43,11 @@ Enhance error handling with structured exceptions, comprehensive configuration m
   - __post_init__ validation for fail-fast behavior
   - .env.example documentation with all options
   - Handlers refactored to use config values
+- **02-03**: Telegram API Error Handling - COMPLETE
+  - Telegram error imports (NetworkError, TimedOut, BadRequest, RetryAfter)
+  - Spanish error messages for all Telegram error types
+  - Retry logic with exponential backoff for transient failures
+  - Correlation IDs for request tracing through logs
 
 ## Blockers
 
@@ -77,6 +82,9 @@ Enhance error handling with structured exceptions, comprehensive configuration m
 - **D02-01-02**: Validate configuration at initialization time (fail-fast)
 - **D02-01-03**: Separate JOIN_TIMEOUT from PROCESSING_TIMEOUT for independent tuning
 - **D02-01-04**: Keep DEFAULT_SEGMENT_DURATION as constant (UI default, not operational)
+- **D02-03-01**: Use 8-character UUID for correlation IDs (sufficient uniqueness, readable)
+- **D02-03-02**: Use exponential backoff (1s, 2s, 3s) for download retries
+- **D02-03-03**: Log transient errors (NetworkError, TimedOut) as warnings, not errors
 
 ## Progress
 
@@ -91,15 +99,15 @@ Phase 1.1: Expandir procesamiento de video
   - 01.1-03: Video Joining ✓
 
 Phase 02: Error Handling and Configuration
-[░░░░░░░░░░░░░░░░░░░░] 33% (1/3 plans complete)
+[████████████████░░░░] 67% (2/3 plans complete)
   - 02-01: Enhanced Bot Configuration ✓
   - 02-02: Structured Error Handling (pending)
-  - 02-03: Health Checks and Monitoring (pending)
+  - 02-03: Telegram API Error Handling ✓
 
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 7/10 plans complete (70%)
+Overall: 8/10 plans complete (80%)
 ```
 
 ## Project Reference
@@ -117,6 +125,7 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 - Phase 1.1 Plan 02 complete: Video splitting with /split command working
 - Phase 1.1 Plan 03 complete: Video joining with /join command working
 - Phase 02 Plan 01 complete: Enhanced bot configuration with environment variables
+- Phase 02 Plan 03 complete: Telegram API error handling with retry logic and correlation IDs
 
 ---
-*Last updated: 2026-02-13 after completing 02-01*
+*Last updated: 2026-02-13 after completing 02-03*
