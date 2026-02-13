@@ -31,6 +31,12 @@ Expandir capacidades del bot para manejar conversiones de formato, extracción d
   - /split command with duration and parts modes
   - Max 10 segments, min 5 seconds per segment constraints
   - Progress messages during segment sending
+- **01.1-03**: Video Joining - COMPLETE
+  - VideoJoiner class with ffmpeg concat demuxer
+  - Format normalization for incompatible codecs
+  - /join command with session-based video collection
+  - Min 2, max 10 videos per join operation
+  - 5-minute session timeout with automatic cleanup
 
 ## Blockers
 
@@ -57,6 +63,10 @@ Expandir capacidades del bot para manejar conversiones de formato, extracción d
 - **D01.1-02-01**: Use ffmpeg segment muxer for fast splitting without re-encoding
 - **D01.1-02-02**: Calculate expected segments before splitting to enforce limits
 - **D01.1-02-03**: Send segments as separate video messages with part number captions
+- **D01.1-03-01**: Use ffmpeg concat demuxer for quality preservation with automatic normalization
+- **D01.1-03-02**: H.264 + AAC as normalization target for maximum compatibility
+- **D01.1-03-03**: Double timeout (120s) for join operations vs standard processing
+- **D01.1-03-04**: Session-based collection with /done trigger for multi-file operations
 
 ## Progress
 
@@ -65,15 +75,15 @@ Phase 1: Core Video Processing
 [████████████████████] 100% (3/3 plans complete)
 
 Phase 1.1: Expandir procesamiento de video
-[████████████████░░░░] 67% (2/3 plans complete)
+[████████████████████] 100% (3/3 plans complete)
   - 01.1-01: Format Conversion and Audio Extraction ✓
   - 01.1-02: Video Splitting ✓
-  - 01.1-03: Video Joining (pending)
+  - 01.1-03: Video Joining ✓
 
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 5/7 plans complete (71%)
+Overall: 6/7 plans complete (86%)
 ```
 
 ## Project Reference
@@ -89,6 +99,7 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 - Phase 1.1 inserted after Phase 1: Expandir procesamiento de video - Cambio de formato, extracción de audio, dividir y unir archivos (URGENT)
 - Phase 1.1 Plan 01 complete: Format conversion and audio extraction working
 - Phase 1.1 Plan 02 complete: Video splitting with /split command working
+- Phase 1.1 Plan 03 complete: Video joining with /join command working
 
 ---
-*Last updated: 2026-02-13 after completing 01.1-02*
+*Last updated: 2026-02-13 after completing 01.1-03*
