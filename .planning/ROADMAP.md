@@ -44,16 +44,16 @@ Plans:
 
 ---
 
-### Phase 1.1: Expandir procesamiento de video (INSERTED)
+### Phase 1.1: Expandir procesamiento de video (INSERTED) ✓ COMPLETE
 
 **Goal:** Cambio de formato, extracción de audio, dividir y unir archivos
 **Depends on:** Phase 1
-**Plans:** 3 plans
+**Plans:** 3 plans — All complete
 
 Plans:
-- [ ] 01.1-01-PLAN.md — Format conversion and audio extraction (/convert, /extract_audio commands)
-- [ ] 01.1-02-PLAN.md — Video splitting functionality (/split command)
-- [ ] 01.1-03-PLAN.md — Video joining/concatenation (/join command with collection flow)
+- [x] 01.1-01-PLAN.md — Format conversion and audio extraction (/convert, /extract_audio commands)
+- [x] 01.1-02-PLAN.md — Video splitting functionality (/split command)
+- [x] 01.1-03-PLAN.md — Video joining/concatenation (/join command with collection flow)
 
 **Details:**
 Nuevas funcionalidades avanzadas de procesamiento de video:
