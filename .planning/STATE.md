@@ -54,6 +54,11 @@ Enhance error handling with structured exceptions, comprehensive configuration m
   - Spanish error messages for all Telegram error types
   - Retry logic with exponential backoff for transient failures
   - Correlation IDs for request tracing through logs
+- **02-04**: Startup Cleanup and Graceful Shutdown - COMPLETE
+  - cleanup_old_temp_directories() removes directories older than 24 hours
+  - Auto-executes on module import for startup cleanup
+  - active_temp_managers set tracks all active TempManager instances
+  - Signal handlers for SIGINT and SIGTERM cleanup temp managers on shutdown
 
 ## Blockers
 
@@ -94,6 +99,9 @@ Enhance error handling with structured exceptions, comprehensive configuration m
 - **D02-03-01**: Use 8-character UUID for correlation IDs (sufficient uniqueness, readable)
 - **D02-03-02**: Use exponential backoff (1s, 2s, 3s) for download retries
 - **D02-03-03**: Log transient errors (NetworkError, TimedOut) as warnings, not errors
+- **D02-04-01**: Use module-level cleanup on import for automatic startup cleanup
+- **D02-04-02**: Use set for active manager tracking (explicit lifecycle management)
+- **D02-04-03**: Cleanup on SIGINT/SIGTERM only (SIGKILL cannot be caught)
 
 ## Progress
 
@@ -108,15 +116,16 @@ Phase 1.1: Expandir procesamiento de video
   - 01.1-03: Video Joining ✓
 
 Phase 02: Error Handling and Configuration
-[████████████████████] 100% (3/3 plans complete)
+[████████████████████] 100% (4/4 plans complete)
   - 02-01: Enhanced Bot Configuration ✓
   - 02-02: Pre-processing Validation ✓
   - 02-03: Telegram API Error Handling ✓
+  - 02-04: Startup Cleanup and Graceful Shutdown ✓
 
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 9/9 plans complete (100%)
+Overall: 10/10 plans complete (100%)
 ```
 
 ## Project Reference
@@ -136,6 +145,7 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 - Phase 02 Plan 01 complete: Enhanced bot configuration with environment variables
 - Phase 02 Plan 02 complete: Pre-processing validation with file size, integrity, and disk space checks
 - Phase 02 Plan 03 complete: Telegram API error handling with retry logic and correlation IDs
+- Phase 02 Plan 04 complete: Startup cleanup and graceful shutdown with signal handlers
 
 ---
-*Last updated: 2026-02-13 after completing 02-02*
+*Last updated: 2026-02-13 after completing 02-04*
