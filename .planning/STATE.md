@@ -43,6 +43,12 @@ Enhance error handling with structured exceptions, comprehensive configuration m
   - __post_init__ validation for fail-fast behavior
   - .env.example documentation with all options
   - Handlers refactored to use config values
+- **02-02**: Pre-processing Validation - COMPLETE
+  - validators.py module with file size, integrity, and disk space checks
+  - ValidationError exception with Spanish user messages
+  - Integration in all handlers (handle_video, convert, extract_audio, split, join)
+  - Fail-fast validation before download to prevent wasted processing
+  - Graceful degradation when ffprobe or disk checks unavailable
 - **02-03**: Telegram API Error Handling - COMPLETE
   - Telegram error imports (NetworkError, TimedOut, BadRequest, RetryAfter)
   - Spanish error messages for all Telegram error types
@@ -82,6 +88,9 @@ Enhance error handling with structured exceptions, comprehensive configuration m
 - **D02-01-02**: Validate configuration at initialization time (fail-fast)
 - **D02-01-03**: Separate JOIN_TIMEOUT from PROCESSING_TIMEOUT for independent tuning
 - **D02-01-04**: Keep DEFAULT_SEGMENT_DURATION as constant (UI default, not operational)
+- **D02-02-01**: Validation should not block if tools unavailable (ffprobe, disk check)
+- **D02-02-02**: Validate at multiple stages: before download, after download, before processing
+- **D02-02-03**: Use 2x file size + 100MB buffer for disk space estimation
 - **D02-03-01**: Use 8-character UUID for correlation IDs (sufficient uniqueness, readable)
 - **D02-03-02**: Use exponential backoff (1s, 2s, 3s) for download retries
 - **D02-03-03**: Log transient errors (NetworkError, TimedOut) as warnings, not errors
@@ -99,15 +108,15 @@ Phase 1.1: Expandir procesamiento de video
   - 01.1-03: Video Joining ✓
 
 Phase 02: Error Handling and Configuration
-[████████████████░░░░] 67% (2/3 plans complete)
+[████████████████████] 100% (3/3 plans complete)
   - 02-01: Enhanced Bot Configuration ✓
-  - 02-02: Structured Error Handling (pending)
+  - 02-02: Pre-processing Validation ✓
   - 02-03: Telegram API Error Handling ✓
 
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 8/10 plans complete (80%)
+Overall: 9/9 plans complete (100%)
 ```
 
 ## Project Reference
@@ -125,7 +134,8 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 - Phase 1.1 Plan 02 complete: Video splitting with /split command working
 - Phase 1.1 Plan 03 complete: Video joining with /join command working
 - Phase 02 Plan 01 complete: Enhanced bot configuration with environment variables
+- Phase 02 Plan 02 complete: Pre-processing validation with file size, integrity, and disk space checks
 - Phase 02 Plan 03 complete: Telegram API error handling with retry logic and correlation IDs
 
 ---
-*Last updated: 2026-02-13 after completing 02-03*
+*Last updated: 2026-02-13 after completing 02-02*
