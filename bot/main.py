@@ -2,22 +2,35 @@
 import logging
 import signal
 import sys
+
+# Import config first (before logging setup to use LOG_LEVEL)
+from bot.config import config
+
+# Configure logging based on config
+# Validate log level and fallback to INFO if invalid
+valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+if config.LOG_LEVEL.upper() not in valid_levels:
+    print(f"Warning: Invalid LOG_LEVEL '{config.LOG_LEVEL}'. Using INFO.", file=sys.stderr)
+    log_level = logging.INFO
+else:
+    log_level = getattr(logging, config.LOG_LEVEL.upper())
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=log_level
+)
+logger = logging.getLogger(__name__)
+logger.info(f"Logging configured at level: {config.LOG_LEVEL}")
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from bot.config import config
 from bot.handlers import (
     start, handle_video, handle_convert_command, handle_extract_audio_command,
     handle_split_command, handle_join_start, handle_join_done, handle_join_cancel
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
-
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 
 def signal_handler(signum, frame):
