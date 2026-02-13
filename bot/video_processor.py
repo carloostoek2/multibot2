@@ -68,7 +68,7 @@ class VideoProcessor:
             "-y",  # Overwrite output if exists
             "-i", str(self.input_path),  # Input file
             "-t", "60",  # Limit duration to 60 seconds
-            "-vf", "crop=ih:ih,scale=640:640:force_original_aspect_ratio=decrease",  # Square crop + scale
+            "-vf", "crop=min(iw,ih):min(iw,ih),scale=640:640:force_original_aspect_ratio=decrease",  # Square crop + scale
             "-c:v", "libx264",  # Video codec
             "-preset", "medium",  # Encoding speed/compression tradeoff
             "-crf", "23",  # Quality (lower = better, 23 is default)
