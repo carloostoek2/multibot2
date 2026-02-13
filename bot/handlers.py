@@ -23,6 +23,13 @@ from bot.error_handler import (
     handle_processing_error,
 )
 from bot.config import config
+from bot.validators import (
+    validate_file_size,
+    validate_video_file,
+    check_disk_space,
+    estimate_required_space,
+    ValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +107,20 @@ async def _process_video_with_timeout(
         logger.error(f"[{cid}] Failed to download video for user {user_id}: {e}")
         raise DownloadError("No pude descargar el video") from e
 
+    # Validate video integrity after download
+    is_valid, error_msg = validate_video_file(str(input_path))
+    if not is_valid:
+        logger.warning(f"[{cid}] Video validation failed for user {user_id}: {error_msg}")
+        raise ValidationError(error_msg)
+
+    # Check disk space before processing
+    video_size_mb = input_path.stat().st_size / (1024 * 1024)
+    required_space = estimate_required_space(int(video_size_mb))
+    has_space, space_error = check_disk_space(required_space)
+    if not has_space:
+        logger.warning(f"[{cid}] Disk space check failed for user {user_id}: {space_error}")
+        raise ValidationError(space_error)
+
     # Process video with timeout
     logger.info(f"[{cid}] Processing video for user {user_id}")
     try:
@@ -148,6 +169,15 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] Video received from user {user_id}")
 
+    # Validate file size before downloading
+    video = update.message.video
+    if video.file_size:
+        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
     # Send "processing" message to user
     processing_message = None
     try:
@@ -169,7 +199,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 except Exception as e:
                     logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
 
-        except (DownloadError, FFmpegError, ProcessingTimeoutError) as e:
+        except (DownloadError, FFmpegError, ProcessingTimeoutError, ValidationError) as e:
             # Handle known processing errors
             logger.error(f"[{correlation_id}] Processing error: {e}")
             await handle_processing_error(update, e, user_id)
@@ -257,6 +287,14 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
+    # Validate file size before downloading
+    if video.file_size:
+        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
     # Parse format from command arguments
     args = context.args
     if not args:
@@ -306,6 +344,20 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
                 logger.error(f"Failed to download video for user {user_id}: {e}")
                 raise DownloadError("No pude descargar el video") from e
 
+            # Validate video integrity after download
+            is_valid, error_msg = validate_video_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"Video validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            video_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(video_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
             # Convert video with timeout
             logger.info(f"Converting video to {output_format} for user {user_id}")
             try:
@@ -341,7 +393,7 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
                 except Exception as e:
                     logger.warning(f"Could not delete processing message: {e}")
 
-        except (DownloadError, FormatConversionError, ProcessingTimeoutError) as e:
+        except (DownloadError, FormatConversionError, ProcessingTimeoutError, ValidationError) as e:
             await handle_processing_error(update, e, user_id)
             if processing_message:
                 try:
@@ -380,6 +432,14 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
             "Formatos soportados: mp3, aac, wav, ogg"
         )
         return
+
+    # Validate file size before downloading
+    if video.file_size:
+        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
 
     # Parse format from command arguments (default to mp3)
     args = context.args
@@ -422,6 +482,20 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
                 logger.error(f"Failed to download video for user {user_id}: {e}")
                 raise DownloadError("No pude descargar el video") from e
 
+            # Validate video integrity after download
+            is_valid, error_msg = validate_video_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"Video validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            video_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(video_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
             # Extract audio with timeout
             logger.info(f"Extracting audio as {output_format} for user {user_id}")
             try:
@@ -457,7 +531,7 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
                 except Exception as e:
                     logger.warning(f"Could not delete processing message: {e}")
 
-        except (DownloadError, AudioExtractionError, ProcessingTimeoutError) as e:
+        except (DownloadError, AudioExtractionError, ProcessingTimeoutError, ValidationError) as e:
             await handle_processing_error(update, e, user_id)
             if processing_message:
                 try:
@@ -506,6 +580,14 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
             "/split - Divide en segmentos de 60 segundos (default)"
         )
         return
+
+    # Validate file size before downloading
+    if video.file_size:
+        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
 
     # Parse command arguments
     args = context.args if context.args else []
@@ -561,7 +643,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
             # Try to parse as a number (assume duration mode)
             try:
                 split_value = int(args[0])
-                if split_value < MIN_SEGMENT_DURATION:
+                if split_value < config.MIN_SEGMENT_SECONDS:
                     await update.message.reply_text(
                         f"La duración mínima es {config.MIN_SEGMENT_SECONDS} segundos."
                     )
@@ -606,6 +688,20 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.error(f"Failed to download video for user {user_id}: {e}")
                 raise DownloadError("No pude descargar el video") from e
 
+            # Validate video integrity after download
+            is_valid, error_msg = validate_video_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"Video validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            video_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(video_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
             # Create output directory for segments
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -620,7 +716,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     duration = await loop.run_in_executor(None, splitter.get_video_duration)
                     expected_segments = int(duration // split_value) + (1 if duration % split_value > 0 else 0)
 
-                    if expected_segments > MAX_SEGMENTS:
+                    if expected_segments > config.MAX_SEGMENTS:
                         await update.message.reply_text(
                             f"El video generaría demasiadas partes ({expected_segments}). "
                             f"Intenta con una duración mayor (máximo {config.MAX_SEGMENTS} partes)."
@@ -643,7 +739,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                     )
 
                     # Check if we got too many segments (shouldn't happen due to validation in split_by_parts)
-                    if len(segments) > MAX_SEGMENTS:
+                    if len(segments) > config.MAX_SEGMENTS:
                         await update.message.reply_text(
                             f"El video generaría demasiadas partes ({len(segments)}). "
                             f"Intenta con menos partes (máximo {config.MAX_SEGMENTS})."
@@ -705,7 +801,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 except Exception as e:
                     logger.warning(f"Could not delete processing message: {e}")
 
-        except (DownloadError, VideoSplitError, ProcessingTimeoutError) as e:
+        except (DownloadError, VideoSplitError, ProcessingTimeoutError, ValidationError) as e:
             await handle_processing_error(update, e, user_id)
             if processing_message:
                 try:
@@ -815,6 +911,14 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
 
+    # Validate file size before downloading
+    if video.file_size:
+        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
     # Send processing message
     processing_message = None
     try:
@@ -848,6 +952,18 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text(
                 "No pude descargar el video. Intenta con otro archivo."
             )
+            return
+
+        # Validate video integrity after download
+        is_valid, error_msg = validate_video_file(str(input_path))
+        if not is_valid:
+            logger.warning(f"Video validation failed for user {user_id}: {error_msg}")
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception:
+                    pass
+            await update.message.reply_text(error_msg)
             return
 
         # Track the video
@@ -930,6 +1046,17 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"Necesitas al menos {config.JOIN_MIN_VIDEOS} videos para unir. "
             f"Actualmente tienes {video_count}."
         )
+        return
+
+    # Check disk space before joining
+    total_size_mb = 0
+    for video_path in session["videos"]:
+        total_size_mb += Path(video_path).stat().st_size / (1024 * 1024)
+    required_space = estimate_required_space(int(total_size_mb))
+    has_space, space_error = check_disk_space(required_space)
+    if not has_space:
+        logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
+        await update.message.reply_text(space_error)
         return
 
     # Send processing message
