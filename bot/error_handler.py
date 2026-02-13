@@ -45,11 +45,29 @@ class ProcessingTimeoutError(VideoProcessingError):
         super().__init__(self.message)
 
 
+class FormatConversionError(VideoProcessingError):
+    """Exception raised when video format conversion fails."""
+
+    def __init__(self, message: str = "Error convirtiendo el formato del video"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class AudioExtractionError(VideoProcessingError):
+    """Exception raised when audio extraction fails."""
+
+    def __init__(self, message: str = "Error extrayendo el audio del video"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
     FFmpegError: "Hubo un problema procesando el video. Asegúrate de que sea un archivo válido.",
     ProcessingTimeoutError: "El video tardó demasiado en procesarse. Intenta con uno más corto.",
+    FormatConversionError: "No pude convertir el formato del video. Verifica que el formato sea válido.",
+    AudioExtractionError: "No pude extraer el audio del video. Intenta con otro archivo.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
 }
 
