@@ -2,31 +2,30 @@
 
 ## Current Phase
 
-Phase 1: Core Video Processing
+Phase 1.1: Expandir procesamiento de video
 
 ## Phase Goal
 
-Bot básico que recibe videos y los convierte a video notes
+Expandir capacidades del bot para manejar conversiones de formato, extracción de audio, y operaciones de división/unión de videos.
 
 ## Context Summary
 
 - Bot de Telegram que convierte videos en notas de video circulares
 - Procesamiento automático sin comandos
-- Dos fases planificadas para MVP
-- **Core video processing COMPLETE** - Videos can be downloaded, processed, and sent as video notes
+- **Phase 1 COMPLETE** - Core video processing done
+- **Phase 1.1 IN PROGRESS** - Format conversion and audio extraction implemented
+- Phase 2: Deployment pending
 
 ## Active Plans
 
 - **01-01**: Bot Foundation - COMPLETE
 - **01-02**: Core Video Processing Implementation - COMPLETE
-  - TempManager for temp file handling
-  - VideoProcessor with ffmpeg
-  - Telegram handlers for video messages
 - **01-03**: Error Handling, Logging and Documentation - COMPLETE
-  - Centralized error handler with custom exceptions
-  - Timeout protection and robust error handling
-  - Comprehensive logging
-  - Complete README documentation
+- **01.1-01**: Format Conversion and Audio Extraction - COMPLETE
+  - FormatConverter class with MP4, AVI, MOV, MKV, WEBM support
+  - AudioExtractor class with MP3, AAC, WAV, OGG support
+  - /convert and /extract_audio Telegram commands
+  - Spanish error messages and comprehensive logging
 
 ## Blockers
 
@@ -46,6 +45,10 @@ Bot básico que recibe videos y los convierte a video notes
 - **D01-03-01**: Use Spanish error messages for user-facing communication
 - **D01-03-02**: 60-second timeout for video processing to prevent indefinite hangs
 - **D01-03-03**: Processing message to user provides feedback during long operations
+- **D01.1-01-01**: Use format-specific codec selection (libx264 for most, libvpx-vp9 for webm)
+- **D01.1-01-02**: Support both direct video messages and reply-to-video patterns
+- **D01.1-01-03**: Default to mp3 for audio extraction when no format specified
+- **D01.1-01-04**: Use -movflags +faststart for all video conversions
 
 ## Progress
 
@@ -53,10 +56,16 @@ Bot básico que recibe videos y los convierte a video notes
 Phase 1: Core Video Processing
 [████████████████████] 100% (3/3 plans complete)
 
+Phase 1.1: Expandir procesamiento de video
+[██████████░░░░░░░░░░] 33% (1/3 plans complete)
+  - 01.1-01: Format Conversion and Audio Extraction ✓
+  - 01.1-02: Video Splitting (pending)
+  - 01.1-03: Video Joining (pending)
+
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 3/3 plans complete (100% of Phase 1)
+Overall: 4/7 plans complete (57%)
 ```
 
 ## Project Reference
@@ -64,12 +73,13 @@ Overall: 3/3 plans complete (100% of Phase 1)
 See: .planning/PROJECT.md (updated 2025-02-03)
 
 **Core value:** El usuario envía un video y recibe inmediatamente una nota de video circular, sin fricción ni pasos intermedios.
-**Current focus:** Phase 1 COMPLETE - Bot is production-ready, awaiting human verification before Phase 2 (Deployment)
+**Current focus:** Phase 1.1 - Expanding video processing capabilities
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 - Phase 1.1 inserted after Phase 1: Expandir procesamiento de video - Cambio de formato, extracción de audio, dividir y unir archivos (URGENT)
+- Phase 1.1 Plan 01 complete: Format conversion and audio extraction working
 
 ---
-*Last updated: 2026-02-03 after completing 01-03*
+*Last updated: 2026-02-13 after completing 01.1-01*

@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from bot.config import BOT_TOKEN
-from bot.handlers import start, handle_video, handle_convert_command, handle_extract_audio_command
+from bot.handlers import start, handle_video, handle_convert_command, handle_extract_audio_command, handle_split_command
 from bot.error_handler import error_handler
 
 # Enable logging
@@ -23,6 +23,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("convert", handle_convert_command))
     application.add_handler(CommandHandler("extract_audio", handle_extract_audio_command))
+    application.add_handler(CommandHandler("split", handle_split_command))
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
 
     # Add global error handler
