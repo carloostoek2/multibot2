@@ -69,6 +69,14 @@ class VideoSplitError(VideoProcessingError):
         super().__init__(self.message)
 
 
+class VideoJoinError(VideoProcessingError):
+    """Exception raised when video joining fails."""
+
+    def __init__(self, message: str = "No pude unir los videos"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -77,6 +85,7 @@ ERROR_MESSAGES = {
     FormatConversionError: "No pude convertir el formato del video. Verifica que el formato sea válido.",
     AudioExtractionError: "No pude extraer el audio del video. Intenta con otro archivo.",
     VideoSplitError: "No pude dividir el video. Verifica que el archivo sea válido.",
+    VideoJoinError: "No pude unir los videos. Verifica que los archivos sean válidos.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
 }
 
