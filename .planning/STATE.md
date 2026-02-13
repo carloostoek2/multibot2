@@ -2,19 +2,19 @@
 
 ## Current Phase
 
-Phase 1.1: Expandir procesamiento de video
+Phase 02: Error Handling and Configuration
 
 ## Phase Goal
 
-Expandir capacidades del bot para manejar conversiones de formato, extracción de audio, y operaciones de división/unión de videos.
+Enhance error handling with structured exceptions, comprehensive configuration management, and health check endpoints for production deployment.
 
 ## Context Summary
 
 - Bot de Telegram que convierte videos en notas de video circulares
 - Procesamiento automático sin comandos
 - **Phase 1 COMPLETE** - Core video processing done
-- **Phase 1.1 IN PROGRESS** - Format conversion and audio extraction implemented
-- Phase 2: Deployment pending
+- **Phase 1.1 COMPLETE** - Format conversion, audio extraction, splitting, joining
+- **Phase 02 IN PROGRESS** - Error handling and configuration enhancement
 
 ## Active Plans
 
@@ -37,6 +37,12 @@ Expandir capacidades del bot para manejar conversiones de formato, extracción d
   - /join command with session-based video collection
   - Min 2, max 10 videos per join operation
   - 5-minute session timeout with automatic cleanup
+- **02-01**: Enhanced Bot Configuration - COMPLETE
+  - BotConfig dataclass with 12 configurable parameters
+  - Environment variable loading with type conversion
+  - __post_init__ validation for fail-fast behavior
+  - .env.example documentation with all options
+  - Handlers refactored to use config values
 
 ## Blockers
 
@@ -67,6 +73,10 @@ Expandir capacidades del bot para manejar conversiones de formato, extracción d
 - **D01.1-03-02**: H.264 + AAC as normalization target for maximum compatibility
 - **D01.1-03-03**: Double timeout (120s) for join operations vs standard processing
 - **D01.1-03-04**: Session-based collection with /done trigger for multi-file operations
+- **D02-01-01**: Use frozen dataclass for configuration immutability
+- **D02-01-02**: Validate configuration at initialization time (fail-fast)
+- **D02-01-03**: Separate JOIN_TIMEOUT from PROCESSING_TIMEOUT for independent tuning
+- **D02-01-04**: Keep DEFAULT_SEGMENT_DURATION as constant (UI default, not operational)
 
 ## Progress
 
@@ -80,10 +90,16 @@ Phase 1.1: Expandir procesamiento de video
   - 01.1-02: Video Splitting ✓
   - 01.1-03: Video Joining ✓
 
+Phase 02: Error Handling and Configuration
+[░░░░░░░░░░░░░░░░░░░░] 33% (1/3 plans complete)
+  - 02-01: Enhanced Bot Configuration ✓
+  - 02-02: Structured Error Handling (pending)
+  - 02-03: Health Checks and Monitoring (pending)
+
 Phase 2: Deployment
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/1 plans complete)
 
-Overall: 6/7 plans complete (86%)
+Overall: 7/10 plans complete (70%)
 ```
 
 ## Project Reference
@@ -91,7 +107,7 @@ Overall: 6/7 plans complete (86%)
 See: .planning/PROJECT.md (updated 2025-02-03)
 
 **Core value:** El usuario envía un video y recibe inmediatamente una nota de video circular, sin fricción ni pasos intermedios.
-**Current focus:** Phase 1.1 - Expanding video processing capabilities
+**Current focus:** Phase 02 - Error handling and configuration enhancement
 
 ## Accumulated Context
 
@@ -100,6 +116,7 @@ See: .planning/PROJECT.md (updated 2025-02-03)
 - Phase 1.1 Plan 01 complete: Format conversion and audio extraction working
 - Phase 1.1 Plan 02 complete: Video splitting with /split command working
 - Phase 1.1 Plan 03 complete: Video joining with /join command working
+- Phase 02 Plan 01 complete: Enhanced bot configuration with environment variables
 
 ---
-*Last updated: 2026-02-13 after completing 01.1-03*
+*Last updated: 2026-02-13 after completing 02-01*
