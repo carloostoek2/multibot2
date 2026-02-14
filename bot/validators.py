@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ def validate_video_file(file_path: str) -> Tuple[bool, Optional[str]]:
         return False, "El archivo de video parece estar corrupto"
 
 
-def check_disk_space(required_mb: int, path: str = "/") -> Tuple[bool, Optional[str]]:
+def check_disk_space(required_mb: int, path: str = None) -> Tuple[bool, Optional[str]]:
     """Check if sufficient disk space is available.
 
     Args:
@@ -158,6 +159,10 @@ def check_disk_space(required_mb: int, path: str = "/") -> Tuple[bool, Optional[
     """
     logger.debug(f"Checking disk space: required {required_mb}MB on {path}")
 
+    # Use temp directory as default if no path specified
+    if path is None:
+        path = tempfile.gettempdir()
+
     try:
         # Get disk usage statistics
         stat = os.statvfs(path)
@@ -167,10 +172,10 @@ def check_disk_space(required_mb: int, path: str = "/") -> Tuple[bool, Optional[
         available_bytes = stat.f_frsize * stat.f_bavail
         available_mb = available_bytes / (1024 * 1024)
 
-        logger.debug(f"Available disk space: {available_mb:.2f}MB (required: {required_mb}MB)")
+        logger.debug(f"Available disk space on {path}: {available_mb:.2f}MB (required: {required_mb}MB)")
 
         if available_mb < required_mb:
-            logger.warning(f"Insufficient disk space: {available_mb:.2f}MB < {required_mb}MB")
+            logger.warning(f"Insufficient disk space: {available_mb:.2f}MB < {required_mb}MB on {path}")
             return False, "Espacio insuficiente en disco"
 
         return True, None
