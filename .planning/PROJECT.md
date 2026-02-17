@@ -100,9 +100,21 @@ El usuario envía un video y recibe inmediatamente una nota de video circular, s
 | Exponential backoff retries | Resilience contra fallos | ✓ Good |
 | Correlation IDs para tracing | Debugging en producción | ✓ Good |
 
-## Next Milestone Goals
+## Current Milestone: v2.0 Navaja Suiza de Audio
 
-**v1.1 Ideas:**
+**Goal:** Expandir el bot con comandos completos de procesamiento de audio, convirtiéndolo en una herramienta versátil tipo "navaja suiza" para archivos de audio.
+
+**Target features:**
+- Conversión MP3 → nota de audio de Telegram (voice note)
+- Split/Join de archivos de audio
+- Conversión entre formatos (MP3, WAV, OGG, AAC, FLAC)
+- Audio enhancement: boost de bajos, boost de agudos, ecualización
+- Efectos: reducción de ruido, compresión, normalización
+- Conversión automática de notas de voz recibidas → MP3
+
+## Next Milestone Goals (Future)
+
+**v2.1 Ideas:**
 - Soporte para videos como documentos (no solo video messages)
 - Barra de progreso durante procesamiento
 - Estadísticas básicas de uso
@@ -110,5 +122,5 @@ El usuario envía un video y recibe inmediatamente una nota de video circular, s
 
 ---
 
-*Last updated: 2026-02-14 after v1.0 milestone*
+*Last updated: 2026-02-14 after starting v2.0 milestone*
 </content>
