@@ -20,16 +20,19 @@ from bot.error_handler import (
     AudioExtractionError,
     VideoSplitError,
     VideoJoinError,
+    VoiceConversionError,
     handle_processing_error,
 )
 from bot.config import config
 from bot.validators import (
     validate_file_size,
     validate_video_file,
+    validate_audio_file,
     check_disk_space,
     estimate_required_space,
     ValidationError,
 )
+from bot.audio_processor import VoiceNoteConverter, get_audio_duration
 
 logger = logging.getLogger(__name__)
 
@@ -1176,3 +1179,151 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(
         f"Sesión cancelada. {video_count} video(s) descartados."
     )
+
+
+async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio file messages by converting them to voice notes.
+
+    Downloads the audio file, validates it, converts it to OGG Opus format,
+    and sends it back as a Telegram voice note.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Audio file received from user {user_id}")
+
+    # Get audio from message
+    audio = update.message.audio
+    if not audio:
+        logger.warning(f"[{correlation_id}] No audio found in message from user {user_id}")
+        await update.message.reply_text("No encontré un archivo de audio en tu mensaje.")
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        logger.debug(f"[{correlation_id}] Audio file size: {audio.file_size} bytes")
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Send "processing" message to user
+    processing_message = None
+    try:
+        processing_message = await update.message.reply_text(
+            "Procesando audio..."
+        )
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not send processing message to user {user_id}: {e}")
+
+    # Use TempManager as context manager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_{user_id}_{audio.file_unique_id}.mp3"
+            output_filename = f"voice_{user_id}_{audio.file_unique_id}.ogg"
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download audio file
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await audio.get_file()
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Get audio duration
+            duration, duration_error = get_audio_duration(str(input_path))
+            if duration_error:
+                logger.warning(f"[{correlation_id}] Could not get audio duration for user {user_id}: {duration_error}")
+            elif duration:
+                # Check if audio exceeds max voice duration and log warning
+                max_duration_seconds = config.MAX_VOICE_DURATION_MINUTES * 60
+                if duration > max_duration_seconds:
+                    logger.warning(
+                        f"[{correlation_id}] Audio duration ({duration:.1f}s) exceeds maximum "
+                        f"({max_duration_seconds}s), will be truncated"
+                    )
+
+            # Check disk space before processing
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Convert to voice note with timeout
+            logger.info(f"[{correlation_id}] Converting audio to voice note for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                converter = VoiceNoteConverter(str(input_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, converter.process),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Voice note conversion failed for user {user_id}")
+                    raise VoiceConversionError("No pude convertir el audio a nota de voz")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Voice note conversion timed out for user {user_id}")
+                raise ProcessingTimeoutError("El audio tardó demasiado en procesarse") from e
+
+            # Send as voice note
+            logger.info(f"[{correlation_id}] Sending voice note to user {user_id}")
+            try:
+                with open(output_path, "rb") as voice_file:
+                    await update.message.reply_voice(voice=voice_file)
+                logger.info(f"[{correlation_id}] Voice note sent successfully to user {user_id}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send voice note to user {user_id}: {e}")
+                raise
+
+            # Delete processing message on success
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+
+        except (DownloadError, ValidationError, VoiceConversionError, ProcessingTimeoutError) as e:
+            # Handle known processing errors
+            logger.error(f"[{correlation_id}] Processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Delete processing message on error
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+
+        except Exception as e:
+            # Handle unexpected errors
+            logger.exception(f"[{correlation_id}] Unexpected error processing audio for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Delete processing message on error
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+
+        # TempManager cleanup happens automatically on context exit
+        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
