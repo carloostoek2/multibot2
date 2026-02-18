@@ -28,7 +28,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from bot.handlers import (
     start, handle_video, handle_convert_command, handle_extract_audio_command,
     handle_split_command, handle_join_start, handle_join_done, handle_join_cancel,
-    handle_voice_message, handle_audio_file
+    handle_voice_message, handle_audio_file,
+    handle_split_audio_command, handle_join_audio_start, handle_join_audio_file,
+    handle_join_audio_done, handle_join_audio_cancel
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -75,8 +77,19 @@ def main() -> None:
     application.add_handler(CommandHandler("extract_audio", handle_extract_audio_command))
     application.add_handler(CommandHandler("split", handle_split_command))
     application.add_handler(CommandHandler("join", handle_join_start))
+
+    # Audio split command
+    application.add_handler(CommandHandler("split_audio", handle_split_audio_command))
+
+    # Audio join commands
+    application.add_handler(CommandHandler("join_audio", handle_join_audio_start))
+
+    # /done and /cancel are shared between video join and audio join
+    # The handlers check context.user_data to determine which session is active
+    # Priority: video join session > audio join session
     application.add_handler(CommandHandler("done", handle_join_done))
     application.add_handler(CommandHandler("cancel", handle_join_cancel))
+
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
 
     # Add handler for voice messages (OGG Opus from Telegram)

@@ -251,7 +251,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/convert <formato> - Convierte un video a otro formato (mp4, avi, mov, mkv, webm)\n"
         "/extract_audio <formato> - Extrae el audio de un video (mp3, aac, wav, ogg)\n"
         "/split [duration|parts] <valor> - Divide un video en segmentos\n"
-        "/join - Une múltiples videos en uno solo"
+        "/join - Une múltiples videos en uno solo\n"
+        "/split_audio [duration|parts] <valor> - Divide un audio en segmentos\n"
+        "/join_audio - Une múltiples archivos de audio"
     )
 
 
@@ -1309,9 +1311,10 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /done command to complete video joining.
+    """Handle /done command to complete video or audio joining.
 
-    Joins all collected videos and sends the result.
+    Joins all collected videos or audios and sends the result.
+    Checks for video join session first, then audio join session.
 
     Args:
         update: Telegram update object
@@ -1320,11 +1323,16 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     logger.info(f"Join done command received from user {user_id}")
 
-    # Check if there's an active join session
+    # Check if there's an active video join session
     session = context.user_data.get("join_session")
     if not session:
+        # No video session - check for audio join session
+        if context.user_data.get("join_audio_session"):
+            # Delegate to audio join handler
+            await handle_join_audio_done(update, context)
+            return
         await update.message.reply_text(
-            "No hay una sesión de unión activa. Usa /join para comenzar."
+            "No hay una sesión de unión activa. Usa /join o /join_audio para comenzar."
         )
         return
 
@@ -1450,6 +1458,7 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Handle /cancel command to cancel a join session.
 
     Clears session data and cleans up temporary files.
+    Checks for video join session first, then audio join session.
 
     Args:
         update: Telegram update object
@@ -1458,9 +1467,14 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     logger.info(f"Join cancel command received from user {user_id}")
 
-    # Check if there's an active join session
+    # Check if there's an active video join session
     session = context.user_data.get("join_session")
     if not session:
+        # No video session - check for audio join session
+        if context.user_data.get("join_audio_session"):
+            # Delegate to audio join handler
+            await handle_join_audio_cancel(update, context)
+            return
         await update.message.reply_text(
             "No hay una sesión de unión activa."
         )
@@ -1851,11 +1865,20 @@ async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     Downloads the audio file, validates it, converts it to OGG Opus format,
     and sends it back as a Telegram voice note.
 
+    If there's an active audio join session, routes to handle_join_audio_file instead.
+
     Args:
         update: Telegram update object
         context: Telegram context object
     """
     user_id = update.effective_user.id
+
+    # Check if there's an active audio join session
+    if context.user_data.get("join_audio_session"):
+        # Route to join audio handler
+        await handle_join_audio_file(update, context)
+        return
+
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] Audio file received from user {user_id}")
 
