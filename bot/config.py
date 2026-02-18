@@ -40,6 +40,10 @@ class BotConfig:
     VOICE_BITRATE: str = "24k"
     MP3_BITRATE: str = "192k"
 
+    # Audio split configuration
+    MAX_AUDIO_SEGMENTS: int = 20
+    MIN_AUDIO_SEGMENT_SECONDS: int = 5
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -84,6 +88,15 @@ class BotConfig:
             errors.append(
                 f"MAX_VOICE_DURATION_MINUTES must be 20 or less (got: {self.MAX_VOICE_DURATION_MINUTES})"
             )
+
+        # Validate audio split configuration
+        audio_split_fields = [
+            ("MAX_AUDIO_SEGMENTS", self.MAX_AUDIO_SEGMENTS),
+            ("MIN_AUDIO_SEGMENT_SECONDS", self.MIN_AUDIO_SEGMENT_SECONDS),
+        ]
+        for name, value in audio_split_fields:
+            if not isinstance(value, int) or value <= 0:
+                errors.append(f"{name} must be a positive integer (got: {value})")
 
         # Validate JOIN_MIN_VIDEOS < JOIN_MAX_VIDEOS
         if self.JOIN_MIN_VIDEOS >= self.JOIN_MAX_VIDEOS:
@@ -145,6 +158,8 @@ def load_config() -> BotConfig:
         MAX_AUDIO_FILE_SIZE_MB=_int_env("MAX_AUDIO_FILE_SIZE_MB", 20),
         VOICE_BITRATE=os.getenv("VOICE_BITRATE", "24k"),
         MP3_BITRATE=os.getenv("MP3_BITRATE", "192k"),
+        MAX_AUDIO_SEGMENTS=_int_env("MAX_AUDIO_SEGMENTS", 20),
+        MIN_AUDIO_SEGMENT_SECONDS=_int_env("MIN_AUDIO_SEGMENT_SECONDS", 5),
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
     )
