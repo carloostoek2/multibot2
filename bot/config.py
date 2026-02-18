@@ -34,6 +34,12 @@ class BotConfig:
     JOIN_MAX_VIDEOS: int = 10
     JOIN_MIN_VIDEOS: int = 2
 
+    # Audio configuration
+    MAX_VOICE_DURATION_MINUTES: int = 20
+    MAX_AUDIO_FILE_SIZE_MB: int = 20
+    VOICE_BITRATE: str = "24k"
+    MP3_BITRATE: str = "192k"
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -66,10 +72,18 @@ class BotConfig:
             ("MIN_SEGMENT_SECONDS", self.MIN_SEGMENT_SECONDS),
             ("JOIN_MAX_VIDEOS", self.JOIN_MAX_VIDEOS),
             ("JOIN_MIN_VIDEOS", self.JOIN_MIN_VIDEOS),
+            ("MAX_VOICE_DURATION_MINUTES", self.MAX_VOICE_DURATION_MINUTES),
+            ("MAX_AUDIO_FILE_SIZE_MB", self.MAX_AUDIO_FILE_SIZE_MB),
         ]
         for name, value in limit_fields:
             if not isinstance(value, int) or value <= 0:
                 errors.append(f"{name} must be a positive integer (got: {value})")
+
+        # Validate audio duration limit (max 20 minutes for Telegram)
+        if self.MAX_VOICE_DURATION_MINUTES > 20:
+            errors.append(
+                f"MAX_VOICE_DURATION_MINUTES must be 20 or less (got: {self.MAX_VOICE_DURATION_MINUTES})"
+            )
 
         # Validate JOIN_MIN_VIDEOS < JOIN_MAX_VIDEOS
         if self.JOIN_MIN_VIDEOS >= self.JOIN_MAX_VIDEOS:
@@ -127,6 +141,10 @@ def load_config() -> BotConfig:
         MIN_SEGMENT_SECONDS=_int_env("MIN_SEGMENT_SECONDS", 5),
         JOIN_MAX_VIDEOS=_int_env("JOIN_MAX_VIDEOS", 10),
         JOIN_MIN_VIDEOS=_int_env("JOIN_MIN_VIDEOS", 2),
+        MAX_VOICE_DURATION_MINUTES=_int_env("MAX_VOICE_DURATION_MINUTES", 20),
+        MAX_AUDIO_FILE_SIZE_MB=_int_env("MAX_AUDIO_FILE_SIZE_MB", 20),
+        VOICE_BITRATE=os.getenv("VOICE_BITRATE", "24k"),
+        MP3_BITRATE=os.getenv("MP3_BITRATE", "192k"),
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
     )
