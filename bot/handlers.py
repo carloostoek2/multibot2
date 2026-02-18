@@ -22,6 +22,8 @@ from bot.error_handler import (
     VideoJoinError,
     VoiceConversionError,
     VoiceToMp3Error,
+    AudioSplitError,
+    AudioJoinError,
     handle_processing_error,
 )
 from bot.config import config
@@ -34,6 +36,8 @@ from bot.validators import (
     ValidationError,
 )
 from bot.audio_processor import VoiceNoteConverter, VoiceToMp3Converter, get_audio_duration
+from bot.audio_splitter import AudioSplitter
+from bot.audio_joiner import AudioJoiner
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +271,26 @@ async def _get_video_from_message(update: Update) -> tuple:
     # Check if it's a reply to a video
     if update.message.reply_to_message and update.message.reply_to_message.video:
         return update.message.reply_to_message.video, True
+
+    return None, False
+
+
+async def _get_audio_from_message(update: Update) -> tuple:
+    """Extract audio object and file info from message.
+
+    Args:
+        update: Telegram update object
+
+    Returns:
+        Tuple of (audio_object, is_reply) or (None, False) if no audio found
+    """
+    # Check if the message itself has audio
+    if update.message.audio:
+        return update.message.audio, False
+
+    # Check if it's a reply to an audio message
+    if update.message.reply_to_message and update.message.reply_to_message.audio:
+        return update.message.reply_to_message.audio, True
 
     return None, False
 
@@ -817,6 +841,276 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
         except Exception as e:
             logger.exception(f"Unexpected error splitting video for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"Could not delete processing message: {e}")
+
+
+# Default audio segment duration for split_audio command
+DEFAULT_AUDIO_SEGMENT_DURATION = 60
+
+
+async def handle_split_audio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /split_audio command to split audio files into segments.
+
+    Usage:
+        /split_audio duration <segundos> - Divide en segmentos de N segundos
+        /split_audio parts <cantidad> - Divide en N partes iguales
+        /split_audio (solo) - Divide en segmentos de 60 segundos
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    logger.info(f"Split audio command received from user {user_id}")
+
+    # Get audio from message or reply
+    audio, is_reply = await _get_audio_from_message(update)
+
+    if not audio:
+        await update.message.reply_text(
+            "Responde a un audio con este comando para dividirlo.\n\n"
+            "Uso:\n"
+            "/split_audio duration 30 - Divide en segmentos de 30 segundos\n"
+            "/split_audio parts 5 - Divide en 5 partes iguales\n"
+            "/split_audio - Divide en segmentos de 60 segundos (default)"
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Parse command arguments
+    args = context.args if context.args else []
+
+    split_mode = "duration"  # Default mode
+    split_value = DEFAULT_AUDIO_SEGMENT_DURATION
+
+    if len(args) >= 1:
+        if args[0].lower() in ["duration", "duracion", "tiempo", "time"]:
+            split_mode = "duration"
+            if len(args) >= 2:
+                try:
+                    split_value = int(args[1])
+                    if split_value < config.MIN_AUDIO_SEGMENT_SECONDS:
+                        await update.message.reply_text(
+                            f"La duración mínima es {config.MIN_AUDIO_SEGMENT_SECONDS} segundos."
+                        )
+                        return
+                except ValueError:
+                    await update.message.reply_text(
+                        "Por favor especifica un número válido de segundos.\n"
+                        "Ejemplo: /split_audio duration 30"
+                    )
+                    return
+        elif args[0].lower() in ["parts", "partes", "cantidad", "number"]:
+            split_mode = "parts"
+            if len(args) >= 2:
+                try:
+                    split_value = int(args[1])
+                    if split_value < 1:
+                        await update.message.reply_text(
+                            "El número de partes debe ser al menos 1."
+                        )
+                        return
+                    if split_value > config.MAX_AUDIO_SEGMENTS:
+                        await update.message.reply_text(
+                            f"El máximo de partes es {config.MAX_AUDIO_SEGMENTS}."
+                        )
+                        return
+                except ValueError:
+                    await update.message.reply_text(
+                        "Por favor especifica un número válido de partes.\n"
+                        "Ejemplo: /split_audio parts 5"
+                    )
+                    return
+            else:
+                await update.message.reply_text(
+                    "Por favor especifica cuántas partes quieres.\n"
+                    "Ejemplo: /split_audio parts 5"
+                )
+                return
+        else:
+            # Try to parse as a number (assume duration mode)
+            try:
+                split_value = int(args[0])
+                if split_value < config.MIN_AUDIO_SEGMENT_SECONDS:
+                    await update.message.reply_text(
+                        f"La duración mínima es {config.MIN_AUDIO_SEGMENT_SECONDS} segundos."
+                    )
+                    return
+            except ValueError:
+                await update.message.reply_text(
+                    "Argumento no reconocido. Usa 'duration' o 'parts'.\n"
+                    "Ejemplo: /split_audio duration 30 o /split_audio parts 5"
+                )
+                return
+
+    # Send processing message
+    processing_message = None
+    try:
+        if split_mode == "duration":
+            processing_message = await update.message.reply_text(
+                f"Dividiendo audio en segmentos de {split_value} segundos..."
+            )
+        else:
+            processing_message = await update.message.reply_text(
+                f"Dividiendo audio en {split_value} partes iguales..."
+            )
+    except Exception as e:
+        logger.warning(f"Could not send processing message to user {user_id}: {e}")
+
+    # Process with TempManager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_audio_{user_id}_{audio.file_unique_id}.mp3"
+            output_dir = temp_mgr.get_temp_path(f"split_audio_{user_id}_{audio.file_unique_id}")
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+
+            # Download audio
+            logger.info(f"Downloading audio from user {user_id} for splitting")
+            try:
+                file = await audio.get_file()
+                await _download_with_retry(file, input_path)
+                logger.info(f"Audio downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Create output directory for segments
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+            # Split audio with timeout
+            logger.info(f"Splitting audio for user {user_id} (mode={split_mode}, value={split_value})")
+            try:
+                loop = asyncio.get_event_loop()
+                splitter = AudioSplitter(str(input_path), str(output_dir))
+
+                if split_mode == "duration":
+                    # Check how many segments would be created
+                    duration = await loop.run_in_executor(None, splitter.get_audio_duration)
+                    expected_segments = int(duration // split_value) + (1 if duration % split_value > 0 else 0)
+
+                    if expected_segments > config.MAX_AUDIO_SEGMENTS:
+                        await update.message.reply_text(
+                            f"El audio generaría demasiadas partes ({expected_segments}). "
+                            f"Intenta con una duración mayor (máximo {config.MAX_AUDIO_SEGMENTS} partes)."
+                        )
+                        if processing_message:
+                            try:
+                                await processing_message.delete()
+                            except Exception:
+                                pass
+                        return
+
+                    segments = await asyncio.wait_for(
+                        loop.run_in_executor(None, splitter.split_by_duration, split_value),
+                        timeout=config.PROCESSING_TIMEOUT
+                    )
+                else:  # split_mode == "parts"
+                    segments = await asyncio.wait_for(
+                        loop.run_in_executor(None, splitter.split_by_parts, split_value),
+                        timeout=config.PROCESSING_TIMEOUT
+                    )
+
+                    # Check if we got too many segments
+                    if len(segments) > config.MAX_AUDIO_SEGMENTS:
+                        await update.message.reply_text(
+                            f"El audio generaría demasiadas partes ({len(segments)}). "
+                            f"Intenta con menos partes (máximo {config.MAX_AUDIO_SEGMENTS})."
+                        )
+                        if processing_message:
+                            try:
+                                await processing_message.delete()
+                            except Exception:
+                                pass
+                        return
+
+                if not segments:
+                    logger.error(f"Audio splitting produced no segments for user {user_id}")
+                    raise AudioSplitError("No se generaron segmentos del audio")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"Audio splitting timed out for user {user_id}")
+                raise ProcessingTimeoutError("La división del audio tardó demasiado") from e
+
+            # Send segments to user
+            logger.info(f"Sending {len(segments)} audio segments to user {user_id}")
+            total_segments = len(segments)
+
+            for i, segment_path in enumerate(segments, 1):
+                try:
+                    # Update progress message
+                    if processing_message:
+                        try:
+                            await processing_message.edit_text(
+                                f"Enviando parte {i} de {total_segments}..."
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not update progress message: {e}")
+
+                    # Send segment
+                    with open(segment_path, "rb") as audio_file:
+                        await update.message.reply_audio(
+                            audio=audio_file,
+                            caption=f"Parte {i} de {total_segments}"
+                        )
+                    logger.info(f"Sent audio segment {i}/{total_segments} to user {user_id}")
+
+                except Exception as e:
+                    logger.error(f"Failed to send audio segment {i} to user {user_id}: {e}")
+                    await update.message.reply_text(
+                        f"Error enviando la parte {i} de {total_segments}."
+                    )
+
+            # Send completion message
+            await update.message.reply_text(
+                f"¡Listo! El audio se dividió en {total_segments} partes."
+            )
+            logger.info(f"All audio segments sent successfully to user {user_id}")
+
+            # Delete processing message on success
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"Could not delete processing message: {e}")
+
+        except (DownloadError, AudioSplitError, ProcessingTimeoutError, ValidationError) as e:
+            await handle_processing_error(update, e, user_id)
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"Could not delete processing message: {e}")
+
+        except Exception as e:
+            logger.exception(f"Unexpected error splitting audio for user {user_id}: {e}")
             await handle_processing_error(update, e, user_id)
             if processing_message:
                 try:
