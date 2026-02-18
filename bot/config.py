@@ -44,6 +44,11 @@ class BotConfig:
     MAX_AUDIO_SEGMENTS: int = 20
     MIN_AUDIO_SEGMENT_SECONDS: int = 5
 
+    # Audio join configuration
+    JOIN_MAX_AUDIO_FILES: int = 20
+    JOIN_MIN_AUDIO_FILES: int = 2
+    JOIN_AUDIO_TIMEOUT: int = 120
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -97,6 +102,23 @@ class BotConfig:
         for name, value in audio_split_fields:
             if not isinstance(value, int) or value <= 0:
                 errors.append(f"{name} must be a positive integer (got: {value})")
+
+        # Validate audio join configuration
+        audio_join_fields = [
+            ("JOIN_MAX_AUDIO_FILES", self.JOIN_MAX_AUDIO_FILES),
+            ("JOIN_MIN_AUDIO_FILES", self.JOIN_MIN_AUDIO_FILES),
+            ("JOIN_AUDIO_TIMEOUT", self.JOIN_AUDIO_TIMEOUT),
+        ]
+        for name, value in audio_join_fields:
+            if not isinstance(value, int) or value <= 0:
+                errors.append(f"{name} must be a positive integer (got: {value})")
+
+        # Validate JOIN_MIN_AUDIO_FILES < JOIN_MAX_AUDIO_FILES
+        if self.JOIN_MIN_AUDIO_FILES >= self.JOIN_MAX_AUDIO_FILES:
+            errors.append(
+                f"JOIN_MIN_AUDIO_FILES ({self.JOIN_MIN_AUDIO_FILES}) must be less than "
+                f"JOIN_MAX_AUDIO_FILES ({self.JOIN_MAX_AUDIO_FILES})"
+            )
 
         # Validate JOIN_MIN_VIDEOS < JOIN_MAX_VIDEOS
         if self.JOIN_MIN_VIDEOS >= self.JOIN_MAX_VIDEOS:
@@ -160,6 +182,9 @@ def load_config() -> BotConfig:
         MP3_BITRATE=os.getenv("MP3_BITRATE", "192k"),
         MAX_AUDIO_SEGMENTS=_int_env("MAX_AUDIO_SEGMENTS", 20),
         MIN_AUDIO_SEGMENT_SECONDS=_int_env("MIN_AUDIO_SEGMENT_SECONDS", 5),
+        JOIN_MAX_AUDIO_FILES=_int_env("JOIN_MAX_AUDIO_FILES", 20),
+        JOIN_MIN_AUDIO_FILES=_int_env("JOIN_MIN_AUDIO_FILES", 2),
+        JOIN_AUDIO_TIMEOUT=_int_env("JOIN_AUDIO_TIMEOUT", 120),
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
     )
