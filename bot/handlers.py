@@ -1476,6 +1476,375 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+# =============================================================================
+# Audio Join Handlers
+# =============================================================================
+
+async def handle_join_audio_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /join_audio command to start an audio join session.
+
+    Usage: /join_audio - Start a session to collect audio files for joining
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    logger.info(f"Join audio command received from user {user_id}")
+
+    # Check if there's already an active audio join session
+    if context.user_data.get("join_audio_session"):
+        await update.message.reply_text(
+            "Ya tienes una sesión de unión de audio activa. "
+            f"Tienes {len(context.user_data['join_audio_session']['audios'])} audio(s) agregados.\n\n"
+            "Envía más audios o usa /done para unir, /cancel para cancelar."
+        )
+        return
+
+    # Check if there's an active video join session (can't have both)
+    if context.user_data.get("join_session"):
+        await update.message.reply_text(
+            "Ya tienes una sesión de unión de videos activa. "
+            "Usa /cancel para cancelarla primero, luego usa /join_audio."
+        )
+        return
+
+    # Initialize audio join session
+    context.user_data["join_audio_session"] = {
+        "audios": [],
+        "temp_mgr": TempManager(),
+        "last_activity": asyncio.get_event_loop().time(),
+    }
+
+    await update.message.reply_text(
+        "🎵 *Modo unión de audio activado*\n\n"
+        "Envíame los archivos de audio que quieres unir (máximo 20).\n"
+        "Los audios se unirán en el orden en que los envíes.\n\n"
+        "Comandos disponibles:\n"
+        "• /done - Unir todos los audios\n"
+        "• /cancel - Cancelar la sesión\n\n"
+        "Envía el primer archivo de audio:",
+        parse_mode="Markdown"
+    )
+
+
+async def handle_join_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio file messages during an active audio join session.
+
+    Downloads each audio file and tracks it in the user's join session.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+
+    # Check if there's an active audio join session
+    session = context.user_data.get("join_audio_session")
+    if not session:
+        # No active audio join session, let the default audio handler process it
+        await handle_audio_file(update, context)
+        return
+
+    # Check session timeout
+    current_time = asyncio.get_event_loop().time()
+    if current_time - session["last_activity"] > config.JOIN_SESSION_TIMEOUT:
+        logger.info(f"Join audio session expired for user {user_id}")
+        # Clean up expired session
+        session["temp_mgr"].cleanup()
+        context.user_data.pop("join_audio_session", None)
+        await update.message.reply_text(
+            "La sesión expiró. Usa /join_audio para comenzar de nuevo."
+        )
+        return
+
+    # Update last activity
+    session["last_activity"] = current_time
+
+    # Check if we've reached the maximum
+    if len(session["audios"]) >= config.JOIN_MAX_AUDIO_FILES:
+        await update.message.reply_text(
+            f"Máximo {config.JOIN_MAX_AUDIO_FILES} archivos de audio permitidos.\n"
+            "Usa /done para unir o /cancel para cancelar."
+        )
+        return
+
+    # Get audio from message
+    audio = update.message.audio
+    if not audio:
+        await update.message.reply_text(
+            "Por favor envía un archivo de audio válido."
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Send processing message
+    processing_message = None
+    try:
+        processing_message = await update.message.reply_text(
+            f"Descargando audio {len(session['audios']) + 1}..."
+        )
+    except Exception as e:
+        logger.warning(f"Could not send processing message to user {user_id}: {e}")
+
+    try:
+        temp_mgr = session["temp_mgr"]
+
+        # Generate safe filename
+        audio_index = len(session["audios"]) + 1
+        input_filename = f"join_audio_{user_id}_{audio_index:02d}_{audio.file_unique_id}.mp3"
+        input_path = temp_mgr.get_temp_path(input_filename)
+
+        # Download audio
+        logger.info(f"Downloading audio {audio_index} for join session, user {user_id}")
+        try:
+            file = await audio.get_file()
+            await _download_with_retry(file, input_path)
+            logger.info(f"Audio downloaded to {input_path}")
+        except Exception as e:
+            logger.error(f"Failed to download audio for user {user_id}: {e}")
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception:
+                    pass
+            await update.message.reply_text(
+                "No pude descargar el audio. Intenta con otro archivo."
+            )
+            return
+
+        # Validate audio integrity after download
+        is_valid, error_msg = validate_audio_file(str(input_path))
+        if not is_valid:
+            logger.warning(f"Audio validation failed for user {user_id}: {error_msg}")
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception:
+                    pass
+            await update.message.reply_text(error_msg)
+            return
+
+        # Track the audio
+        session["audios"].append(str(input_path))
+        temp_mgr.track_file(str(input_path))
+
+        audio_count = len(session["audios"])
+
+        # Delete processing message
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+
+        # Send confirmation
+        if audio_count == 1:
+            await update.message.reply_text(
+                f"Audio {audio_count} agregado. Envía más audios o usa /done para unir."
+            )
+        elif audio_count < config.JOIN_MIN_AUDIO_FILES:
+            remaining = config.JOIN_MIN_AUDIO_FILES - audio_count
+            await update.message.reply_text(
+                f"Audio {audio_count} agregado. Necesitas {remaining} audio(s) más para unir."
+            )
+        else:
+            await update.message.reply_text(
+                f"Audio {audio_count} agregado. "
+                f"Tienes {audio_count} audio(s). "
+                f"Envía más (máx. {config.JOIN_MAX_AUDIO_FILES}) o usa /done para unir."
+            )
+
+    except Exception as e:
+        logger.exception(f"Unexpected error handling join audio for user {user_id}: {e}")
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+        await update.message.reply_text(
+            "Ocurrió un error procesando el audio. Intenta de nuevo."
+        )
+
+
+async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /done command to complete audio joining.
+
+    Joins all collected audio files and sends the result.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    logger.info(f"Join audio done command received from user {user_id}")
+
+    # Check if there's an active audio join session
+    session = context.user_data.get("join_audio_session")
+    if not session:
+        # No active audio join session - let video join handler check
+        # This will be handled by the router in main.py or the video handler
+        await update.message.reply_text(
+            "No hay una sesión de unión de audio activa. Usa /join_audio para comenzar."
+        )
+        return
+
+    # Check session timeout
+    current_time = asyncio.get_event_loop().time()
+    if current_time - session["last_activity"] > config.JOIN_SESSION_TIMEOUT:
+        logger.info(f"Join audio session expired for user {user_id}")
+        session["temp_mgr"].cleanup()
+        context.user_data.pop("join_audio_session", None)
+        await update.message.reply_text(
+            "La sesión expiró. Usa /join_audio para comenzar de nuevo."
+        )
+        return
+
+    # Check minimum audios
+    audio_count = len(session["audios"])
+    if audio_count < config.JOIN_MIN_AUDIO_FILES:
+        await update.message.reply_text(
+            f"Necesitas al menos {config.JOIN_MIN_AUDIO_FILES} audios para unir. "
+            f"Actualmente tienes {audio_count}."
+        )
+        return
+
+    # Check disk space before joining
+    total_size_mb = 0
+    for audio_path in session["audios"]:
+        total_size_mb += Path(audio_path).stat().st_size / (1024 * 1024)
+    required_space = estimate_required_space(int(total_size_mb))
+    has_space, space_error = check_disk_space(required_space)
+    if not has_space:
+        logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
+        await update.message.reply_text(space_error)
+        return
+
+    # Send processing message
+    processing_message = None
+    try:
+        processing_message = await update.message.reply_text(
+            f"Uniendo {audio_count} audios... Esto puede tomar un momento."
+        )
+    except Exception as e:
+        logger.warning(f"Could not send processing message to user {user_id}: {e}")
+
+    temp_mgr = session["temp_mgr"]
+
+    try:
+        # Generate output path
+        output_filename = f"joined_audio_{user_id}_{int(asyncio.get_event_loop().time())}.mp3"
+        output_path = temp_mgr.get_temp_path(output_filename)
+
+        # Create AudioJoiner and add all audios
+        logger.info(f"Starting audio join for user {user_id} with {audio_count} audios")
+        joiner = AudioJoiner(str(output_path))
+
+        for audio_path in session["audios"]:
+            joiner.add_audio(audio_path)
+
+        # Join audios with timeout
+        try:
+            loop = asyncio.get_event_loop()
+            success = await asyncio.wait_for(
+                loop.run_in_executor(None, joiner.join_audios),
+                timeout=config.JOIN_AUDIO_TIMEOUT
+            )
+
+            if not success:
+                logger.error(f"Audio joining failed for user {user_id}")
+                raise AudioJoinError("No pude unir los archivos de audio")
+
+        except asyncio.TimeoutError as e:
+            logger.error(f"Audio joining timed out for user {user_id}")
+            raise ProcessingTimeoutError("La unión de audios tardó demasiado") from e
+
+        # Send joined audio
+        logger.info(f"Sending joined audio to user {user_id}")
+        try:
+            with open(output_path, "rb") as audio_file:
+                await update.message.reply_audio(
+                    audio=audio_file,
+                    caption=f"Audio unido ({audio_count} partes)"
+                )
+            logger.info(f"Joined audio sent successfully to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send joined audio to user {user_id}: {e}")
+            raise
+
+        # Delete processing message on success
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception as e:
+                logger.warning(f"Could not delete processing message: {e}")
+
+        # Clean up session
+        temp_mgr.cleanup()
+        context.user_data.pop("join_audio_session", None)
+
+    except (AudioJoinError, ProcessingTimeoutError) as e:
+        await handle_processing_error(update, e, user_id)
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+        # Clean up session on error
+        temp_mgr.cleanup()
+        context.user_data.pop("join_audio_session", None)
+
+    except Exception as e:
+        logger.exception(f"Unexpected error joining audios for user {user_id}: {e}")
+        await handle_processing_error(update, e, user_id)
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception:
+                pass
+        # Clean up session on error
+        temp_mgr.cleanup()
+        context.user_data.pop("join_audio_session", None)
+
+
+async def handle_join_audio_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /cancel command to cancel an audio join session.
+
+    Clears session data and cleans up temporary files.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    logger.info(f"Join audio cancel command received from user {user_id}")
+
+    # Check if there's an active audio join session
+    session = context.user_data.get("join_audio_session")
+    if not session:
+        # No active audio join session
+        await update.message.reply_text(
+            "No hay una sesión de unión de audio activa."
+        )
+        return
+
+    # Clean up temp files
+    audio_count = len(session["audios"])
+    session["temp_mgr"].cleanup()
+    context.user_data.pop("join_audio_session", None)
+
+    await update.message.reply_text(
+        f"Sesión cancelada. {audio_count} audio(s) descartados."
+    )
+
+
 async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle audio file messages by converting them to voice notes.
 
