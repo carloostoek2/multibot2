@@ -111,6 +111,14 @@ class AudioSplitError(VideoProcessingError):
         super().__init__(self.message)
 
 
+class AudioJoinError(VideoProcessingError):
+    """Exception raised when audio joining fails."""
+
+    def __init__(self, message: str = "No pude unir los archivos de audio"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -123,6 +131,7 @@ ERROR_MESSAGES = {
     VoiceConversionError: "No pude convertir el audio a nota de voz. Verifica que el archivo sea válido.",
     VoiceToMp3Error: "No pude convertir la nota de voz a MP3. Intenta de nuevo.",
     AudioSplitError: "No pude dividir el audio. Verifica que el archivo sea válido.",
+    AudioJoinError: "No pude unir los archivos de audio. Verifica que los archivos sean válidos.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
     ValidationError: "El archivo no es válido. Verifica que sea un video correcto.",
     # Telegram API errors
