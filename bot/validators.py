@@ -207,10 +207,216 @@ def estimate_required_space(video_file_size_mb: int) -> int:
     return required
 
 
+def get_audio_duration(file_path: str) -> Tuple[Optional[float], Optional[str]]:
+    """Get audio file duration using ffprobe.
+
+    Args:
+        file_path: Path to the audio file
+
+    Returns:
+        Tuple of (duration, error_message)
+        - duration: Duration in seconds, or None if failed
+        - error_message: None if success, Spanish error message if failed
+    """
+    logger.debug(f"Getting audio duration: {file_path}")
+
+    # Check file exists
+    if not os.path.exists(file_path):
+        logger.warning(f"Audio file does not exist: {file_path}")
+        return None, "El archivo de audio no existe"
+
+    # Check file is not empty
+    file_size = os.path.getsize(file_path)
+    if file_size == 0:
+        logger.warning(f"Audio file is empty: {file_path}")
+        return None, "El archivo de audio está vacío"
+
+    try:
+        # Get audio duration using ffprobe
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                file_path
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            logger.warning(f"ffprobe failed for {file_path}: {result.stderr}")
+            return None, "El archivo de audio parece estar corrupto"
+
+        duration_str = result.stdout.strip()
+        if not duration_str:
+            logger.warning(f"No duration info for {file_path}")
+            return None, "El archivo de audio parece estar corrupto"
+
+        try:
+            duration = float(duration_str)
+            if duration <= 0:
+                logger.warning(f"Invalid audio duration for {file_path}: {duration}")
+                return None, "El archivo de audio parece estar corrupto"
+            logger.debug(f"Audio duration for {file_path}: {duration:.2f}s")
+            return duration, None
+        except ValueError:
+            logger.warning(f"Invalid duration format for {file_path}: {duration_str}")
+            return None, "El archivo de audio parece estar corrupto"
+
+    except FileNotFoundError:
+        # ffprobe not available - log warning but don't fail
+        logger.warning("ffprobe not found, cannot determine audio duration")
+        return None, None
+    except subprocess.TimeoutExpired:
+        logger.warning(f"ffprobe timed out for {file_path}")
+        return None, "El archivo de audio parece estar corrupto"
+    except Exception as e:
+        logger.warning(f"Error getting audio duration for {file_path}: {e}")
+        return None, "Error al obtener la duración del audio"
+
+
+def validate_audio_file(file_path: str) -> Tuple[bool, Optional[str]]:
+    """Validate audio file integrity using ffprobe.
+
+    Checks that the file exists, is not empty, and has valid audio streams
+    with a positive duration.
+
+    Args:
+        file_path: Path to the audio file to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - is_valid: True if audio is valid, False otherwise
+        - error_message: None if valid, Spanish error message if invalid
+    """
+    logger.debug(f"Validating audio file: {file_path}")
+
+    # Check file exists
+    if not os.path.exists(file_path):
+        logger.warning(f"Audio file does not exist: {file_path}")
+        return False, "El archivo de audio no existe"
+
+    # Check file is not empty
+    file_size = os.path.getsize(file_path)
+    if file_size == 0:
+        logger.warning(f"Audio file is empty: {file_path}")
+        return False, "El archivo de audio está vacío"
+
+    # Use ffprobe to validate audio integrity
+    try:
+        # Check for audio stream existence
+        stream_result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_type",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                file_path
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if stream_result.returncode != 0 or 'audio' not in stream_result.stdout.lower():
+            logger.warning(f"No audio stream found in {file_path}")
+            return False, "El archivo de audio parece estar corrupto"
+
+        # Get duration to verify file integrity
+        duration_result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                file_path
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if duration_result.returncode != 0:
+            logger.warning(f"ffprobe failed for {file_path}: {duration_result.stderr}")
+            return False, "El archivo de audio parece estar corrupto"
+
+        duration_str = duration_result.stdout.strip()
+        if not duration_str:
+            logger.warning(f"No duration info for {file_path}")
+            return False, "El archivo de audio parece estar corrupto"
+
+        try:
+            duration = float(duration_str)
+            if duration <= 0:
+                logger.warning(f"Invalid audio duration for {file_path}: {duration}")
+                return False, "El archivo de audio parece estar corrupto"
+        except ValueError:
+            logger.warning(f"Invalid duration format for {file_path}: {duration_str}")
+            return False, "El archivo de audio parece estar corrupto"
+
+        logger.debug(f"Audio validation passed for {file_path} (duration: {duration:.2f}s)")
+        return True, None
+
+    except FileNotFoundError:
+        # ffprobe not available - log warning but don't fail
+        logger.warning("ffprobe not found, skipping audio integrity validation")
+        return True, None
+    except subprocess.TimeoutExpired:
+        logger.warning(f"ffprobe timed out for {file_path}")
+        return False, "El archivo de audio parece estar corrupto"
+    except Exception as e:
+        logger.warning(f"Error validating audio {file_path}: {e}")
+        return False, "El archivo de audio parece estar corrupto"
+
+
+def validate_audio_duration(file_path: str, max_minutes: int) -> Tuple[bool, Optional[str]]:
+    """Validate that audio duration does not exceed maximum.
+
+    Args:
+        file_path: Path to the audio file to validate
+        max_minutes: Maximum allowed duration in minutes
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - is_valid: True if duration is within limit, False otherwise
+        - error_message: None if valid, Spanish error message if invalid
+    """
+    logger.debug(f"Validating audio duration: {file_path} (max: {max_minutes}min)")
+
+    duration, error = get_audio_duration(file_path)
+
+    if error:
+        return False, error
+
+    if duration is None:
+        # ffprobe not available, skip duration validation
+        return True, None
+
+    max_seconds = max_minutes * 60
+
+    if duration > max_seconds:
+        logger.warning(
+            f"Audio duration ({duration:.1f}s) exceeds maximum ({max_seconds}s)"
+        )
+        return False, f"El audio es demasiado largo (máximo {max_minutes} minutos)"
+
+    logger.debug(f"Audio duration validation passed: {duration:.1f}s <= {max_seconds}s")
+    return True, None
+
+
 __all__ = [
     "ValidationError",
     "validate_file_size",
     "validate_video_file",
+    "validate_audio_file",
+    "validate_audio_duration",
+    "get_audio_duration",
     "check_disk_space",
     "estimate_required_space",
 ]
