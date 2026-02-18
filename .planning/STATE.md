@@ -8,10 +8,10 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 
 ## Current Position
 
-Phase: 3 (in progress)
-Plan: 02 (completed)
-Status: Voice note handler implemented
-Last activity: 2026-02-18 — Plan 03-02 completed (handle_audio_file handler, VoiceConversionError)
+Phase: 3 (completed)
+Plan: 03 (completed)
+Status: Voice message processing complete - Phase 3 finished
+Last activity: 2026-02-18 — Plan 03-03 completed (handle_voice_message, VoiceToMp3Error)
 
 ## Progress
 
@@ -19,7 +19,7 @@ Last activity: 2026-02-18 — Plan 03-02 completed (handle_audio_file handler, V
 v2.0 Navaja Suiza de Audio
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/5 phases)
 
-Phase 3: Voice Notes & Voice Message Processing [████░░░░░░] 67% (2/3 plans)
+Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
 Phase 4: Audio Split/Join                      [░░░░░░░░░░] 0%
 Phase 5: Audio Format Conversion               [░░░░░░░░░░] 0%
 Phase 6: Audio Enhancement                     [░░░░░░░░░░] 0%
@@ -51,11 +51,16 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
   - handle_audio_file: Process audio files as voice notes
   - VoiceConversionError: Error handling for voice conversion
   - Integration with TempManager for cleanup
+- Plan 03-03: Voice Message Processing — COMPLETED
+  - handle_voice_message: Convert voice messages to MP3
+  - VoiceToMp3Error: Error handling for voice to MP3 conversion
+  - Handlers registered: filters.VOICE, filters.AUDIO
 
 ## Active Plans
 
 - Plan 03-01: Audio Processing Infrastructure — COMPLETED (2026-02-18)
 - Plan 03-02: Voice Note Handler — COMPLETED (2026-02-18)
+- Plan 03-03: Voice Message Processing — COMPLETED (2026-02-18)
 
 ## Decisions Made
 
@@ -64,6 +69,8 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 3. **Max voice duration 20 minutes** — Telegram voice note hard limit
 4. **Spanish error messages** — Consistent with existing validators.py convention
 5. **English logging** — Consistent with video_processor.py codebase pattern
+6. **Handler order matters** — VIDEO → VOICE → AUDIO for proper filter matching
+7. **Voice file extension .oga** — Telegram uses .oga for voice messages (OGG Opus)
 
 ## Blockers
 
@@ -71,8 +78,8 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 
 ## Next Actions
 
-1. Plan 03-03: Voice Message Processing — Handle voice message downloads
-2. Plan 04-01: Audio Split — Implement audio splitting functionality
+1. Plan 04-01: Audio Split — Implement audio splitting functionality
+2. Plan 04-02: Audio Join — Implement audio joining functionality
 
 ## Project Reference
 
@@ -80,10 +87,11 @@ See: .planning/PROJECT.md (updated 2026-02-14)
 See: .planning/ROADMAP.md (v2.0 roadmap created 2026-02-14)
 See: .planning/phases/03-voice-notes-voice-message-processing/03-01-SUMMARY.md
 See: .planning/phases/03-voice-notes-voice-message-processing/03-02-SUMMARY.md
+See: .planning/phases/03-voice-notes-voice-message-processing/03-03-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
 **Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
 
 ---
 
-*Last updated: 2026-02-18 after completing Plan 03-02*
+*Last updated: 2026-02-18 after completing Plan 03-03*
