@@ -8,10 +8,10 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 
 ## Current Position
 
-Phase: 4 (in progress)
-Plan: 02 (completed)
-Status: Audio join infrastructure complete - AudioJoiner class implemented
-Last activity: 2026-02-18 — Plan 04-02 completed (AudioJoiner, AudioJoinError)
+Phase: 4 (completed)
+Plan: 03 (completed)
+Status: Audio split/join command handlers implemented - Phase 4 complete
+Last activity: 2026-02-18 — Plan 04-03 completed (Audio split/join handlers)
 
 ## Progress
 
@@ -20,7 +20,7 @@ v2.0 Navaja Suiza de Audio
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/5 phases)
 
 Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
-Phase 4: Audio Split/Join                      [████░░░░░░] 67% (2/3 plans)
+Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
 Phase 5: Audio Format Conversion               [░░░░░░░░░░] 0%
 Phase 6: Audio Enhancement                     [░░░░░░░░░░] 0%
 Phase 7: Audio Effects                         [░░░░░░░░░░] 0%
@@ -59,14 +59,13 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 **Phase 4 Progress:**
 - Plan 04-01: Audio Split Infrastructure — COMPLETED
 - Plan 04-02: Audio Join Infrastructure — COMPLETED
-  - AudioJoiner class: join_audios with automatic format normalization
-  - AudioJoinError exception for error handling
-  - Configuration: JOIN_MAX_AUDIO_FILES, JOIN_MIN_AUDIO_FILES, JOIN_AUDIO_TIMEOUT
-  - Supports MP3, OGG, WAV, AAC, FLAC formats
-  - AudioSplitter class: split_by_duration and split_by_parts methods
-  - AudioSplitError exception for error handling
-  - Configuration: MAX_AUDIO_SEGMENTS, MIN_AUDIO_SEGMENT_SECONDS
-  - Supports MP3, OGG, WAV, AAC, FLAC, M4A, WMA formats
+- Plan 04-03: Audio Split/Join Handlers — COMPLETED
+  - handle_split_audio_command: /split_audio command for splitting audio files
+  - handle_join_audio_start/done/cancel: /join_audio command for joining audio files
+  - handle_join_audio_file: Collects audio files during join session
+  - Session-based state management with context.user_data
+  - Shared /done and /cancel routing between video and audio join
+  - Updated help text with new commands
 
 ## Active Plans
 
@@ -74,11 +73,11 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 - Plan 03-02: Voice Note Handler — COMPLETED (2026-02-18)
 - Plan 03-03: Voice Message Processing — COMPLETED (2026-02-18)
 - Plan 04-01: Audio Split Infrastructure — COMPLETED (2026-02-18)
-- Plan 04-02: Audio Join Infrastructure — COMPLETED
-  - AudioJoiner class: join_audios with automatic format normalization
-  - AudioJoinError exception for error handling
-  - Configuration: JOIN_MAX_AUDIO_FILES, JOIN_MIN_AUDIO_FILES, JOIN_AUDIO_TIMEOUT
-  - Supports MP3, OGG, WAV, AAC, FLAC formats
+- Plan 04-02: Audio Join Infrastructure — COMPLETED (2026-02-18)
+- Plan 04-03: Audio Split/Join Handlers — COMPLETED (2026-02-18)
+  - handle_split_audio_command: /split_audio command for splitting audio files
+  - handle_join_audio_start/done/cancel: /join_audio command for joining audio files
+  - handle_join_audio_file: Collects audio files during join session
 
 ## Decisions Made
 
@@ -89,6 +88,7 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 5. **English logging** — Consistent with video_processor.py codebase pattern
 6. **Handler order matters** — VIDEO → VOICE → AUDIO for proper filter matching
 7. **Voice file extension .oga** — Telegram uses .oga for voice messages (OGG Opus)
+8. **Shared /done and /cancel commands** — Route based on session state (video first, then audio)
 
 ## Blockers
 
@@ -96,7 +96,7 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 
 ## Next Actions
 
-1. Plan 04-03: Audio Split/Join Handlers — Telegram command handlers
+1. Phase 5: Audio Format Conversion — Plan 05-01
 
 
 ## Project Reference
@@ -108,10 +108,11 @@ See: .planning/phases/03-voice-notes-voice-message-processing/03-02-SUMMARY.md
 See: .planning/phases/03-voice-notes-voice-message-processing/03-03-SUMMARY.md
 See: .planning/phases/04-audio-split-join/04-01-SUMMARY.md
 See: .planning/phases/04-audio-split-join/04-02-SUMMARY.md
+See: .planning/phases/04-audio-split-join/04-03-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
 **Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
 
 ---
 
-*Last updated: 2026-02-18 after completing Plan 04-02*
+*Last updated: 2026-02-18 after completing Plan 04-03 (Phase 4 complete)*
