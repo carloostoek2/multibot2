@@ -38,6 +38,13 @@
 4. Bot detecta automáticamente notas de voz entrantes sin necesidad de comandos
 5. Conversión preserva calidad de audio dentro de límites razonables de tamaño
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Crear módulo audio_processor.py con clases de conversión (VoiceNoteConverter, VoiceToMp3Converter), configuración y validación
+- [ ] 03-02-PLAN.md — Implementar handler para archivos de audio a voice notes (MP3 → OGG Opus)
+- [ ] 03-03-PLAN.md — Implementar detección automática y conversión de voice messages a MP3
+
 ---
 
 ## Phase 4: Audio Split/Join
@@ -119,7 +126,7 @@
 | 1. Core Video Processing | v1.0 | 3/3 | Complete | 2026-02-13 |
 | 1.1. Expandir procesamiento | v1.0 | 3/3 | Complete | 2026-02-13 |
 | 2. Error Handling & Config | v1.0 | 5/5 | Complete | 2026-02-14 |
-| 3. Voice Notes & VMP | v2.0 | 0/5 | Pending | — |
+| 3. Voice Notes & VMP | v2.0 | 0/3 | Planned | — |
 | 4. Audio Split/Join | v2.0 | 0/5 | Pending | — |
 | 5. Audio Format Conversion | v2.0 | 0/3 | Pending | — |
 | 6. Audio Enhancement | v2.0 | 0/4 | Pending | — |
