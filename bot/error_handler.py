@@ -87,6 +87,22 @@ class VideoJoinError(VideoProcessingError):
         super().__init__(self.message)
 
 
+class VoiceConversionError(VideoProcessingError):
+    """Exception raised when audio to voice note conversion fails."""
+
+    def __init__(self, message: str = "Error convirtiendo audio a nota de voz"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class VoiceToMp3Error(VideoProcessingError):
+    """Exception raised when voice to MP3 conversion fails."""
+
+    def __init__(self, message: str = "Error convirtiendo nota de voz a MP3"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -96,6 +112,8 @@ ERROR_MESSAGES = {
     AudioExtractionError: "No pude extraer el audio del video. Intenta con otro archivo.",
     VideoSplitError: "No pude dividir el video. Verifica que el archivo sea válido.",
     VideoJoinError: "No pude unir los videos. Verifica que los archivos sean válidos.",
+    VoiceConversionError: "No pude convertir el audio a nota de voz. Verifica que el archivo sea válido.",
+    VoiceToMp3Error: "No pude convertir la nota de voz a MP3. Intenta de nuevo.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
     ValidationError: "El archivo no es válido. Verifica que sea un video correcto.",
     # Telegram API errors
