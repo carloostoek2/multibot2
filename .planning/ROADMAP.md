@@ -66,9 +66,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Crear AudioSplitter class para dividir archivos de audio por duración o número de partes
-- [ ] 04-02-PLAN.md — Crear AudioJoiner class para unir múltiples archivos de audio
-- [ ] 04-03-PLAN.md — Implementar comandos /split_audio y /join_audio con handlers
+- [x] 04-01-PLAN.md — Crear AudioSplitter class para dividir archivos de audio por duración o número de partes
+- [x] 04-02-PLAN.md — Crear AudioJoiner class para unir múltiples archivos de audio
+- [x] 04-03-PLAN.md — Implementar comandos /split_audio y /join_audio con handlers
 
 ---
 
@@ -134,7 +134,7 @@ Plans:
 | 1.1. Expandir procesamiento | v1.0 | 3/3 | Complete | 2026-02-13 |
 | 2. Error Handling & Config | v1.0 | 5/5 | Complete | 2026-02-14 |
 | 3. Voice Notes & VMP | v2.0 | 3/3 | Complete | 2026-02-18 |
-| 4. Audio Split/Join | v2.0 | 0/3 | Planned | — |
+| 4. Audio Split/Join | v2.0 | 3/3 | Complete | 2026-02-18 |
 | 5. Audio Format Conversion | v2.0 | 0/3 | Pending | — |
 | 6. Audio Enhancement | v2.0 | 0/4 | Pending | — |
 | 7. Audio Effects | v2.0 | 0/4 | Pending | — |
@@ -163,4 +163,4 @@ Plans:
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 
-*Last updated: 2026-02-18 — Phase 4 plans created*
+*Last updated: 2026-02-18 — Phase 4 complete*
