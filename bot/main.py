@@ -27,7 +27,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from bot.handlers import (
     start, handle_video, handle_convert_command, handle_extract_audio_command,
-    handle_split_command, handle_join_start, handle_join_done, handle_join_cancel
+    handle_split_command, handle_join_start, handle_join_done, handle_join_cancel,
+    handle_voice_message, handle_audio_file
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -77,6 +78,12 @@ def main() -> None:
     application.add_handler(CommandHandler("done", handle_join_done))
     application.add_handler(CommandHandler("cancel", handle_join_cancel))
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
+
+    # Add handler for voice messages (OGG Opus from Telegram)
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
+
+    # Add handler for audio files (MP3, OGG, etc.)
+    application.add_handler(MessageHandler(filters.AUDIO, handle_audio_file))
 
     # Add global error handler
     application.add_error_handler(error_handler)
