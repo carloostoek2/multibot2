@@ -123,9 +123,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Crear AudioEnhancer class con bass boost, treble boost y ecualizador de 3 bandas
-- [ ] 06-02-PLAN.md — Implementar comandos /bass_boost y /treble_boost con selección de intensidad
-- [ ] 06-03-PLAN.md — Implementar comando /equalize con interfaz interactiva de 3 bandas
+- [x] 06-01-PLAN.md — Crear AudioEnhancer class con bass boost, treble boost y ecualizador de 3 bandas
+- [x] 06-02-PLAN.md — Implementar comandos /bass_boost y /treble_boost con selección de intensidad
+- [x] 06-03-PLAN.md — Implementar comando /equalize con interfaz interactiva de 3 bandas
 
 ---
 
@@ -157,14 +157,14 @@ Plans:
 | 3. Voice Notes & VMP | v2.0 | 3/3 | Complete | 2026-02-18 |
 | 4. Audio Split/Join | v2.0 | 3/3 | Complete | 2026-02-18 |
 | 5. Audio Format Conversion | v2.0 | 3/3 | Complete | 2026-02-19 |
-| 6. Audio Enhancement | v2.0 | 0/3 | Planned | — |
+| 6. Audio Enhancement | v2.0 | 3/3 | Complete | 2026-02-19 |
 | 7. Audio Effects | v2.0 | 0/4 | Pending | — |
 
 **Coverage:** 21/21 v2.0 requirements mapped ✓
 
 ---
 
-*Last updated: 2026-02-19 — Phase 6 planned*
+*Last updated: 2026-02-19 — Phase 6 complete*
 
 ---
 
