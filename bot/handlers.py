@@ -2680,3 +2680,348 @@ async def handle_intensity_selection(update: Update, context: ContextTypes.DEFAU
 
         # TempManager cleanup happens automatically on context exit
         logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
+
+
+# =============================================================================
+# Equalizer Handlers
+# =============================================================================
+
+
+def _get_equalizer_keyboard(bass: int, mid: int, treble: int) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for 3-band equalizer.
+
+    Args:
+        bass: Current bass value (-10 to +10)
+        mid: Current mid value (-10 to +10)
+        treble: Current treble value (-10 to +10)
+
+    Returns:
+        InlineKeyboardMarkup with equalizer controls
+    """
+    # Format values with sign for positive numbers
+    bass_str = f"{bass:+d}" if bass != 0 else "0"
+    mid_str = f"{mid:+d}" if mid != 0 else "0"
+    treble_str = f"{treble:+d}" if treble != 0 else "0"
+
+    keyboard = [
+        # Bass row
+        [
+            InlineKeyboardButton("Bass", callback_data="eq_noop"),
+            InlineKeyboardButton("-", callback_data="eq_bass_down"),
+            InlineKeyboardButton(bass_str, callback_data="eq_noop"),
+            InlineKeyboardButton("+", callback_data="eq_bass_up"),
+        ],
+        # Mid row
+        [
+            InlineKeyboardButton("Mid", callback_data="eq_noop"),
+            InlineKeyboardButton("-", callback_data="eq_mid_down"),
+            InlineKeyboardButton(mid_str, callback_data="eq_noop"),
+            InlineKeyboardButton("+", callback_data="eq_mid_up"),
+        ],
+        # Treble row
+        [
+            InlineKeyboardButton("Treble", callback_data="eq_noop"),
+            InlineKeyboardButton("-", callback_data="eq_treble_down"),
+            InlineKeyboardButton(treble_str, callback_data="eq_noop"),
+            InlineKeyboardButton("+", callback_data="eq_treble_up"),
+        ],
+        # Reset and Apply row
+        [
+            InlineKeyboardButton("Reset", callback_data="eq_reset_all"),
+            InlineKeyboardButton("Aplicar", callback_data="eq_apply"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_equalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /equalize command to show 3-band equalizer interface.
+
+    Usage: /equalize (when replying to an audio or with audio attached)
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Equalize command received from user {user_id}")
+
+    # Get audio from message or reply
+    audio, is_reply = await _get_audio_from_message(update)
+
+    if not audio:
+        await update.message.reply_text(
+            "Envía /equalize respondiendo a un archivo de audio o adjunta el audio al mensaje."
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Initialize equalizer state in context.user_data
+    context.user_data["eq_file_id"] = audio.file_id
+    context.user_data["eq_correlation_id"] = correlation_id
+    context.user_data["eq_bass"] = 0
+    context.user_data["eq_mid"] = 0
+    context.user_data["eq_treble"] = 0
+
+    # Create inline keyboard
+    reply_markup = _get_equalizer_keyboard(0, 0, 0)
+
+    await update.message.reply_text(
+        "Ecualizador de 3 bandas:\n"
+        "🎵 Bass: 0\n"
+        "🎵 Mid: 0\n"
+        "🎵 Treble: 0\n\n"
+        "Ajusta cada banda y presiona Aplicar.",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Equalizer interface sent to user {user_id}")
+
+
+async def handle_equalizer_adjustment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle equalizer adjustment callbacks from inline keyboard.
+
+    Handles up/down adjustments for bass/mid/treble, reset, and apply.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Handle noop callbacks (display buttons)
+    if callback_data == "eq_noop":
+        return
+
+    # Get current values from context
+    bass = context.user_data.get("eq_bass", 0)
+    mid = context.user_data.get("eq_mid", 0)
+    treble = context.user_data.get("eq_treble", 0)
+    correlation_id = context.user_data.get("eq_correlation_id", str(uuid.uuid4())[:8])
+
+    # Process callback
+    if callback_data == "eq_apply":
+        await _handle_equalizer_apply(update, context, bass, mid, treble)
+        return
+
+    # Step size for adjustments
+    STEP = 2
+    MIN_VAL = -10
+    MAX_VAL = 10
+
+    if callback_data == "eq_bass_up":
+        bass = min(MAX_VAL, bass + STEP)
+    elif callback_data == "eq_bass_down":
+        bass = max(MIN_VAL, bass - STEP)
+    elif callback_data == "eq_mid_up":
+        mid = min(MAX_VAL, mid + STEP)
+    elif callback_data == "eq_mid_down":
+        mid = max(MIN_VAL, mid - STEP)
+    elif callback_data == "eq_treble_up":
+        treble = min(MAX_VAL, treble + STEP)
+    elif callback_data == "eq_treble_down":
+        treble = max(MIN_VAL, treble - STEP)
+    elif callback_data == "eq_reset_all":
+        bass = 0
+        mid = 0
+        treble = 0
+    else:
+        logger.warning(f"[{correlation_id}] Unknown equalizer callback: {callback_data}")
+        return
+
+    # Store updated values
+    context.user_data["eq_bass"] = bass
+    context.user_data["eq_mid"] = mid
+    context.user_data["eq_treble"] = treble
+
+    # Format values for display
+    bass_display = f"{bass:+d}" if bass != 0 else "0"
+    mid_display = f"{mid:+d}" if mid != 0 else "0"
+    treble_display = f"{treble:+d}" if treble != 0 else "0"
+
+    # Update message with new values
+    reply_markup = _get_equalizer_keyboard(bass, mid, treble)
+
+    try:
+        await query.edit_message_text(
+            f"Ecualizador de 3 bandas:\n"
+            f"🎵 Bass: {bass_display}\n"
+            f"🎵 Mid: {mid_display}\n"
+            f"🎵 Treble: {treble_display}\n\n"
+            f"Ajusta cada banda y presiona Aplicar.",
+            reply_markup=reply_markup
+        )
+        logger.info(f"[{correlation_id}] Equalizer updated: bass={bass}, mid={mid}, treble={treble}")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update equalizer message: {e}")
+
+
+async def _handle_equalizer_apply(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    bass: int,
+    mid: int,
+    treble: int
+) -> None:
+    """Apply equalizer settings and process audio.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        bass: Bass gain value (-10 to +10)
+        mid: Mid gain value (-10 to +10)
+        treble: Treble gain value (-10 to +10)
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    correlation_id = context.user_data.get("eq_correlation_id", str(uuid.uuid4())[:8])
+
+    # Check if any adjustments were made
+    if bass == 0 and mid == 0 and treble == 0:
+        await query.edit_message_text(
+            "No has hecho ajustes. Modifica al menos una banda antes de aplicar."
+        )
+        return
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("eq_file_id")
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    # Format values for display
+    bass_display = f"{bass:+d}" if bass != 0 else "0"
+    mid_display = f"{mid:+d}" if mid != 0 else "0"
+    treble_display = f"{treble:+d}" if treble != 0 else "0"
+
+    # Update message to show processing
+    try:
+        await query.edit_message_text(
+            f"Aplicando ecualización (Bass: {bass_display}, Mid: {mid_display}, Treble: {treble_display})..."
+        )
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    logger.info(f"[{correlation_id}] Applying equalizer: bass={bass}, mid={mid}, treble={treble}")
+
+    # Process with TempManager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_eq_{user_id}_{correlation_id}.audio"
+            output_filename = f"equalized_{user_id}_{correlation_id}.mp3"
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download audio file
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Audio downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Apply equalization with timeout
+            logger.info(f"[{correlation_id}] Applying equalization for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                enhancer = AudioEnhancer(str(input_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, enhancer.equalize, bass, mid, treble),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Equalization failed for user {user_id}")
+                    raise AudioEnhancementError("No pude aplicar la ecualización")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Equalization timed out for user {user_id}")
+                raise ProcessingTimeoutError("La ecualización tardó demasiado") from e
+
+            # Send equalized audio
+            logger.info(f"[{correlation_id}] Sending equalized audio to user {user_id}")
+            try:
+                with open(output_path, "rb") as audio_file:
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=audio_file,
+                        filename=f"equalized.mp3",
+                        title=f"Audio ecualizado"
+                    )
+                logger.info(f"[{correlation_id}] Equalized audio sent successfully to user {user_id}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send equalized audio to user {user_id}: {e}")
+                raise
+
+            # Update message on success
+            try:
+                await query.edit_message_text(
+                    f"¡Listo! Ecualización aplicada:\n"
+                    f"🎵 Bass: {bass_display}\n"
+                    f"🎵 Mid: {mid_display}\n"
+                    f"🎵 Treble: {treble_display}"
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update final message: {e}")
+
+            # Clean up user_data
+            context.user_data.pop("eq_file_id", None)
+            context.user_data.pop("eq_correlation_id", None)
+            context.user_data.pop("eq_bass", None)
+            context.user_data.pop("eq_mid", None)
+            context.user_data.pop("eq_treble", None)
+
+        except (DownloadError, ValidationError, AudioEnhancementError, ProcessingTimeoutError) as e:
+            # Handle known processing errors
+            logger.error(f"[{correlation_id}] Processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text(f"Error: {str(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        except Exception as e:
+            # Handle unexpected errors
+            logger.exception(f"[{correlation_id}] Unexpected error applying equalizer for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        # TempManager cleanup happens automatically on context exit
+        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
