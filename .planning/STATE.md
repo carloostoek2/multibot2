@@ -9,9 +9,9 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 ## Current Position
 
 Phase: 05-audio-format-conversion
-Plan: 03 (completed)
-Status: Metadata preservation for audio conversion complete
-Last activity: 2026-02-19 — Plan 05-03 completed (Metadata preservation in AudioFormatConverter)
+Plan: 02 (completed)
+Status: Audio format conversion handlers complete
+Last activity: 2026-02-19 — Plan 05-02 completed (Audio Format Conversion Handlers)
 
 ## Progress
 
@@ -21,7 +21,7 @@ v2.0 Navaja Suiza de Audio
 
 Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
-Phase 5: Audio Format Conversion               [██████░░░░] 67% (2/3 plans)
+Phase 5: Audio Format Conversion               [██████████] 100% (3/3 plans) ✓
 Phase 6: Audio Enhancement                     [░░░░░░░░░░] 0%
 Phase 7: Audio Effects                         [░░░░░░░░░░] 0%
 ```
@@ -82,6 +82,10 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
   - AudioFormatConverter: Convert between MP3, WAV, OGG, AAC, FLAC
   - detect_audio_format: Automatic format detection using ffprobe
   - AudioFormatConversionError: Error handling for format conversion
+- Plan 05-02: Audio Format Conversion Handlers — COMPLETED (2026-02-19)
+  - handle_convert_audio_command: /convert_audio command with inline keyboard
+  - handle_format_selection: Callback handler for format selection
+  - Support for MP3, WAV, OGG, AAC, FLAC format conversion
 - Plan 05-03: Metadata Preservation — COMPLETED (2026-02-19)
   - extract_metadata: Extract ID3/Vorbis tags using ffprobe
   - has_metadata_support: Check format metadata capabilities
@@ -100,6 +104,8 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 - [Phase 05-audio-format-conversion]: Error handling follows existing pattern: Spanish messages, English logging
 - [Phase 05-audio-format-conversion]: Format detection uses ffprobe format_name field for reliability
 - [Phase 05-audio-format-conversion]: Codec settings optimized: MP3 at 192k (quality 2), FLAC compression level 5
+- [Phase 05-audio-format-conversion]: Inline keyboard layout: 3 + 2 buttons for format selection
+- [Phase 05-audio-format-conversion]: Input format detection prevents unnecessary conversion
 - [Phase 05-audio-format-conversion]: Metadata extraction uses ffprobe JSON output for structured parsing
 - [Phase 05-audio-format-conversion]: WAV format has limited metadata support (INFO chunks only)
 
@@ -109,7 +115,7 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 
 ## Next Actions
 
-1. Phase 5: Audio Format Conversion — Plan 05-02
+1. Phase 6: Audio Enhancement — Plan 06-01
 
 
 ## Project Reference
@@ -123,6 +129,7 @@ See: .planning/phases/04-audio-split-join/04-01-SUMMARY.md
 See: .planning/phases/04-audio-split-join/04-02-SUMMARY.md
 See: .planning/phases/04-audio-split-join/04-03-SUMMARY.md
 See: .planning/phases/05-audio-format-conversion/05-01-SUMMARY.md
+See: .planning/phases/05-audio-format-conversion/05-02-SUMMARY.md
 See: .planning/phases/05-audio-format-conversion/05-03-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
@@ -130,4 +137,4 @@ See: .planning/phases/05-audio-format-conversion/05-03-SUMMARY.md
 
 ---
 
-*Last updated: 2026-02-19 after completing Plan 05-03 (Metadata Preservation in Audio Conversion)*
+*Last updated: 2026-02-19 after completing Plan 05-02 (Audio Format Conversion Handlers)*
