@@ -8,10 +8,10 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 
 ## Current Position
 
-Phase: 05-audio-format-conversion
-Plan: 02 (completed)
-Status: Audio format conversion handlers complete
-Last activity: 2026-02-19 — Plan 05-02 completed (Audio Format Conversion Handlers)
+Phase: 06-audio-enhancement
+Plan: 01 (completed)
+Status: Audio enhancement infrastructure complete
+Last activity: 2026-02-19 — Plan 06-01 completed (Audio Enhancement Infrastructure)
 
 ## Progress
 
@@ -22,7 +22,7 @@ v2.0 Navaja Suiza de Audio
 Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
 Phase 5: Audio Format Conversion               [██████████] 100% (3/3 plans) ✓
-Phase 6: Audio Enhancement                     [░░░░░░░░░░] 0%
+Phase 6: Audio Enhancement                     [███░░░░░░░] 33% (1/3 plans)
 Phase 7: Audio Effects                         [░░░░░░░░░░] 0%
 ```
 
@@ -90,6 +90,10 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
   - extract_metadata: Extract ID3/Vorbis tags using ffprobe
   - has_metadata_support: Check format metadata capabilities
   - _log_metadata_preservation: Debug logging for metadata operations
+- Plan 06-01: Audio Enhancement Infrastructure — COMPLETED (2026-02-19)
+  - AudioEnhancer: Bass boost, treble boost, 3-band equalizer
+  - AudioEnhancementError: Error handling for audio enhancement
+  - ffmpeg filters: bass, treble, equalizer
 
 ## Decisions Made
 
@@ -108,6 +112,10 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 - [Phase 05-audio-format-conversion]: Input format detection prevents unnecessary conversion
 - [Phase 05-audio-format-conversion]: Metadata extraction uses ffprobe JSON output for structured parsing
 - [Phase 05-audio-format-conversion]: WAV format has limited metadata support (INFO chunks only)
+- [Phase 06-audio-enhancement]: Use ffmpeg bass/treble filters (simpler than firequalizer)
+- [Phase 06-audio-enhancement]: Output to MP3 format for maximum compatibility
+- [Phase 06-audio-enhancement]: Intensity 1-10 maps to 2-20dB for bass, 1.5-15dB for treble
+- [Phase 06-audio-enhancement]: EQ gain -10 to +10 maps to -15 to +15dB
 
 ## Blockers
 
@@ -115,8 +123,8 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 
 ## Next Actions
 
-1. Phase 6: Audio Enhancement — Plan 06-01
-
+1. Phase 6: Audio Enhancement — Plan 06-02 (Bass/Treble Boost Handlers)
+2. Phase 6: Audio Enhancement — Plan 06-03 (Equalizer Handler)
 
 ## Project Reference
 
@@ -131,10 +139,11 @@ See: .planning/phases/04-audio-split-join/04-03-SUMMARY.md
 See: .planning/phases/05-audio-format-conversion/05-01-SUMMARY.md
 See: .planning/phases/05-audio-format-conversion/05-02-SUMMARY.md
 See: .planning/phases/05-audio-format-conversion/05-03-SUMMARY.md
+See: .planning/phases/06-audio-enhancement/06-01-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
 **Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
 
 ---
 
-*Last updated: 2026-02-19 after completing Plan 05-02 (Audio Format Conversion Handlers)*
+*Last updated: 2026-02-19 after completing Plan 06-01 (Audio Enhancement Infrastructure)*
