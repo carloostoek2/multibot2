@@ -2434,3 +2434,65 @@ async def handle_bass_boost_command(update: Update, context: ContextTypes.DEFAUL
         reply_markup=reply_markup
     )
     logger.info(f"[{correlation_id}] Intensity selection keyboard sent to user {user_id}")
+
+
+async def handle_treble_boost_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /treble_boost command to apply treble boost enhancement.
+
+    Usage: /treble_boost (when replying to an audio or with audio attached)
+    Shows inline keyboard with intensity options (1-10) for user to select.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Treble boost command received from user {user_id}")
+
+    # Get audio from message or reply
+    audio, is_reply = await _get_audio_from_message(update)
+
+    if not audio:
+        await update.message.reply_text(
+            "Envía /treble_boost respondiendo a un archivo de audio o adjunta el audio al mensaje."
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Store file_id in context for later retrieval
+    context.user_data["enhance_audio_file_id"] = audio.file_id
+    context.user_data["enhance_audio_correlation_id"] = correlation_id
+    context.user_data["enhance_type"] = "treble"
+
+    # Create inline keyboard with intensity options (5 + 5 layout)
+    keyboard = [
+        [
+            InlineKeyboardButton("1", callback_data="treble:1"),
+            InlineKeyboardButton("2", callback_data="treble:2"),
+            InlineKeyboardButton("3", callback_data="treble:3"),
+            InlineKeyboardButton("4", callback_data="treble:4"),
+            InlineKeyboardButton("5", callback_data="treble:5"),
+        ],
+        [
+            InlineKeyboardButton("6", callback_data="treble:6"),
+            InlineKeyboardButton("7", callback_data="treble:7"),
+            InlineKeyboardButton("8", callback_data="treble:8"),
+            InlineKeyboardButton("9", callback_data="treble:9"),
+            InlineKeyboardButton("10", callback_data="treble:10"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Selecciona la intensidad del treble boost (1-10):",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Intensity selection keyboard sent to user {user_id}")
