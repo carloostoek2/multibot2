@@ -23,14 +23,15 @@ logger = logging.getLogger(__name__)
 logger.info(f"Logging configured at level: {config.LOG_LEVEL}")
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from bot.handlers import (
     start, handle_video, handle_convert_command, handle_extract_audio_command,
     handle_split_command, handle_join_start, handle_join_done, handle_join_cancel,
     handle_voice_message, handle_audio_file,
     handle_split_audio_command, handle_join_audio_start, handle_join_audio_file,
-    handle_join_audio_done, handle_join_audio_cancel
+    handle_join_audio_done, handle_join_audio_cancel,
+    handle_convert_audio_command, handle_format_selection
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -83,6 +84,12 @@ def main() -> None:
 
     # Audio join commands
     application.add_handler(CommandHandler("join_audio", handle_join_audio_start))
+
+    # Audio format conversion command
+    application.add_handler(CommandHandler("convert_audio", handle_convert_audio_command))
+
+    # Callback handler for format selection
+    application.add_handler(CallbackQueryHandler(handle_format_selection, pattern="^format:"))
 
     # /done and /cancel are shared between video join and audio join
     # The handlers check context.user_data to determine which session is active
