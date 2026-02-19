@@ -88,6 +88,13 @@ Plans:
 4. Bot detecta formato de entrada automáticamente
 5. Archivos convertidos mantienen calidad apropiada para el formato seleccionado
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — Crear AudioFormatConverter class con soporte para MP3, WAV, OGG, AAC, FLAC y detección automática de formato
+- [ ] 05-02-PLAN.md — Implementar comando /convert_audio con selección de formato vía teclado inline
+- [ ] 05-03-PLAN.md — Implementar preservación de metadatos durante la conversión
+
 ---
 
 ## Phase 6: Audio Enhancement
@@ -135,7 +142,7 @@ Plans:
 | 2. Error Handling & Config | v1.0 | 5/5 | Complete | 2026-02-14 |
 | 3. Voice Notes & VMP | v2.0 | 3/3 | Complete | 2026-02-18 |
 | 4. Audio Split/Join | v2.0 | 3/3 | Complete | 2026-02-18 |
-| 5. Audio Format Conversion | v2.0 | 0/3 | Pending | — |
+| 5. Audio Format Conversion | v2.0 | 3/3 | Complete | 2026-02-19 |
 | 6. Audio Enhancement | v2.0 | 0/4 | Pending | — |
 | 7. Audio Effects | v2.0 | 0/4 | Pending | — |
 
@@ -163,4 +170,4 @@ Plans:
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 
-*Last updated: 2026-02-18 — Phase 4 complete*
+*Last updated: 2026-02-19 — Phase 5 planned*
