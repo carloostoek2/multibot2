@@ -32,7 +32,8 @@ from bot.handlers import (
     handle_split_audio_command, handle_join_audio_start, handle_join_audio_file,
     handle_join_audio_done, handle_join_audio_cancel,
     handle_convert_audio_command, handle_format_selection,
-    handle_bass_boost_command, handle_treble_boost_command, handle_intensity_selection
+    handle_bass_boost_command, handle_treble_boost_command, handle_intensity_selection,
+    handle_equalize_command, handle_equalizer_adjustment
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -95,9 +96,13 @@ def main() -> None:
     # Audio enhancement commands
     application.add_handler(CommandHandler("bass_boost", handle_bass_boost_command))
     application.add_handler(CommandHandler("treble_boost", handle_treble_boost_command))
+    application.add_handler(CommandHandler("equalize", handle_equalize_command))
 
     # Callback handler for intensity selection (bass/treble boost)
     application.add_handler(CallbackQueryHandler(handle_intensity_selection, pattern="^(bass|treble):\\d+$"))
+
+    # Callback handler for equalizer adjustments
+    application.add_handler(CallbackQueryHandler(handle_equalizer_adjustment, pattern="^eq_"))
 
     # /done and /cancel are shared between video join and audio join
     # The handlers check context.user_data to determine which session is active

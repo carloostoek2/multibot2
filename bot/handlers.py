@@ -260,7 +260,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/join_audio - Une múltiples archivos de audio\n"
         "/convert_audio - Convierte un audio a otro formato (MP3, WAV, OGG, AAC, FLAC)\n"
         "/bass_boost - Aumenta los bajos del audio (intensidad ajustable)\n"
-        "/treble_boost - Aumenta los agudos del audio (intensidad ajustable)"
+        "/treble_boost - Aumenta los agudos del audio (intensidad ajustable)\n"
+        "/equalize - Ecualizador de 3 bandas (bass, mid, treble)"
     )
 
 
