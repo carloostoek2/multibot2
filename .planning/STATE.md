@@ -9,9 +9,9 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 ## Current Position
 
 Phase: 06-audio-enhancement
-Plan: 02 (completed)
-Status: Bass/Treble boost handlers complete
-Last activity: 2026-02-19 — Plan 06-02 completed (Bass/Treble Boost Handlers)
+Plan: 03 (completed)
+Status: Equalizer handler complete
+Last activity: 2026-02-19 — Plan 06-03 completed (Equalizer Handler)
 
 ## Progress
 
@@ -22,7 +22,7 @@ v2.0 Navaja Suiza de Audio
 Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
 Phase 5: Audio Format Conversion               [██████████] 100% (3/3 plans) ✓
-Phase 6: Audio Enhancement                     [██████░░░░] 67% (2/3 plans)
+Phase 6: Audio Enhancement                     [██████████] 100% (3/3 plans) ✓
 Phase 7: Audio Effects                         [░░░░░░░░░░] 0%
 ```
 
@@ -99,6 +99,11 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
   - handle_treble_boost_command: /treble_boost command with intensity keyboard
   - handle_intensity_selection: Callback handler for intensity selection
   - Inline keyboard layout: 5+5 buttons for intensity 1-10
+- Plan 06-03: Equalizer Handler — COMPLETED (2026-02-19)
+  - handle_equalize_command: /equalize command with 3-band equalizer interface
+  - handle_equalizer_adjustment: Callback handler for +/- button adjustments
+  - _handle_equalizer_apply: Process audio with AudioEnhancer.equalize()
+  - Inline keyboard layout: 3 rows for bass/mid/treble + reset/apply buttons
 
 ## Decisions Made
 
@@ -130,7 +135,7 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 
 ## Next Actions
 
-1. Phase 6: Audio Enhancement — Plan 06-03 (Equalizer Handler)
+1. Phase 7: Audio Effects — Plan 07-01 (Audio Effects Infrastructure)
 
 ## Project Reference
 
@@ -147,10 +152,11 @@ See: .planning/phases/05-audio-format-conversion/05-02-SUMMARY.md
 See: .planning/phases/05-audio-format-conversion/05-03-SUMMARY.md
 See: .planning/phases/06-audio-enhancement/06-01-SUMMARY.md
 See: .planning/phases/06-audio-enhancement/06-02-SUMMARY.md
+See: .planning/phases/06-audio-enhancement/06-03-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
 **Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
 
 ---
 
-*Last updated: 2026-02-19 after completing Plan 06-02 (Bass/Treble Boost Handlers)*
+*Last updated: 2026-02-19 after completing Plan 06-03 (Equalizer Handler)*
