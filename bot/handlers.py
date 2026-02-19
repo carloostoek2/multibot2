@@ -258,7 +258,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/join - Une múltiples videos en uno solo\n"
         "/split_audio [duration|parts] <valor> - Divide un audio en segmentos\n"
         "/join_audio - Une múltiples archivos de audio\n"
-        "/convert_audio - Convierte un audio a otro formato (MP3, WAV, OGG, AAC, FLAC)"
+        "/convert_audio - Convierte un audio a otro formato (MP3, WAV, OGG, AAC, FLAC)\n"
+        "/bass_boost - Aumenta los bajos del audio (intensidad ajustable)\n"
+        "/treble_boost - Aumenta los agudos del audio (intensidad ajustable)"
     )
 
 
