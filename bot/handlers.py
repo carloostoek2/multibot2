@@ -3,8 +3,8 @@ import asyncio
 import logging
 import uuid
 from pathlib import Path
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ContextTypes, CallbackQueryHandler
 from telegram.error import NetworkError, TimedOut
 
 from bot.temp_manager import TempManager
@@ -24,6 +24,7 @@ from bot.error_handler import (
     VoiceToMp3Error,
     AudioSplitError,
     AudioJoinError,
+    AudioFormatConversionError,
     handle_processing_error,
 )
 from bot.config import config
@@ -38,6 +39,7 @@ from bot.validators import (
 from bot.audio_processor import VoiceNoteConverter, VoiceToMp3Converter, get_audio_duration
 from bot.audio_splitter import AudioSplitter
 from bot.audio_joiner import AudioJoiner
+from bot.audio_format_converter import AudioFormatConverter, detect_audio_format, get_supported_audio_formats
 
 logger = logging.getLogger(__name__)
 
@@ -2152,6 +2154,218 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
                     await processing_message.delete()
                 except Exception as e:
                     logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+
+        # TempManager cleanup happens automatically on context exit
+        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
+
+
+async def handle_convert_audio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /convert_audio command to convert audio to different format.
+
+    Usage: /convert_audio (when replying to an audio or with audio attached)
+    Shows inline keyboard with format options for user to select.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Convert audio command received from user {user_id}")
+
+    # Get audio from message or reply
+    audio, is_reply = await _get_audio_from_message(update)
+
+    if not audio:
+        await update.message.reply_text(
+            "Envía /convert_audio respondiendo a un archivo de audio o adjunta el audio al mensaje."
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Store file_id in context for later retrieval
+    context.user_data["convert_audio_file_id"] = audio.file_id
+    context.user_data["convert_audio_correlation_id"] = correlation_id
+
+    # Create inline keyboard with format options (3 + 2 layout)
+    keyboard = [
+        [
+            InlineKeyboardButton("MP3", callback_data="format:mp3"),
+            InlineKeyboardButton("WAV", callback_data="format:wav"),
+            InlineKeyboardButton("OGG", callback_data="format:ogg"),
+        ],
+        [
+            InlineKeyboardButton("AAC", callback_data="format:aac"),
+            InlineKeyboardButton("FLAC", callback_data="format:flac"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Selecciona el formato de salida:",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Format selection keyboard sent to user {user_id}")
+
+
+async def handle_format_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle format selection callback from inline keyboard.
+
+    Downloads the audio, converts it to selected format, and sends back.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Extract format from callback data (e.g., "format:mp3" -> "mp3")
+    callback_data = query.data
+    if not callback_data.startswith("format:"):
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    output_format = callback_data.split(":")[1]
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("convert_audio_file_id")
+    correlation_id = context.user_data.get("convert_audio_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    logger.info(f"[{correlation_id}] Format {output_format} selected by user {user_id}")
+
+    # Update message to show processing
+    try:
+        await query.edit_message_text(f"Convirtiendo a {output_format.upper()}...")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    # Process with TempManager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_{user_id}_{correlation_id}.audio"
+            output_filename = f"converted_{user_id}_{correlation_id}.{output_format}"
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download audio file
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Audio downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Detect input format
+            input_format = detect_audio_format(str(input_path))
+            if input_format:
+                logger.info(f"[{correlation_id}] Detected input format: {input_format}")
+                # Check if input format equals output format
+                if input_format == output_format:
+                    await query.edit_message_text(
+                        f"El archivo ya está en formato {output_format.upper()}. No es necesario convertir."
+                    )
+                    return
+            else:
+                logger.warning(f"[{correlation_id}] Could not detect input format for user {user_id}")
+
+            # Check disk space before processing
+            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Convert audio with timeout
+            logger.info(f"[{correlation_id}] Converting audio to {output_format} for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                converter = AudioFormatConverter(str(input_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, converter.convert, output_format),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Audio format conversion failed for user {user_id}")
+                    raise AudioFormatConversionError(f"No pude convertir el audio a {output_format.upper()}")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Audio conversion timed out for user {user_id}")
+                raise ProcessingTimeoutError("La conversión tardó demasiado") from e
+
+            # Send converted audio
+            logger.info(f"[{correlation_id}] Sending converted audio to user {user_id}")
+            try:
+                with open(output_path, "rb") as audio_file:
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=audio_file,
+                        filename=f"converted.{output_format}",
+                        title=f"Audio convertido a {output_format.upper()}"
+                    )
+                logger.info(f"[{correlation_id}] Converted audio sent successfully to user {user_id}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send converted audio to user {user_id}: {e}")
+                raise
+
+            # Update message on success
+            try:
+                await query.edit_message_text(f"Audio convertido a {output_format.upper()} exitosamente.")
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update final message: {e}")
+
+            # Clean up user_data
+            context.user_data.pop("convert_audio_file_id", None)
+            context.user_data.pop("convert_audio_correlation_id", None)
+
+        except (DownloadError, ValidationError, AudioFormatConversionError, ProcessingTimeoutError) as e:
+            # Handle known processing errors
+            logger.error(f"[{correlation_id}] Processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text(f"Error: {str(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        except Exception as e:
+            # Handle unexpected errors
+            logger.exception(f"[{correlation_id}] Unexpected error converting audio for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
 
         # TempManager cleanup happens automatically on context exit
         logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
