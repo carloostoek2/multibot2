@@ -92,8 +92,15 @@ Plans:
 
 Plans:
 - [ ] 05-01-PLAN.md — Crear AudioFormatConverter class con soporte para MP3, WAV, OGG, AAC, FLAC y detección automática de formato
-- [ ] 05-02-PLAN.md — Implementar comando /convert_audio con selección de formato vía teclado inline
-- [ ] 05-03-PLAN.md — Implementar preservación de metadatos durante la conversión
+- [x] 05-02-PLAN.md — Implementar comando /convert_audio con selección de formato vía teclado inline
+- [x] 05-03-PLAN.md — Implementar preservación de metadatos durante la conversión
+
+**Plans:** 3 plans
+
+Plans:
+- [x] 05-01-PLAN.md — Crear AudioFormatConverter class con soporte para MP3, WAV, OGG, AAC, FLAC y detección automática de formato
+- [x] 05-02-PLAN.md — Implementar comando /convert_audio con selección de formato vía teclado inline
+- [x] 05-03-PLAN.md — Implementar preservación de metadatos durante la conversión
 
 ---
 
@@ -112,6 +119,13 @@ Plans:
 3. Usuario puede usar comando /equalize para ajustar 3 bandas: bass, mid, treble
 4. Parámetros de intensidad son ajustables (ej: nivel 1-10 o porcentaje)
 5. Procesamiento aplica filtros ffmpeg apropiados sin distorsión excesiva
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Crear AudioEnhancer class con bass boost, treble boost y ecualizador de 3 bandas
+- [ ] 06-02-PLAN.md — Implementar comandos /bass_boost y /treble_boost con selección de intensidad
+- [ ] 06-03-PLAN.md — Implementar comando /equalize con interfaz interactiva de 3 bandas
 
 ---
 
@@ -143,10 +157,14 @@ Plans:
 | 3. Voice Notes & VMP | v2.0 | 3/3 | Complete | 2026-02-18 |
 | 4. Audio Split/Join | v2.0 | 3/3 | Complete | 2026-02-18 |
 | 5. Audio Format Conversion | v2.0 | 3/3 | Complete | 2026-02-19 |
-| 6. Audio Enhancement | v2.0 | 0/4 | Pending | — |
+| 6. Audio Enhancement | v2.0 | 0/3 | Planned | — |
 | 7. Audio Effects | v2.0 | 0/4 | Pending | — |
 
 **Coverage:** 21/21 v2.0 requirements mapped ✓
+
+---
+
+*Last updated: 2026-02-19 — Phase 6 planned*
 
 ---
 
