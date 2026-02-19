@@ -8,10 +8,10 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 
 ## Current Position
 
-Phase: 4 (completed)
-Plan: 03 (completed)
-Status: Audio split/join command handlers implemented - Phase 4 complete
-Last activity: 2026-02-18 — Plan 04-03 completed (Audio split/join handlers)
+Phase: 05-audio-format-conversion
+Plan: 01 (completed)
+Status: Audio format conversion infrastructure complete
+Last activity: 2026-02-19 — Plan 05-01 completed (AudioFormatConverter class)
 
 ## Progress
 
@@ -21,7 +21,7 @@ v2.0 Navaja Suiza de Audio
 
 Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
-Phase 5: Audio Format Conversion               [░░░░░░░░░░] 0%
+Phase 5: Audio Format Conversion               [██░░░░░░░░] 33% (1/3 plans)
 Phase 6: Audio Enhancement                     [░░░░░░░░░░] 0%
 Phase 7: Audio Effects                         [░░░░░░░░░░] 0%
 ```
@@ -78,6 +78,10 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
   - handle_split_audio_command: /split_audio command for splitting audio files
   - handle_join_audio_start/done/cancel: /join_audio command for joining audio files
   - handle_join_audio_file: Collects audio files during join session
+- Plan 05-01: Audio Format Conversion Infrastructure — COMPLETED (2026-02-19)
+  - AudioFormatConverter: Convert between MP3, WAV, OGG, AAC, FLAC
+  - detect_audio_format: Automatic format detection using ffprobe
+  - AudioFormatConversionError: Error handling for format conversion
 
 ## Decisions Made
 
@@ -89,6 +93,9 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 6. **Handler order matters** — VIDEO → VOICE → AUDIO for proper filter matching
 7. **Voice file extension .oga** — Telegram uses .oga for voice messages (OGG Opus)
 8. **Shared /done and /cancel commands** — Route based on session state (video first, then audio)
+- [Phase 05-audio-format-conversion]: Error handling follows existing pattern: Spanish messages, English logging
+- [Phase 05-audio-format-conversion]: Format detection uses ffprobe format_name field for reliability
+- [Phase 05-audio-format-conversion]: Codec settings optimized: MP3 at 192k (quality 2), FLAC compression level 5
 
 ## Blockers
 
@@ -96,7 +103,7 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 
 ## Next Actions
 
-1. Phase 5: Audio Format Conversion — Plan 05-01
+1. Phase 5: Audio Format Conversion — Plan 05-02
 
 
 ## Project Reference
@@ -109,10 +116,11 @@ See: .planning/phases/03-voice-notes-voice-message-processing/03-03-SUMMARY.md
 See: .planning/phases/04-audio-split-join/04-01-SUMMARY.md
 See: .planning/phases/04-audio-split-join/04-02-SUMMARY.md
 See: .planning/phases/04-audio-split-join/04-03-SUMMARY.md
+See: .planning/phases/05-audio-format-conversion/05-01-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
 **Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
 
 ---
 
-*Last updated: 2026-02-18 after completing Plan 04-03 (Phase 4 complete)*
+*Last updated: 2026-02-19 after completing Plan 05-01 (Audio Format Conversion Infrastructure)*
