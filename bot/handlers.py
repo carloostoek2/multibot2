@@ -171,10 +171,13 @@ async def _process_video_with_timeout(
 
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle video messages by converting them to video notes.
+    """Handle video messages by showing an inline menu with available actions.
 
-    Downloads the video, processes it to 1:1 square format,
-    and sends it back as a circular video note.
+    When a user sends a video, displays an inline keyboard with options:
+    - Nota de Video: Convert to circular video note
+    - Extraer Audio: Extract audio from video
+    - Convertir Formato: Convert video to different format
+    - Dividir Video: Split video into segments
 
     Args:
         update: Telegram update object
@@ -184,7 +187,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] Video received from user {user_id}")
 
-    # Validate file size before downloading
+    # Validate file size before showing menu
     video = update.message.video
     if video.file_size:
         logger.debug(f"[{correlation_id}] Video file size: {video.file_size} bytes")
@@ -194,53 +197,17 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text(error_msg)
             return
 
-    # Send "processing" message to user
-    processing_message = None
-    try:
-        processing_message = await update.message.reply_text(
-            "Procesando tu video... "
-        )
-    except Exception as e:
-        logger.warning(f"[{correlation_id}] Could not send processing message to user {user_id}: {e}")
+    # Store file info for callback handler
+    context.user_data["video_menu_file_id"] = video.file_id
+    context.user_data["video_menu_correlation_id"] = correlation_id
 
-    # Use TempManager as context manager for automatic cleanup
-    with TempManager() as temp_mgr:
-        try:
-            await _process_video_with_timeout(update, temp_mgr, user_id, correlation_id)
-
-            # Delete processing message on success
-            if processing_message:
-                try:
-                    await processing_message.delete()
-                except Exception as e:
-                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
-
-        except (DownloadError, FFmpegError, ProcessingTimeoutError, ValidationError) as e:
-            # Handle known processing errors
-            logger.error(f"[{correlation_id}] Processing error: {e}")
-            await handle_processing_error(update, e, user_id)
-
-            # Delete processing message on error
-            if processing_message:
-                try:
-                    await processing_message.delete()
-                except Exception as e:
-                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
-
-        except Exception as e:
-            # Handle unexpected errors
-            logger.exception(f"[{correlation_id}] Unexpected error processing video for user {user_id}: {e}")
-            await handle_processing_error(update, e, user_id)
-
-            # Delete processing message on error
-            if processing_message:
-                try:
-                    await processing_message.delete()
-                except Exception as e:
-                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
-
-        # TempManager cleanup happens automatically on context exit (finally behavior)
-        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
+    # Show inline menu
+    reply_markup = _get_video_menu_keyboard()
+    await update.message.reply_text(
+        "Video recibido. Selecciona una acción:",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Video menu displayed to user {user_id}")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
