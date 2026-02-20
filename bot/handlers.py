@@ -3990,7 +3990,7 @@ async def _handle_pipeline_apply(
                 raise ValidationError(error_msg)
 
             # Check disk space before processing (estimate based on number of effects)
-            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(audio_size_mb * (1 + len(pipeline_effects) * 0.5)))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
