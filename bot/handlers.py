@@ -2297,6 +2297,7 @@ async def handle_bass_boost_command(update: Update, context: ContextTypes.DEFAUL
             InlineKeyboardButton("9", callback_data="bass:9"),
             InlineKeyboardButton("10", callback_data="bass:10"),
         ],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -2359,6 +2360,7 @@ async def handle_treble_boost_command(update: Update, context: ContextTypes.DEFA
             InlineKeyboardButton("9", callback_data="treble:9"),
             InlineKeyboardButton("10", callback_data="treble:10"),
         ],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
