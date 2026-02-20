@@ -38,7 +38,8 @@ from bot.handlers import (
     handle_normalize_command, handle_normalize_selection,
     handle_effects_command, handle_pipeline_builder,
     handle_audio_menu_callback, handle_audio_menu_format_selection,
-    handle_video_menu_callback, handle_video_format_selection
+    handle_video_menu_callback, handle_video_format_selection,
+    handle_cancel_callback, handle_back_callback
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -97,6 +98,10 @@ def main() -> None:
 
     # Callback handlers - ordered by pattern specificity
     # More specific patterns should be registered before general ones
+
+    # Navigation handlers - must be first to catch cancel/back before other patterns
+    application.add_handler(CallbackQueryHandler(handle_cancel_callback, pattern="^cancel$"))
+    application.add_handler(CallbackQueryHandler(handle_back_callback, pattern="^back:"))
 
     # Callback handler for format selection
     application.add_handler(CallbackQueryHandler(handle_format_selection, pattern="^format:"))
