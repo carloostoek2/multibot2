@@ -6,7 +6,7 @@
 ## Milestones
 
 - ✅ **v1.0 MVP** — Phases 1-2 (shipped 2026-02-14)
-- 🚧 **v2.0 Navaja Suiza de Audio** — Phases 3-7 (in progress)
+- 🚧 **v2.0 Navaja Suiza de Audio** — Phases 3-8 (in progress)
 
 ---
 
@@ -19,6 +19,7 @@
 | 5 | Audio Format Conversion | AFC-01, AFC-02, AFC-03 | Usuarios pueden convertir archivos de audio entre múltiples formatos |
 | 6 | Audio Enhancement | AE-01, AE-02, AE-03, AE-04 | Usuarios pueden aplicar mejoras de audio: bass boost, treble boost, y ecualización |
 | 7 | Audio Effects | AFX-01, AFX-02, AFX-03, AFX-04 | Usuarios pueden aplicar efectos profesionales: reducción de ruido, compresión, normalización |
+| 8 | Interfaz de usuario con menú inline | UI-01, UI-02, UI-03 | Usuarios pueden acceder a todas las funcionalidades vía menú inline contextual según tipo de archivo |
 
 ---
 
@@ -147,6 +148,32 @@ Plans:
 
 ---
 
+## Phase 8: Interfaz de usuario con menú inline para archivos de video y audio
+
+**Goal:** Usuarios pueden acceder a todas las funcionalidades vía menú inline contextual según tipo de archivo, eliminando la necesidad de aprender comandos.
+
+**Requirements:** UI-01, UI-02, UI-03
+
+**Dependencies:** Phases 1-7 (todas las funcionalidades de video y audio deben estar implementadas)
+
+**Success Criteria:**
+
+1. Al recibir un archivo de video, el bot presenta automáticamente un menú inline con opciones disponibles para video (nota de video, extraer audio, convertir formato, etc.)
+2. Al recibir un archivo de audio, el bot presenta automáticamente un menú inline con opciones disponibles para audio (voice note, convertir formato, efectos, mejora, etc.)
+3. El menú es contextual y solo muestra opciones relevantes para el tipo de archivo recibido
+4. No se requieren comandos para acceder a las funcionalidades principales
+5. Los comandos existentes siguen funcionando para usuarios avanzados (compatibilidad hacia atrás)
+
+**Plans:** 4 plans
+
+Plans:
+- [x] 08-01-PLAN.md — Implementar menú inline para archivos de video con opciones: nota de video, extraer audio, convertir formato, dividir video
+- [x] 08-02-PLAN.md — Implementar menú inline para archivos de audio con opciones: nota de voz, convertir formato, efectos (bass/treble/ecualizar), mejoras (denoise/compress/normalize), pipeline
+- [x] 08-03-PLAN.md — Registrar handlers de callback en main.py y actualizar imports, asegurando compatibilidad con comandos existentes
+- [x] 08-04-PLAN.md — Agregar navegación (Cancelar/Volver) a todos los menús inline de múltiples pasos
+
+---
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -158,13 +185,14 @@ Plans:
 | 4. Audio Split/Join | v2.0 | 3/3 | Complete | 2026-02-18 |
 | 5. Audio Format Conversion | v2.0 | 3/3 | Complete | 2026-02-19 |
 | 6. Audio Enhancement | v2.0 | 3/3 | Complete | 2026-02-19 |
-| 7. Audio Effects | v2.0 | 0/4 | Pending | — |
+| 7. Audio Effects | v2.0 | 4/4 | Complete | 2026-02-20 |
+| 8. Interfaz de usuario con menú inline | v2.0 | 4/4 | Complete | 2026-02-20 |
 
-**Coverage:** 21/21 v2.0 requirements mapped ✓
+**Coverage:** 21/21 v2.0 requirements mapped ✓ (+ 3 UI requirements)
 
 ---
 
-*Last updated: 2026-02-19 — Phase 6 complete*
+*Last updated: 2026-02-20 — Phase 8 complete with 4 plans*
 
 ---
 
