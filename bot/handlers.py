@@ -3348,3 +3348,241 @@ async def handle_effect_selection(update: Update, context: ContextTypes.DEFAULT_
                 logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
 
         # TempManager cleanup happens automatically on context exit
+        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
+
+
+# =============================================================================
+# Normalize Handler
+# =============================================================================
+
+
+async def handle_normalize_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /normalize command to apply loudness normalization.
+
+    Usage: /normalize (when replying to an audio or with audio attached)
+    Shows inline keyboard with normalization preset options for user to select.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Normalize command received from user {user_id}")
+
+    # Get audio from message or reply
+    audio, is_reply = await _get_audio_from_message(update)
+
+    if not audio:
+        await update.message.reply_text(
+            "Envía /normalize respondiendo a un archivo de audio o adjunta el audio al mensaje."
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Store file_id in context for later retrieval
+    context.user_data["effect_audio_file_id"] = audio.file_id
+    context.user_data["effect_audio_correlation_id"] = correlation_id
+    context.user_data["effect_type"] = "normalize"
+
+    # Create inline keyboard with normalization presets (1 per row for clarity)
+    keyboard = [
+        [
+            InlineKeyboardButton("Música/General (-14 LUFS)", callback_data="normalize:music"),
+        ],
+        [
+            InlineKeyboardButton("Podcast/Voz (-16 LUFS)", callback_data="normalize:podcast"),
+        ],
+        [
+            InlineKeyboardButton("Streaming/Broadcast (-23 LUFS)", callback_data="normalize:streaming"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Selecciona el perfil de normalización:\n\n"
+        "La normalización ajusta el volumen al estándar EBU R128.",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Normalization preset keyboard sent to user {user_id}")
+
+
+async def handle_normalize_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle normalization preset selection callback from inline keyboard.
+
+    Downloads the audio, applies loudness normalization with the selected preset,
+    and sends back the normalized audio.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data (e.g., "normalize:music", "normalize:podcast", "normalize:streaming")
+    callback_data = query.data
+    if not callback_data or not callback_data.startswith("normalize:"):
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 2:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    preset = parts[1]
+
+    # Map preset to target LUFS value
+    preset_map = {
+        "music": (-14.0, "Música/General", "reproducción general"),
+        "podcast": (-16.0, "Podcast/Voz", "contenido de voz"),
+        "streaming": (-23.0, "Streaming/Broadcast", "plataformas de streaming"),
+    }
+
+    if preset not in preset_map:
+        logger.warning(f"Invalid normalization preset: {preset}")
+        await query.edit_message_text("Error: perfil de normalización inválido.")
+        return
+
+    target_lufs, preset_name, use_case = preset_map[preset]
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("effect_audio_file_id")
+    correlation_id = context.user_data.get("effect_audio_correlation_id", str(uuid.uuid4())[:8])
+    stored_effect_type = context.user_data.get("effect_type")
+
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    # Verify effect_type matches stored type
+    if stored_effect_type and stored_effect_type != "normalize":
+        logger.warning(f"[{correlation_id}] Mismatch: stored={stored_effect_type}, callback=normalize")
+
+    logger.info(f"[{correlation_id}] Normalization preset '{preset}' ({target_lufs} LUFS) selected by user {user_id}")
+
+    # Update message to show processing
+    try:
+        await query.edit_message_text(f"Normalizando audio a {preset_name} ({target_lufs} LUFS)...")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    # Process with TempManager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_{user_id}_{correlation_id}.audio"
+            output_filename = f"normalized_{user_id}_{correlation_id}.mp3"
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download audio file
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Audio downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Apply normalization with timeout
+            logger.info(f"[{correlation_id}] Applying normalization ({target_lufs} LUFS) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(input_path), str(output_path))
+
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.normalize, target_lufs),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Normalization failed for user {user_id}")
+                    raise AudioEffectsError("No pude normalizar el audio")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Normalization timed out for user {user_id}")
+                raise ProcessingTimeoutError("La normalización tardó demasiado") from e
+
+            # Send normalized audio
+            logger.info(f"[{correlation_id}] Sending normalized audio to user {user_id}")
+            try:
+                with open(output_path, "rb") as audio_file:
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=audio_file,
+                        filename=f"normalized.mp3",
+                        title=f"Audio normalizado ({preset_name})"
+                    )
+                logger.info(f"[{correlation_id}] Normalized audio sent successfully to user {user_id}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send normalized audio to user {user_id}: {e}")
+                raise
+
+            # Update message on success
+            try:
+                await query.edit_message_text(
+                    f"¡Listo! Audio normalizado a {preset_name} ({target_lufs} LUFS).\n\n"
+                    f"El volumen ahora está optimizado para {use_case}."
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update final message: {e}")
+
+            # Clean up user_data
+            context.user_data.pop("effect_audio_file_id", None)
+            context.user_data.pop("effect_audio_correlation_id", None)
+            context.user_data.pop("effect_type", None)
+
+        except (DownloadError, ValidationError, AudioEffectsError, ProcessingTimeoutError) as e:
+            # Handle known processing errors
+            logger.error(f"[{correlation_id}] Processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text(f"Error: {str(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        except Exception as e:
+            # Handle unexpected errors
+            logger.exception(f"[{correlation_id}] Unexpected error normalizing audio for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        # TempManager cleanup happens automatically on context exit
+        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
