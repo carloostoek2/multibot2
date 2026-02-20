@@ -3004,6 +3004,7 @@ async def handle_denoise_command(update: Update, context: ContextTypes.DEFAULT_T
             InlineKeyboardButton("9", callback_data="denoise:9"),
             InlineKeyboardButton("10", callback_data="denoise:10"),
         ],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
