@@ -2582,6 +2582,10 @@ def _get_video_format_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("MKV", callback_data="video_format:mkv"),
             InlineKeyboardButton("WEBM", callback_data="video_format:webm"),
         ],
+        [
+            InlineKeyboardButton("← Volver", callback_data="back:video"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
