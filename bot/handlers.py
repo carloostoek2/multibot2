@@ -397,7 +397,7 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            video_size_mb = input_path.stat().st_size / (1024 * 1024)
+            video_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(video_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -535,7 +535,7 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            video_size_mb = input_path.stat().st_size / (1024 * 1024)
+            video_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(video_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -741,7 +741,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            video_size_mb = input_path.stat().st_size / (1024 * 1024)
+            video_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(video_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -1011,7 +1011,7 @@ async def handle_split_audio_command(update: Update, context: ContextTypes.DEFAU
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(audio_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -2307,7 +2307,7 @@ async def handle_format_selection(update: Update, context: ContextTypes.DEFAULT_
                 logger.warning(f"[{correlation_id}] Could not detect input format for user {user_id}")
 
             # Check disk space before processing
-            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(audio_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -2603,7 +2603,7 @@ async def handle_intensity_selection(update: Update, context: ContextTypes.DEFAU
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(audio_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -2950,7 +2950,7 @@ async def _handle_equalizer_apply(
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(audio_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -3273,7 +3273,7 @@ async def handle_effect_selection(update: Update, context: ContextTypes.DEFAULT_
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(audio_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
@@ -3509,7 +3509,7 @@ async def handle_normalize_selection(update: Update, context: ContextTypes.DEFAU
                 raise ValidationError(error_msg)
 
             # Check disk space before processing
-            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
             required_space = estimate_required_space(int(audio_size_mb))
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
