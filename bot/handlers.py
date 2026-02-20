@@ -3148,3 +3148,201 @@ async def handle_compress_command(update: Update, context: ContextTypes.DEFAULT_
         reply_markup=reply_markup
     )
     logger.info(f"[{correlation_id}] Compression ratio selection keyboard sent to user {user_id}")
+
+
+async def handle_effect_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle effect selection callback from inline keyboard.
+
+    Downloads the audio, applies the selected effect (denoise or compress),
+    and sends back the processed audio.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data (e.g., "denoise:5" or "compress:medium")
+    callback_data = query.data
+    if not callback_data or ":" not in callback_data:
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 2:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    effect_type = parts[0]
+    parameter = parts[1]
+
+    if effect_type not in ("denoise", "compress"):
+        logger.warning(f"Invalid effect type: {effect_type}")
+        await query.edit_message_text("Error: tipo de efecto inválido.")
+        return
+
+    # Validate and convert parameter
+    if effect_type == "denoise":
+        try:
+            strength = int(parameter)
+            if strength < 1 or strength > 10:
+                logger.warning(f"Invalid denoise strength: {strength}")
+                await query.edit_message_text("Error: intensidad debe estar entre 1 y 10.")
+                return
+        except ValueError:
+            logger.warning(f"Invalid denoise strength value: {parameter}")
+            await query.edit_message_text("Error: intensidad inválida.")
+            return
+    else:  # compress
+        preset_map = {
+            "light": (2.0, "ligera"),
+            "medium": (4.0, "media"),
+            "heavy": (8.0, "fuerte"),
+            "extreme": (12.0, "extrema"),
+        }
+        if parameter not in preset_map:
+            logger.warning(f"Invalid compress preset: {parameter}")
+            await query.edit_message_text("Error: nivel de compresión inválido.")
+            return
+        ratio, preset_name = preset_map[parameter]
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("effect_audio_file_id")
+    correlation_id = context.user_data.get("effect_audio_correlation_id", str(uuid.uuid4())[:8])
+    stored_effect_type = context.user_data.get("effect_type")
+
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    # Verify effect_type matches stored type
+    if stored_effect_type and stored_effect_type != effect_type:
+        logger.warning(f"[{correlation_id}] Mismatch: stored={stored_effect_type}, callback={effect_type}")
+
+    # Update message to show processing
+    if effect_type == "denoise":
+        processing_text = f"Aplicando reducción de ruido (intensidad {strength})..."
+        effect_name = "reducción de ruido"
+        success_text = f"¡Listo! Reducción de ruido aplicada (intensidad {strength}/10)."
+    else:
+        processing_text = f"Aplicando compresión ({preset_name})..."
+        effect_name = "compresión"
+        success_text = f"¡Listo! Compresión aplicada (nivel: {preset_name})."
+
+    logger.info(f"[{correlation_id}] {effect_name.capitalize()} selected by user {user_id}")
+
+    try:
+        await query.edit_message_text(processing_text)
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    # Process with TempManager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_{user_id}_{correlation_id}.audio"
+            output_filename = f"effect_{user_id}_{correlation_id}.mp3"
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download audio file
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Audio downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Apply effect with timeout
+            logger.info(f"[{correlation_id}] Applying {effect_name} for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(input_path), str(output_path))
+
+                if effect_type == "denoise":
+                    await asyncio.wait_for(
+                        loop.run_in_executor(None, effects.denoise, float(strength)),
+                        timeout=config.PROCESSING_TIMEOUT
+                    )
+                else:  # compress
+                    await asyncio.wait_for(
+                        loop.run_in_executor(None, effects.compress, ratio, -20.0),
+                        timeout=config.PROCESSING_TIMEOUT
+                    )
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Audio effect timed out for user {user_id}")
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            # Send processed audio
+            logger.info(f"[{correlation_id}] Sending processed audio to user {user_id}")
+            try:
+                with open(output_path, "rb") as audio_file:
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=audio_file,
+                        filename=f"{effect_type}_audio.mp3",
+                        title=f"Audio con {effect_name.capitalize()}"
+                    )
+                logger.info(f"[{correlation_id}] Processed audio sent successfully to user {user_id}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send processed audio to user {user_id}: {e}")
+                raise
+
+            # Update message on success
+            try:
+                await query.edit_message_text(success_text)
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update final message: {e}")
+
+            # Clean up user_data
+            context.user_data.pop("effect_audio_file_id", None)
+            context.user_data.pop("effect_audio_correlation_id", None)
+            context.user_data.pop("effect_type", None)
+
+        except (DownloadError, ValidationError, AudioEffectsError, ProcessingTimeoutError) as e:
+            # Handle known processing errors
+            logger.error(f"[{correlation_id}] Processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text(f"Error: {str(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        except Exception as e:
+            # Handle unexpected errors
+            logger.exception(f"[{correlation_id}] Unexpected error applying effect for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        # TempManager cleanup happens automatically on context exit
