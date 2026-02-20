@@ -8,10 +8,10 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 
 ## Current Position
 
-Phase: 07-audio-effects
-Plan: 04 (completed)
-Status: Effects Pipeline Handler complete - Phase 7 COMPLETE
-Last activity: 2026-02-20 — Plan 07-04 completed (Effects Pipeline Handler)
+Phase: 08-interfaz-usuario-menu-inline
+Plan: 01 (completed)
+Status: Video Inline Menu complete - Phase 8 IN PROGRESS
+Last activity: 2026-02-20 — Plan 08-01 completed (Video Inline Menu)
 
 ## Progress
 
@@ -40,6 +40,10 @@ Phase 7: Audio Effects                         [██████████] 
 - 5 phases (3-7)
 - 21 requirements mapped
 - Focus: Procesamiento completo de audio
+
+### Roadmap Evolution
+
+- Phase 8 added: Interfaz de usuario con menú inline — Menú contextual automático que detecta tipo de archivo (video/audio) y presenta opciones disponibles sin necesidad de aprender comandos
 
 **Phase 3 Progress:**
 - Plan 03-01: Audio Processing Infrastructure — COMPLETED
@@ -125,6 +129,11 @@ Phase 7: Audio Effects                         [██████████] 
   - handle_pipeline_builder: Callback handler for add/preview/apply/cancel actions
   - _handle_pipeline_apply: Process audio with chained AudioEffects methods
   - Support for chaining denoise, compress, and normalize effects in sequence
+- Plan 08-01: Video Inline Menu — COMPLETED (2026-02-20)
+  - _get_video_menu_keyboard(): Inline menu with 4 video action options
+  - handle_video_menu_callback: Routes video actions (videonote, extract_audio, convert, split)
+  - handle_video_format_selection: Handles video format and audio extraction format selection
+  - Context storage pattern for file_id and correlation_id across callbacks
 
 ## Decisions Made
 
@@ -164,8 +173,9 @@ Phase 7: Audio Effects                         [██████████] 
 
 ## Next Actions
 
-1. Phase 7: Audio Effects — COMPLETE (all 3 plans done)
-2. Consider next phase based on ROADMAP.md priorities
+1. Phase 8: Interfaz de usuario con menú inline — IN PROGRESS
+2. Plan 08-02: Audio Inline Menu — COMPLETED
+3. Continue with Phase 8 plans or proceed to next phase
 
 ## Project Reference
 
@@ -193,4 +203,4 @@ See: .planning/phases/07-audio-effects/07-04-SUMMARY.md
 
 ---
 
-*Last updated: 2026-02-20 after completing Plan 07-04 (Effects Pipeline Handler)*
+*Last updated: 2026-02-20 after completing Plan 08-01 (Video Inline Menu)*
