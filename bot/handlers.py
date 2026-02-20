@@ -2654,6 +2654,7 @@ def _get_equalizer_keyboard(bass: int, mid: int, treble: int) -> InlineKeyboardM
         [
             InlineKeyboardButton("Reset", callback_data="eq_reset_all"),
             InlineKeyboardButton("Aplicar", callback_data="eq_apply"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
