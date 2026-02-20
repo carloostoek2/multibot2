@@ -3063,6 +3063,7 @@ async def handle_compress_command(update: Update, context: ContextTypes.DEFAULT_
             InlineKeyboardButton("Compresión fuerte", callback_data="compress:heavy"),
             InlineKeyboardButton("Compresión extrema", callback_data="compress:extreme"),
         ],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
