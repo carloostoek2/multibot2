@@ -183,7 +183,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         context: Telegram context object containing the error
     """
     error = context.error
-    user_id = update.effective_user.id if update.effective_user else "unknown"
+    user_id = update.effective_user.id if update and update.effective_user else "unknown"
 
     # Determine user-friendly message based on error type
     user_message = DEFAULT_ERROR_MESSAGE
