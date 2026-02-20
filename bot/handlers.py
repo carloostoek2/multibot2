@@ -2078,6 +2078,7 @@ async def handle_convert_audio_command(update: Update, context: ContextTypes.DEF
             InlineKeyboardButton("AAC", callback_data="format:aac"),
             InlineKeyboardButton("FLAC", callback_data="format:flac"),
         ],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
