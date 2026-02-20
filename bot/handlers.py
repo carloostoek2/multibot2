@@ -2601,6 +2601,10 @@ def _get_video_audio_format_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("WAV", callback_data="video_audio_format:wav"),
             InlineKeyboardButton("OGG", callback_data="video_audio_format:ogg"),
         ],
+        [
+            InlineKeyboardButton("← Volver", callback_data="back:video"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
