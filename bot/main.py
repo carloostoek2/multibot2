@@ -95,6 +95,9 @@ def main() -> None:
     # Audio format conversion command
     application.add_handler(CommandHandler("convert_audio", handle_convert_audio_command))
 
+    # Callback handlers - ordered by pattern specificity
+    # More specific patterns should be registered before general ones
+
     # Callback handler for format selection
     application.add_handler(CallbackQueryHandler(handle_format_selection, pattern="^format:"))
 
