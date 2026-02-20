@@ -9,9 +9,9 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 ## Current Position
 
 Phase: 07-audio-effects
-Plan: 01 (completed)
-Status: Audio Effects Infrastructure complete
-Last activity: 2026-02-20 — Plan 07-01 completed (Audio Effects Infrastructure)
+Plan: 02 (completed)
+Status: Denoise and Compress Handlers complete
+Last activity: 2026-02-20 — Plan 07-02 completed (Denoise and Compress Handlers)
 
 ## Progress
 
@@ -23,7 +23,7 @@ Phase 3: Voice Notes & Voice Message Processing [██████████]
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
 Phase 5: Audio Format Conversion               [██████████] 100% (3/3 plans) ✓
 Phase 6: Audio Enhancement                     [██████████] 100% (3/3 plans) ✓
-Phase 7: Audio Effects                         [███░░░░░░░] 33% (1/3 plans) ✓
+Phase 7: Audio Effects                         [██████░░░░] 67% (2/3 plans) ✓
 ```
 
 ## Accumulated Context
@@ -110,6 +110,11 @@ Phase 7: Audio Effects                         [███░░░░░░░] 
   - compress(): Dynamic range compression using acompressor filter
   - normalize(): EBU R128 loudness normalization using loudnorm filter
   - AudioEffectsError: Error handling for audio effects
+- Plan 07-02: Denoise and Compress Handlers — COMPLETED (2026-02-20)
+  - handle_denoise_command: /denoise command with strength keyboard (1-10)
+  - handle_compress_command: /compress command with ratio presets (light/medium/heavy/extreme)
+  - handle_effect_selection: Unified callback handler for both effects
+  - Integration with AudioEffects class for processing
 
 ## Decisions Made
 
@@ -146,7 +151,7 @@ Phase 7: Audio Effects                         [███░░░░░░░] 
 
 ## Next Actions
 
-1. Phase 7: Audio Effects — Plan 07-02 (Denoise Handler)
+1. Phase 7: Audio Effects — Plan 07-03 (Normalize Handler)
 
 ## Project Reference
 
@@ -164,10 +169,12 @@ See: .planning/phases/05-audio-format-conversion/05-03-SUMMARY.md
 See: .planning/phases/06-audio-enhancement/06-01-SUMMARY.md
 See: .planning/phases/06-audio-enhancement/06-02-SUMMARY.md
 See: .planning/phases/06-audio-enhancement/06-03-SUMMARY.md
+See: .planning/phases/07-audio-effects/07-01-SUMMARY.md
+See: .planning/phases/07-audio-effects/07-02-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
 **Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
 
 ---
 
-*Last updated: 2026-02-20 after completing Plan 07-01 (Audio Effects Infrastructure)*
+*Last updated: 2026-02-20 after completing Plan 07-02 (Denoise and Compress Handlers)*
