@@ -3601,6 +3601,10 @@ async def handle_audio_menu_callback(update: Update, context: ContextTypes.DEFAU
                 InlineKeyboardButton("AAC", callback_data="audio_menu_format:aac"),
                 InlineKeyboardButton("FLAC", callback_data="audio_menu_format:flac"),
             ],
+            [
+                InlineKeyboardButton("← Volver", callback_data="back:audio"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
