@@ -3531,6 +3531,356 @@ def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+async def handle_audio_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio menu selection callbacks from inline keyboard.
+
+    Routes to appropriate action based on user selection:
+    - voicenote: Convert to voice note
+    - convert: Show format selection
+    - bass_boost/treble_boost/equalize: Show enhancement options
+    - denoise/compress/normalize: Show effect options
+    - effects: Show pipeline builder
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data (format: "audio_action:<action>")
+    callback_data = query.data
+    if not callback_data or not callback_data.startswith("audio_action:"):
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    action = callback_data.split(":")[1]
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("audio_menu_file_id")
+    correlation_id = context.user_data.get("audio_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    logger.info(f"[{correlation_id}] Audio menu action '{action}' selected by user {user_id}")
+
+    # Route to appropriate action
+    if action == "voicenote":
+        await _handle_audio_menu_voicenote(update, context, file_id, correlation_id)
+
+    elif action == "convert":
+        # Store action and show format selection
+        context.user_data["audio_menu_action"] = "convert"
+        keyboard = [
+            [
+                InlineKeyboardButton("MP3", callback_data="audio_menu_format:mp3"),
+                InlineKeyboardButton("WAV", callback_data="audio_menu_format:wav"),
+                InlineKeyboardButton("OGG", callback_data="audio_menu_format:ogg"),
+            ],
+            [
+                InlineKeyboardButton("AAC", callback_data="audio_menu_format:aac"),
+                InlineKeyboardButton("FLAC", callback_data="audio_menu_format:flac"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el formato de conversión:",
+            reply_markup=reply_markup
+        )
+
+    elif action == "bass_boost":
+        # Store file info for enhancement handler
+        context.user_data["enhance_audio_file_id"] = file_id
+        context.user_data["enhance_audio_correlation_id"] = correlation_id
+        context.user_data["enhance_type"] = "bass"
+        # Show intensity selection keyboard
+        keyboard = [
+            [
+                InlineKeyboardButton("1", callback_data="bass:1"),
+                InlineKeyboardButton("2", callback_data="bass:2"),
+                InlineKeyboardButton("3", callback_data="bass:3"),
+                InlineKeyboardButton("4", callback_data="bass:4"),
+                InlineKeyboardButton("5", callback_data="bass:5"),
+            ],
+            [
+                InlineKeyboardButton("6", callback_data="bass:6"),
+                InlineKeyboardButton("7", callback_data="bass:7"),
+                InlineKeyboardButton("8", callback_data="bass:8"),
+                InlineKeyboardButton("9", callback_data="bass:9"),
+                InlineKeyboardButton("10", callback_data="bass:10"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona la intensidad del Bass Boost (1-10):",
+            reply_markup=reply_markup
+        )
+
+    elif action == "treble_boost":
+        # Store file info for enhancement handler
+        context.user_data["enhance_audio_file_id"] = file_id
+        context.user_data["enhance_audio_correlation_id"] = correlation_id
+        context.user_data["enhance_type"] = "treble"
+        # Show intensity selection keyboard
+        keyboard = [
+            [
+                InlineKeyboardButton("1", callback_data="treble:1"),
+                InlineKeyboardButton("2", callback_data="treble:2"),
+                InlineKeyboardButton("3", callback_data="treble:3"),
+                InlineKeyboardButton("4", callback_data="treble:4"),
+                InlineKeyboardButton("5", callback_data="treble:5"),
+            ],
+            [
+                InlineKeyboardButton("6", callback_data="treble:6"),
+                InlineKeyboardButton("7", callback_data="treble:7"),
+                InlineKeyboardButton("8", callback_data="treble:8"),
+                InlineKeyboardButton("9", callback_data="treble:9"),
+                InlineKeyboardButton("10", callback_data="treble:10"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona la intensidad del Treble Boost (1-10):",
+            reply_markup=reply_markup
+        )
+
+    elif action == "equalize":
+        # Store file info for equalizer
+        context.user_data["eq_file_id"] = file_id
+        context.user_data["eq_correlation_id"] = correlation_id
+        context.user_data["eq_bass"] = 0
+        context.user_data["eq_mid"] = 0
+        context.user_data["eq_treble"] = 0
+        # Show equalizer keyboard
+        reply_markup = _get_equalizer_keyboard(0, 0, 0)
+        await query.edit_message_text(
+            "Ecualizador de 3 bandas:\n"
+            "🎵 Bass: 0\n"
+            "🎵 Mid: 0\n"
+            "🎵 Treble: 0\n\n"
+            "Ajusta cada banda y presiona Aplicar.",
+            reply_markup=reply_markup
+        )
+
+    elif action == "denoise":
+        # Store file info for effect handler
+        context.user_data["effect_audio_file_id"] = file_id
+        context.user_data["effect_audio_correlation_id"] = correlation_id
+        context.user_data["effect_type"] = "denoise"
+        # Show strength selection keyboard
+        keyboard = [
+            [
+                InlineKeyboardButton("1", callback_data="denoise:1"),
+                InlineKeyboardButton("2", callback_data="denoise:2"),
+                InlineKeyboardButton("3", callback_data="denoise:3"),
+                InlineKeyboardButton("4", callback_data="denoise:4"),
+                InlineKeyboardButton("5", callback_data="denoise:5"),
+            ],
+            [
+                InlineKeyboardButton("6", callback_data="denoise:6"),
+                InlineKeyboardButton("7", callback_data="denoise:7"),
+                InlineKeyboardButton("8", callback_data="denoise:8"),
+                InlineKeyboardButton("9", callback_data="denoise:9"),
+                InlineKeyboardButton("10", callback_data="denoise:10"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona la intensidad de reducción de ruido (1-10):\n\n"
+            "1 = Reducción ligera\n"
+            "10 = Reducción máxima",
+            reply_markup=reply_markup
+        )
+
+    elif action == "compress":
+        # Store file info for effect handler
+        context.user_data["effect_audio_file_id"] = file_id
+        context.user_data["effect_audio_correlation_id"] = correlation_id
+        context.user_data["effect_type"] = "compress"
+        # Show compression preset keyboard
+        keyboard = [
+            [
+                InlineKeyboardButton("Ligera", callback_data="compress:light"),
+                InlineKeyboardButton("Media", callback_data="compress:medium"),
+            ],
+            [
+                InlineKeyboardButton("Fuerte", callback_data="compress:heavy"),
+                InlineKeyboardButton("Extrema", callback_data="compress:extreme"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el nivel de compresión:",
+            reply_markup=reply_markup
+        )
+
+    elif action == "normalize":
+        # Store file info for effect handler
+        context.user_data["effect_audio_file_id"] = file_id
+        context.user_data["effect_audio_correlation_id"] = correlation_id
+        context.user_data["effect_type"] = "normalize"
+        # Show normalization preset keyboard
+        keyboard = [
+            [
+                InlineKeyboardButton("Música", callback_data="normalize:music"),
+            ],
+            [
+                InlineKeyboardButton("Podcast", callback_data="normalize:podcast"),
+            ],
+            [
+                InlineKeyboardButton("Streaming", callback_data="normalize:streaming"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el perfil de normalización:",
+            reply_markup=reply_markup
+        )
+
+    elif action == "effects":
+        # Store file info for pipeline builder
+        context.user_data["pipeline_file_id"] = file_id
+        context.user_data["pipeline_correlation_id"] = correlation_id
+        context.user_data["pipeline_effects"] = []
+        # Show pipeline builder keyboard
+        reply_markup = _get_pipeline_keyboard([])
+        await query.edit_message_text(
+            _format_pipeline_message([]),
+            reply_markup=reply_markup
+        )
+
+    else:
+        logger.warning(f"[{correlation_id}] Unknown audio action: {action}")
+        await query.edit_message_text("Error: acción no reconocida.")
+
+
+async def _handle_audio_menu_voicenote(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+    correlation_id: str
+) -> None:
+    """Handle voice note conversion from audio menu.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        file_id: Telegram file ID of the audio
+        correlation_id: Correlation ID for tracing
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    # Update message to show processing
+    try:
+        await query.edit_message_text("Convirtiendo a nota de voz...")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    # Process with TempManager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_{user_id}_{correlation_id}.audio"
+            output_filename = f"voice_{user_id}_{correlation_id}.ogg"
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download audio file
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Audio downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Convert to voice note with timeout
+            logger.info(f"[{correlation_id}] Converting audio to voice note for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                converter = VoiceNoteConverter(str(input_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, converter.process),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Voice note conversion failed for user {user_id}")
+                    raise VoiceConversionError("No pude convertir el audio a nota de voz")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Voice note conversion timed out for user {user_id}")
+                raise ProcessingTimeoutError("El audio tardó demasiado en procesarse") from e
+
+            # Send as voice note
+            logger.info(f"[{correlation_id}] Sending voice note to user {user_id}")
+            try:
+                with open(output_path, "rb") as voice_file:
+                    await context.bot.send_voice(
+                        chat_id=update.effective_chat.id,
+                        voice=voice_file
+                    )
+                logger.info(f"[{correlation_id}] Voice note sent successfully to user {user_id}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send voice note to user {user_id}: {e}")
+                raise
+
+            # Update message on success
+            try:
+                await query.edit_message_text("¡Listo! Audio convertido a nota de voz.")
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update final message: {e}")
+
+            # Clean up user_data
+            context.user_data.pop("audio_menu_file_id", None)
+            context.user_data.pop("audio_menu_correlation_id", None)
+
+        except (DownloadError, ValidationError, VoiceConversionError, ProcessingTimeoutError) as e:
+            # Handle known processing errors
+            logger.error(f"[{correlation_id}] Processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text(f"Error: {str(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        except Exception as e:
+            # Handle unexpected errors
+            logger.exception(f"[{correlation_id}] Unexpected error converting audio for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+
 # Effects Pipeline Handler
 # =============================================================================
 
