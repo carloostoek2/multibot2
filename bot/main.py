@@ -35,7 +35,8 @@ from bot.handlers import (
     handle_bass_boost_command, handle_treble_boost_command, handle_intensity_selection,
     handle_equalize_command, handle_equalizer_adjustment,
     handle_denoise_command, handle_compress_command, handle_effect_selection,
-    handle_normalize_command, handle_normalize_selection
+    handle_normalize_command, handle_normalize_selection,
+    handle_effects_command, handle_pipeline_builder
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -116,6 +117,12 @@ def main() -> None:
 
     # Callback handler for normalize selection
     application.add_handler(CallbackQueryHandler(handle_normalize_selection, pattern="^normalize:"))
+
+    # Audio effects pipeline command
+    application.add_handler(CommandHandler("effects", handle_effects_command))
+
+    # Callback handler for pipeline builder
+    application.add_handler(CallbackQueryHandler(handle_pipeline_builder, pattern="^pipeline_"))
 
     # /done and /cancel are shared between video join and audio join
     # The handlers check context.user_data to determine which session is active

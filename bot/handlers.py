@@ -266,7 +266,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/equalize - Ecualizador de 3 bandas (bass, mid, treble)\n"
         "/denoise - Reduce el ruido de fondo del audio (intensidad ajustable)\n"
         "/compress - Comprime el rango dinámico del audio (nivel ajustable)\n"
-        "/normalize - Normaliza el volumen del audio (EBU R128)"
+        "/normalize - Normaliza el volumen del audio (EBU R128)\n"
+        "/effects - Aplica múltiples efectos en cadena (pipeline)"
     )
 
 
