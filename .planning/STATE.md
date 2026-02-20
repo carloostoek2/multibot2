@@ -9,9 +9,9 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 ## Current Position
 
 Phase: 08-interfaz-usuario-menu-inline
-Plan: 01 (completed)
-Status: Video Inline Menu complete - Phase 8 IN PROGRESS
-Last activity: 2026-02-20 — Plan 08-01 completed (Video Inline Menu)
+Plan: 03 (completed)
+Status: Phase 8 COMPLETE - All inline menu handlers registered
+Last activity: 2026-02-20 — Plan 08-03 completed (Register Inline Menu Callback Handlers)
 
 ## Progress
 
@@ -134,6 +134,15 @@ Phase 7: Audio Effects                         [██████████] 
   - handle_video_menu_callback: Routes video actions (videonote, extract_audio, convert, split)
   - handle_video_format_selection: Handles video format and audio extraction format selection
   - Context storage pattern for file_id and correlation_id across callbacks
+- Plan 08-02: Audio Inline Menu — COMPLETED (2026-02-20)
+  - _get_audio_menu_keyboard(): Inline menu with 9 audio action options
+  - handle_audio_menu_callback: Routes audio actions (voicenote, convert, effects, etc.)
+  - handle_audio_menu_format_selection: Handles audio format selection from menu
+- Plan 08-03: Register Inline Menu Callback Handlers — COMPLETED (2026-02-20)
+  - All 4 new callback handlers registered in main.py
+  - 10 total callback patterns with no conflicts
+  - Pattern specificity comment added
+  - Help text updated to mention inline menus
 
 ## Decisions Made
 
@@ -173,9 +182,9 @@ Phase 7: Audio Effects                         [██████████] 
 
 ## Next Actions
 
-1. Phase 8: Interfaz de usuario con menú inline — IN PROGRESS
-2. Plan 08-02: Audio Inline Menu — COMPLETED
-3. Continue with Phase 8 plans or proceed to next phase
+1. Phase 8: Interfaz de usuario con menú inline — COMPLETED
+2. All 3 plans completed (08-01, 08-02, 08-03)
+3. Ready to proceed to next phase
 
 ## Project Reference
 
@@ -203,4 +212,4 @@ See: .planning/phases/07-audio-effects/07-04-SUMMARY.md
 
 ---
 
-*Last updated: 2026-02-20 after completing Plan 08-01 (Video Inline Menu)*
+*Last updated: 2026-02-20 after completing Plan 08-03 (Register Inline Menu Callback Handlers)*
