@@ -3326,6 +3326,7 @@ async def handle_normalize_command(update: Update, context: ContextTypes.DEFAULT
         [
             InlineKeyboardButton("Streaming/Broadcast (-23 LUFS)", callback_data="normalize:streaming"),
         ],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
