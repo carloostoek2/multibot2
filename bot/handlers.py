@@ -2694,6 +2694,52 @@ async def handle_intensity_selection(update: Update, context: ContextTypes.DEFAU
 # =============================================================================
 
 
+def _get_video_menu_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for video menu options."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Nota de Video", callback_data="video_action:videonote"),
+            InlineKeyboardButton("Extraer Audio", callback_data="video_action:extract_audio"),
+        ],
+        [
+            InlineKeyboardButton("Convertir Formato", callback_data="video_action:convert"),
+            InlineKeyboardButton("Dividir Video", callback_data="video_action:split"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_video_format_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for video format selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("MP4", callback_data="video_format:mp4"),
+            InlineKeyboardButton("AVI", callback_data="video_format:avi"),
+            InlineKeyboardButton("MOV", callback_data="video_format:mov"),
+        ],
+        [
+            InlineKeyboardButton("MKV", callback_data="video_format:mkv"),
+            InlineKeyboardButton("WEBM", callback_data="video_format:webm"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_video_audio_format_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for audio extraction format selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("MP3", callback_data="video_audio_format:mp3"),
+            InlineKeyboardButton("AAC", callback_data="video_audio_format:aac"),
+        ],
+        [
+            InlineKeyboardButton("WAV", callback_data="video_audio_format:wav"),
+            InlineKeyboardButton("OGG", callback_data="video_audio_format:ogg"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def _get_equalizer_keyboard(bass: int, mid: int, treble: int) -> InlineKeyboardMarkup:
     """Generate inline keyboard for 3-band equalizer.
 
