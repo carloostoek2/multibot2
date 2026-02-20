@@ -135,6 +135,14 @@ class AudioEnhancementError(VideoProcessingError):
         super().__init__(self.message)
 
 
+class AudioEffectsError(VideoProcessingError):
+    """Exception raised when audio effects processing fails."""
+
+    def __init__(self, message: str = "Error aplicando efecto de audio"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -150,6 +158,7 @@ ERROR_MESSAGES = {
     AudioJoinError: "No pude unir los archivos de audio. Verifica que los archivos sean válidos.",
     AudioFormatConversionError: "No pude convertir el formato del audio. Verifica que el formato sea válido.",
     AudioEnhancementError: "No pude aplicar la mejora de audio. Verifica que el archivo sea válido.",
+    AudioEffectsError: "No pude aplicar el efecto de audio. Verifica que el archivo sea válido.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
     ValidationError: "El archivo no es válido. Verifica que sea un video correcto.",
     # Telegram API errors
