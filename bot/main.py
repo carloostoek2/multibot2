@@ -36,7 +36,8 @@ from bot.handlers import (
     handle_equalize_command, handle_equalizer_adjustment,
     handle_denoise_command, handle_compress_command, handle_effect_selection,
     handle_normalize_command, handle_normalize_selection,
-    handle_effects_command, handle_pipeline_builder
+    handle_effects_command, handle_pipeline_builder,
+    handle_audio_menu_callback, handle_audio_menu_format_selection
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -123,6 +124,10 @@ def main() -> None:
 
     # Callback handler for pipeline builder
     application.add_handler(CallbackQueryHandler(handle_pipeline_builder, pattern="^pipeline_"))
+
+    # Audio inline menu handlers
+    application.add_handler(CallbackQueryHandler(handle_audio_menu_callback, pattern="^audio_action:"))
+    application.add_handler(CallbackQueryHandler(handle_audio_menu_format_selection, pattern="^audio_menu_format:"))
 
     # /done and /cancel are shared between video join and audio join
     # The handlers check context.user_data to determine which session is active
