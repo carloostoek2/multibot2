@@ -3637,6 +3637,38 @@ async def handle_normalize_selection(update: Update, context: ContextTypes.DEFAU
 
 
 # =============================================================================
+# Audio Inline Menu Handler
+# =============================================================================
+
+
+def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for audio menu options.
+
+    Returns:
+        InlineKeyboardMarkup with audio action buttons
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("Nota de Voz", callback_data="audio_action:voicenote"),
+            InlineKeyboardButton("Convertir Formato", callback_data="audio_action:convert"),
+        ],
+        [
+            InlineKeyboardButton("Bass Boost", callback_data="audio_action:bass_boost"),
+            InlineKeyboardButton("Treble Boost", callback_data="audio_action:treble_boost"),
+            InlineKeyboardButton("Ecualizar", callback_data="audio_action:equalize"),
+        ],
+        [
+            InlineKeyboardButton("Reducir Ruido", callback_data="audio_action:denoise"),
+            InlineKeyboardButton("Comprimir", callback_data="audio_action:compress"),
+            InlineKeyboardButton("Normalizar", callback_data="audio_action:normalize"),
+        ],
+        [
+            InlineKeyboardButton("Pipeline de Efectos", callback_data="audio_action:effects"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 # Effects Pipeline Handler
 # =============================================================================
 
