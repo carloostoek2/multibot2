@@ -9,9 +9,9 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 ## Current Position
 
 Phase: 07-audio-effects
-Plan: 03 (completed)
-Status: Normalize Handler complete - Phase 7 COMPLETE
-Last activity: 2026-02-20 — Plan 07-03 completed (Normalize Handler)
+Plan: 04 (completed)
+Status: Effects Pipeline Handler complete - Phase 7 COMPLETE
+Last activity: 2026-02-20 — Plan 07-04 completed (Effects Pipeline Handler)
 
 ## Progress
 
@@ -23,7 +23,7 @@ Phase 3: Voice Notes & Voice Message Processing [██████████]
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
 Phase 5: Audio Format Conversion               [██████████] 100% (3/3 plans) ✓
 Phase 6: Audio Enhancement                     [██████████] 100% (3/3 plans) ✓
-Phase 7: Audio Effects                         [██████████] 100% (3/3 plans) ✓
+Phase 7: Audio Effects                         [██████████] 100% (4/4 plans) ✓
 ```
 
 ## Accumulated Context
@@ -120,6 +120,11 @@ Phase 7: Audio Effects                         [██████████] 
   - handle_normalize_selection: Callback handler for preset selection
   - EBU R128 loudness normalization with 3 presets: -14/-16/-23 LUFS
   - Integration with AudioEffects.normalize() for professional loudness normalization
+- Plan 07-04: Effects Pipeline Handler — COMPLETED (2026-02-20)
+  - handle_effects_command: /effects command with pipeline builder interface
+  - handle_pipeline_builder: Callback handler for add/preview/apply/cancel actions
+  - _handle_pipeline_apply: Process audio with chained AudioEffects methods
+  - Support for chaining denoise, compress, and normalize effects in sequence
 
 ## Decisions Made
 
@@ -149,6 +154,9 @@ Phase 7: Audio Effects                         [██████████] 
 - [Phase 07-audio-effects]: Context manager support for automatic cleanup
 - [Phase 07-audio-effects]: afftdn nr parameter maps strength 1-10 to 0.01-0.5 range
 - [Phase 07-audio-effects]: loudnorm uses LRA=11 for general audio (not speech-specific)
+- [Phase 07-audio-effects]: Pipeline state uses "pipeline_" prefix to avoid conflicts with individual effect handlers
+- [Phase 07-audio-effects]: Effects are applied in user-specified order (not auto-optimized)
+- [Phase 07-audio-effects]: Method chaining ensures single ffmpeg execution where possible
 
 ## Blockers
 
@@ -178,10 +186,11 @@ See: .planning/phases/06-audio-enhancement/06-03-SUMMARY.md
 See: .planning/phases/07-audio-effects/07-01-SUMMARY.md
 See: .planning/phases/07-audio-effects/07-02-SUMMARY.md
 See: .planning/phases/07-audio-effects/07-03-SUMMARY.md
+See: .planning/phases/07-audio-effects/07-04-SUMMARY.md
 
 **Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
 **Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
 
 ---
 
-*Last updated: 2026-02-20 after completing Plan 07-03 (Normalize Handler)*
+*Last updated: 2026-02-20 after completing Plan 07-04 (Effects Pipeline Handler)*
