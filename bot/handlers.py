@@ -218,9 +218,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context: Telegram context object
     """
     await update.message.reply_text(
-        "¡Hola! Envíame un video y lo convertiré en una nota de video circular. "
-        "El video debe ser de máximo 60 segundos.\n\n"
-        "Comandos disponibles:\n"
+        "¡Hola! Envíame un video o audio y te mostraré opciones de procesamiento.\n\n"
+        "También puedes usar comandos:\n"
         "/convert <formato> - Convierte un video a otro formato (mp4, avi, mov, mkv, webm)\n"
         "/extract_audio <formato> - Extrae el audio de un video (mp3, aac, wav, ogg)\n"
         "/split [duration|parts] <valor> - Divide un video en segmentos\n"
@@ -4550,3 +4549,349 @@ async def _handle_pipeline_apply(
                 logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
 
         # TempManager cleanup happens automatically on context exit
+
+
+async def handle_video_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle video menu selections from inline keyboard.
+
+    Routes to appropriate action based on user selection:
+    - videonote: Convert video to circular video note
+    - extract_audio: Show format selection for audio extraction
+    - convert: Show format selection for video conversion
+    - split: Show split options or prompt for parameters
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+    correlation_id = context.user_data.get("video_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    # Parse action from callback data (format: video_action:<action>)
+    if not callback_data.startswith("video_action:"):
+        logger.warning(f"[{correlation_id}] Unexpected callback data: {callback_data}")
+        return
+
+    action = callback_data.split(":")[1]
+    logger.info(f"[{correlation_id}] Video menu action selected: {action} by user {user_id}")
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("video_menu_file_id")
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el video. Intenta de nuevo.")
+        return
+
+    if action == "videonote":
+        # Process video to video note
+        await query.edit_message_text("Procesando video a nota de video...")
+
+        with TempManager() as temp_mgr:
+            try:
+                # Generate safe filenames
+                input_filename = f"input_videonote_{user_id}_{correlation_id}.mp4"
+                output_filename = f"videonote_{user_id}_{correlation_id}.mp4"
+
+                input_path = temp_mgr.get_temp_path(input_filename)
+                output_path = temp_mgr.get_temp_path(output_filename)
+
+                # Download video
+                logger.info(f"[{correlation_id}] Downloading video for videonote from user {user_id}")
+                try:
+                    file = await context.bot.get_file(file_id)
+                    await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                    logger.info(f"[{correlation_id}] Video downloaded to {input_path}")
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Failed to download video for user {user_id}: {e}")
+                    raise DownloadError("No pude descargar el video") from e
+
+                # Validate video integrity
+                is_valid, error_msg = validate_video_file(str(input_path))
+                if not is_valid:
+                    logger.warning(f"[{correlation_id}] Video validation failed for user {user_id}: {error_msg}")
+                    raise ValidationError(error_msg)
+
+                # Check disk space
+                video_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
+                required_space = estimate_required_space(int(video_size_mb))
+                has_space, space_error = check_disk_space(required_space)
+                if not has_space:
+                    logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                    raise ValidationError(space_error)
+
+                # Process video with timeout
+                logger.info(f"[{correlation_id}] Processing video to video note for user {user_id}")
+                try:
+                    loop = asyncio.get_event_loop()
+                    success = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            VideoProcessor.process_video,
+                            str(input_path),
+                            str(output_path)
+                        ),
+                        timeout=config.PROCESSING_TIMEOUT
+                    )
+
+                    if not success:
+                        logger.error(f"[{correlation_id}] Video processing failed for user {user_id}")
+                        raise FFmpegError("El procesamiento de video falló")
+
+                except asyncio.TimeoutError as e:
+                    logger.error(f"[{correlation_id}] Video processing timed out for user {user_id}")
+                    raise ProcessingTimeoutError("El video tardó demasiado en procesarse") from e
+
+                # Send as video note
+                logger.info(f"[{correlation_id}] Sending video note to user {user_id}")
+                try:
+                    with open(output_path, "rb") as video_file:
+                        await query.message.reply_video_note(video_note=video_file)
+                    logger.info(f"[{correlation_id}] Video note sent successfully to user {user_id}")
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Failed to send video note to user {user_id}: {e}")
+                    raise
+
+                # Update message to confirm completion
+                await query.edit_message_text("¡Listo! Nota de video enviada.")
+
+                # Clean up context
+                context.user_data.pop("video_menu_file_id", None)
+                context.user_data.pop("video_menu_correlation_id", None)
+
+            except (DownloadError, FFmpegError, ProcessingTimeoutError, ValidationError) as e:
+                logger.error(f"[{correlation_id}] Video note processing error: {e}")
+                await handle_processing_error(update, e, user_id)
+                await query.edit_message_text(f"Error: {str(e)}")
+
+                # Clean up context on error
+                context.user_data.pop("video_menu_file_id", None)
+                context.user_data.pop("video_menu_correlation_id", None)
+
+            except Exception as e:
+                logger.exception(f"[{correlation_id}] Unexpected error processing video note for user {user_id}: {e}")
+                await handle_processing_error(update, e, user_id)
+                await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+                # Clean up context on error
+                context.user_data.pop("video_menu_file_id", None)
+                context.user_data.pop("video_menu_correlation_id", None)
+
+    elif action == "extract_audio":
+        # Store action type and show format selection
+        context.user_data["video_menu_action"] = "extract_audio"
+
+        reply_markup = _get_video_audio_format_keyboard()
+        await query.edit_message_text(
+            "Selecciona el formato de audio:",
+            reply_markup=reply_markup
+        )
+        logger.info(f"[{correlation_id}] Showing audio format selection to user {user_id}")
+
+    elif action == "convert":
+        # Store action type and show format selection
+        context.user_data["video_menu_action"] = "convert"
+
+        reply_markup = _get_video_format_keyboard()
+        await query.edit_message_text(
+            "Selecciona el formato de video:",
+            reply_markup=reply_markup
+        )
+        logger.info(f"[{correlation_id}] Showing video format selection to user {user_id}")
+
+    elif action == "split":
+        # For split, direct user to use the /split command with the video
+        await query.edit_message_text(
+            "Para dividir el video, usa el comando /split respondiendo al video.\n\n"
+            "Ejemplos:\n"
+            "/split duration 30 - Divide en segmentos de 30 segundos\n"
+            "/split parts 5 - Divide en 5 partes iguales"
+        )
+        logger.info(f"[{correlation_id}] Directed user {user_id} to /split command")
+
+        # Clean up context
+        context.user_data.pop("video_menu_file_id", None)
+        context.user_data.pop("video_menu_correlation_id", None)
+
+    else:
+        logger.warning(f"[{correlation_id}] Unknown video menu action: {action}")
+        await query.edit_message_text("Acción no reconocida. Por favor intenta de nuevo.")
+
+        # Clean up context
+        context.user_data.pop("video_menu_file_id", None)
+        context.user_data.pop("video_menu_correlation_id", None)
+
+
+async def handle_video_format_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle video format selection callbacks.
+
+    Processes video conversion or audio extraction based on the
+    previously stored action type and selected format.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+    correlation_id = context.user_data.get("video_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    # Retrieve file_id and action from context
+    file_id = context.user_data.get("video_menu_file_id")
+    action = context.user_data.get("video_menu_action")
+
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el video. Intenta de nuevo.")
+        return
+
+    if not action:
+        logger.error(f"[{correlation_id}] No action found in context for user {user_id}")
+        await query.edit_message_text("Error: acción no encontrada. Intenta de nuevo.")
+        return
+
+    # Parse format from callback data
+    if callback_data.startswith("video_format:"):
+        output_format = callback_data.split(":")[1]
+    elif callback_data.startswith("video_audio_format:"):
+        output_format = callback_data.split(":")[1]
+    else:
+        logger.warning(f"[{correlation_id}] Unexpected callback data: {callback_data}")
+        return
+
+    logger.info(f"[{correlation_id}] Format selected: {output_format} for action: {action} by user {user_id}")
+
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_{action}_{user_id}_{correlation_id}.mp4"
+            input_path = temp_mgr.get_temp_path(input_filename)
+
+            # Download video
+            logger.info(f"[{correlation_id}] Downloading video for {action} from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Video downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download video for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el video") from e
+
+            # Validate video integrity
+            is_valid, error_msg = validate_video_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Video validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space
+            video_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(video_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            if action == "convert":
+                # Process video conversion
+                await query.edit_message_text(f"Convirtiendo video a {output_format.upper()}...")
+
+                output_filename = f"converted_{user_id}_{correlation_id}.{output_format}"
+                output_path = temp_mgr.get_temp_path(output_filename)
+
+                logger.info(f"[{correlation_id}] Converting video to {output_format} for user {user_id}")
+                try:
+                    loop = asyncio.get_event_loop()
+                    converter = FormatConverter(str(input_path), str(output_path))
+                    success = await asyncio.wait_for(
+                        loop.run_in_executor(None, converter.convert, output_format),
+                        timeout=config.PROCESSING_TIMEOUT
+                    )
+
+                    if not success:
+                        logger.error(f"[{correlation_id}] Format conversion failed for user {user_id}")
+                        raise FormatConversionError(f"No pude convertir el video a {output_format.upper()}")
+
+                except asyncio.TimeoutError as e:
+                    logger.error(f"[{correlation_id}] Format conversion timed out for user {user_id}")
+                    raise ProcessingTimeoutError("La conversión tardó demasiado") from e
+
+                # Send converted video
+                logger.info(f"[{correlation_id}] Sending converted video to user {user_id}")
+                try:
+                    with open(output_path, "rb") as video_file:
+                        await query.message.reply_video(video=video_file)
+                    logger.info(f"[{correlation_id}] Converted video sent successfully to user {user_id}")
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Failed to send converted video to user {user_id}: {e}")
+                    raise
+
+                # Update message to confirm completion
+                await query.edit_message_text(f"¡Listo! Video convertido a {output_format.upper()}.")
+
+            elif action == "extract_audio":
+                # Process audio extraction
+                await query.edit_message_text(f"Extrayendo audio como {output_format.upper()}...")
+
+                output_filename = f"audio_{user_id}_{correlation_id}.{output_format}"
+                output_path = temp_mgr.get_temp_path(output_filename)
+
+                logger.info(f"[{correlation_id}] Extracting audio as {output_format} for user {user_id}")
+                try:
+                    loop = asyncio.get_event_loop()
+                    extractor = AudioExtractor(str(input_path), str(output_path))
+                    success = await asyncio.wait_for(
+                        loop.run_in_executor(None, extractor.extract, output_format),
+                        timeout=config.PROCESSING_TIMEOUT
+                    )
+
+                    if not success:
+                        logger.error(f"[{correlation_id}] Audio extraction failed for user {user_id}")
+                        raise AudioExtractionError(f"No pude extraer el audio en formato {output_format.upper()}")
+
+                except asyncio.TimeoutError as e:
+                    logger.error(f"[{correlation_id}] Audio extraction timed out for user {user_id}")
+                    raise ProcessingTimeoutError("La extracción de audio tardó demasiado") from e
+
+                # Send extracted audio
+                logger.info(f"[{correlation_id}] Sending extracted audio to user {user_id}")
+                try:
+                    with open(output_path, "rb") as audio_file:
+                        await query.message.reply_audio(audio=audio_file)
+                    logger.info(f"[{correlation_id}] Audio sent successfully to user {user_id}")
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Failed to send audio to user {user_id}: {e}")
+                    raise
+
+                # Update message to confirm completion
+                await query.edit_message_text(f"¡Listo! Audio extraído como {output_format.upper()}.")
+
+            # Clean up context
+            context.user_data.pop("video_menu_file_id", None)
+            context.user_data.pop("video_menu_correlation_id", None)
+            context.user_data.pop("video_menu_action", None)
+
+        except (DownloadError, FormatConversionError, AudioExtractionError, ProcessingTimeoutError, ValidationError) as e:
+            logger.error(f"[{correlation_id}] Format selection processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+            await query.edit_message_text(f"Error: {str(e)}")
+
+            # Clean up context on error
+            context.user_data.pop("video_menu_file_id", None)
+            context.user_data.pop("video_menu_correlation_id", None)
+            context.user_data.pop("video_menu_action", None)
+
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error in format selection for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+            # Clean up context on error
+            context.user_data.pop("video_menu_file_id", None)
+            context.user_data.pop("video_menu_correlation_id", None)
+            context.user_data.pop("video_menu_action", None)
