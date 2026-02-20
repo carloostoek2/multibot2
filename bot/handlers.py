@@ -263,7 +263,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/convert_audio - Convierte un audio a otro formato (MP3, WAV, OGG, AAC, FLAC)\n"
         "/bass_boost - Aumenta los bajos del audio (intensidad ajustable)\n"
         "/treble_boost - Aumenta los agudos del audio (intensidad ajustable)\n"
-        "/equalize - Ecualizador de 3 bandas (bass, mid, treble)"
+        "/equalize - Ecualizador de 3 bandas (bass, mid, treble)\n"
+        "/denoise - Reduce el ruido de fondo del audio (intensidad ajustable)\n"
+        "/compress - Comprime el rango dinámico del audio (nivel ajustable)"
     )
 
 

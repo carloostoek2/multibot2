@@ -33,7 +33,8 @@ from bot.handlers import (
     handle_join_audio_done, handle_join_audio_cancel,
     handle_convert_audio_command, handle_format_selection,
     handle_bass_boost_command, handle_treble_boost_command, handle_intensity_selection,
-    handle_equalize_command, handle_equalizer_adjustment
+    handle_equalize_command, handle_equalizer_adjustment,
+    handle_denoise_command, handle_compress_command, handle_effect_selection
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -103,6 +104,13 @@ def main() -> None:
 
     # Callback handler for equalizer adjustments
     application.add_handler(CallbackQueryHandler(handle_equalizer_adjustment, pattern="^eq_"))
+
+    # Audio effects commands
+    application.add_handler(CommandHandler("denoise", handle_denoise_command))
+    application.add_handler(CommandHandler("compress", handle_compress_command))
+
+    # Callback handler for effect selection (denoise/compress)
+    application.add_handler(CallbackQueryHandler(handle_effect_selection, pattern="^(denoise|compress):"))
 
     # /done and /cancel are shared between video join and audio join
     # The handlers check context.user_data to determine which session is active
