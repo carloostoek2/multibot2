@@ -4895,3 +4895,120 @@ async def handle_video_format_selection(update: Update, context: ContextTypes.DE
             context.user_data.pop("video_menu_file_id", None)
             context.user_data.pop("video_menu_correlation_id", None)
             context.user_data.pop("video_menu_action", None)
+
+
+async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle cancel callback from inline keyboard.
+
+    Cleans up all user context data related to ongoing operations
+    and shows a cancellation confirmation message.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+
+    # Clear video menu keys
+    context.user_data.pop("video_menu_file_id", None)
+    context.user_data.pop("video_menu_correlation_id", None)
+    context.user_data.pop("video_menu_action", None)
+
+    # Clear audio menu keys
+    context.user_data.pop("audio_menu_file_id", None)
+    context.user_data.pop("audio_menu_correlation_id", None)
+    context.user_data.pop("audio_menu_action", None)
+
+    # Clear convert keys
+    context.user_data.pop("convert_audio_file_id", None)
+    context.user_data.pop("convert_audio_correlation_id", None)
+
+    # Clear enhance keys
+    context.user_data.pop("enhance_audio_file_id", None)
+    context.user_data.pop("enhance_audio_correlation_id", None)
+    context.user_data.pop("enhance_type", None)
+
+    # Clear EQ keys
+    context.user_data.pop("eq_file_id", None)
+    context.user_data.pop("eq_correlation_id", None)
+    context.user_data.pop("eq_bass", None)
+    context.user_data.pop("eq_mid", None)
+    context.user_data.pop("eq_treble", None)
+
+    # Clear effect keys
+    context.user_data.pop("effect_audio_file_id", None)
+    context.user_data.pop("effect_audio_correlation_id", None)
+    context.user_data.pop("effect_type", None)
+
+    # Clear pipeline keys
+    context.user_data.pop("pipeline_file_id", None)
+    context.user_data.pop("pipeline_correlation_id", None)
+    context.user_data.pop("pipeline_effects", None)
+    context.user_data.pop("pipeline_selecting_effect", None)
+
+    await query.edit_message_text("Operación cancelada.")
+    logger.info(f"[{correlation_id}] Operation cancelled by user {user_id}")
+
+
+async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle back navigation callback from inline keyboard.
+
+    Returns the user to the appropriate parent menu based on context.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse callback data: back:video or back:audio
+    if not callback_data.startswith("back:"):
+        logger.warning(f"Invalid back callback data: {callback_data}")
+        return
+
+    menu_type = callback_data.split(":")[1]
+
+    if menu_type == "video":
+        # Re-show video menu with stored file_id
+        file_id = context.user_data.get("video_menu_file_id")
+        if not file_id:
+            await query.edit_message_text(
+                "Error: no se encontró el archivo de video. Por favor envía el video de nuevo."
+            )
+            logger.warning(f"Back to video menu failed: no file_id for user {user_id}")
+            return
+
+        reply_markup = _get_video_menu_keyboard()
+        await query.edit_message_text(
+            "¿Qué quieres hacer con este video?",
+            reply_markup=reply_markup
+        )
+        logger.info(f"User {user_id} navigated back to video menu")
+
+    elif menu_type == "audio":
+        # Re-show audio menu with stored file_id
+        file_id = context.user_data.get("audio_menu_file_id")
+        if not file_id:
+            await query.edit_message_text(
+                "Error: no se encontró el archivo de audio. Por favor envía el audio de nuevo."
+            )
+            logger.warning(f"Back to audio menu failed: no file_id for user {user_id}")
+            return
+
+        reply_markup = _get_audio_menu_keyboard()
+        await query.edit_message_text(
+            "¿Qué quieres hacer con este audio?",
+            reply_markup=reply_markup
+        )
+        logger.info(f"User {user_id} navigated back to audio menu")
+
+    else:
+        logger.warning(f"Unknown back menu type: {menu_type}")
