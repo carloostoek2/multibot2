@@ -3091,4 +3091,60 @@ async def handle_denoise_command(update: Update, context: ContextTypes.DEFAULT_T
         reply_markup=reply_markup
     )
     logger.info(f"[{correlation_id}] Denoise strength selection keyboard sent to user {user_id}")
-        logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
+
+
+async def handle_compress_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /compress command to apply dynamic range compression.
+
+    Usage: /compress (when replying to an audio or with audio attached)
+    Shows inline keyboard with compression ratio presets for user to select.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Compress command received from user {user_id}")
+
+    # Get audio from message or reply
+    audio, is_reply = await _get_audio_from_message(update)
+
+    if not audio:
+        await update.message.reply_text(
+            "Envía /compress respondiendo a un archivo de audio o adjunta el audio al mensaje."
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Store file_id in context for later retrieval
+    context.user_data["effect_audio_file_id"] = audio.file_id
+    context.user_data["effect_audio_correlation_id"] = correlation_id
+    context.user_data["effect_type"] = "compress"
+
+    # Create inline keyboard with compression ratio presets (2 + 2 layout)
+    keyboard = [
+        [
+            InlineKeyboardButton("Compresión ligera", callback_data="compress:light"),
+            InlineKeyboardButton("Compresión media", callback_data="compress:medium"),
+        ],
+        [
+            InlineKeyboardButton("Compresión fuerte", callback_data="compress:heavy"),
+            InlineKeyboardButton("Compresión extrema", callback_data="compress:extreme"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Selecciona el nivel de compresión:\n\n"
+        "La compresión reduce la diferencia entre sonidos fuertes y débiles.",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Compression ratio selection keyboard sent to user {user_id}")
