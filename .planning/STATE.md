@@ -8,10 +8,10 @@ Goal: Expandir el bot con comandos completos de procesamiento de audio.
 
 ## Current Position
 
-Phase: 06-audio-enhancement
-Plan: 03 (completed)
-Status: Equalizer handler complete
-Last activity: 2026-02-19 — Plan 06-03 completed (Equalizer Handler)
+Phase: 07-audio-effects
+Plan: 01 (completed)
+Status: Audio Effects Infrastructure complete
+Last activity: 2026-02-20 — Plan 07-01 completed (Audio Effects Infrastructure)
 
 ## Progress
 
@@ -23,7 +23,7 @@ Phase 3: Voice Notes & Voice Message Processing [██████████]
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
 Phase 5: Audio Format Conversion               [██████████] 100% (3/3 plans) ✓
 Phase 6: Audio Enhancement                     [██████████] 100% (3/3 plans) ✓
-Phase 7: Audio Effects                         [░░░░░░░░░░] 0%
+Phase 7: Audio Effects                         [███░░░░░░░] 33% (1/3 plans) ✓
 ```
 
 ## Accumulated Context
@@ -104,6 +104,12 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
   - handle_equalizer_adjustment: Callback handler for +/- button adjustments
   - _handle_equalizer_apply: Process audio with AudioEnhancer.equalize()
   - Inline keyboard layout: 3 rows for bass/mid/treble + reset/apply buttons
+- Plan 07-01: Audio Effects Infrastructure — COMPLETED (2026-02-20)
+  - AudioEffects: Professional audio effects with method chaining
+  - denoise(): FFT noise reduction using afftdn filter
+  - compress(): Dynamic range compression using acompressor filter
+  - normalize(): EBU R128 loudness normalization using loudnorm filter
+  - AudioEffectsError: Error handling for audio effects
 
 ## Decisions Made
 
@@ -128,6 +134,11 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 - [Phase 06-audio-enhancement]: EQ gain -10 to +10 maps to -15 to +15dB
 - [Phase 06-audio-enhancement]: Shared state keys allow only one enhancement session at a time
 - [Phase 06-audio-enhancement]: Keyboard layout 5+5 for intensity selection (better UX than 3+2)
+- [Phase 07-audio-effects]: Effect pipeline uses temp files for intermediate results
+- [Phase 07-audio-effects]: finalize() method required to complete chained effects
+- [Phase 07-audio-effects]: Context manager support for automatic cleanup
+- [Phase 07-audio-effects]: afftdn nr parameter maps strength 1-10 to 0.01-0.5 range
+- [Phase 07-audio-effects]: loudnorm uses LRA=11 for general audio (not speech-specific)
 
 ## Blockers
 
@@ -135,7 +146,7 @@ Phase 7: Audio Effects                         [░░░░░░░░░░] 
 
 ## Next Actions
 
-1. Phase 7: Audio Effects — Plan 07-01 (Audio Effects Infrastructure)
+1. Phase 7: Audio Effects — Plan 07-02 (Denoise Handler)
 
 ## Project Reference
 
@@ -159,4 +170,4 @@ See: .planning/phases/06-audio-enhancement/06-03-SUMMARY.md
 
 ---
 
-*Last updated: 2026-02-19 after completing Plan 06-03 (Equalizer Handler)*
+*Last updated: 2026-02-20 after completing Plan 07-01 (Audio Effects Infrastructure)*
