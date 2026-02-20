@@ -3587,3 +3587,520 @@ async def handle_normalize_selection(update: Update, context: ContextTypes.DEFAU
 
         # TempManager cleanup happens automatically on context exit
         logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
+
+
+# =============================================================================
+# Effects Pipeline Handler
+# =============================================================================
+
+
+def _get_pipeline_keyboard(pipeline_effects: list) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for pipeline builder.
+
+    Args:
+        pipeline_effects: List of effect configs in the pipeline
+
+    Returns:
+        InlineKeyboardMarkup with add/preview/apply/cancel buttons
+    """
+    # Add effect buttons row
+    add_buttons = [
+        InlineKeyboardButton("+ Denoise", callback_data="pipeline_add:denoise"),
+        InlineKeyboardButton("+ Compress", callback_data="pipeline_add:compress"),
+        InlineKeyboardButton("+ Normalize", callback_data="pipeline_add:normalize"),
+    ]
+
+    # Preview button row
+    preview_button = [InlineKeyboardButton("Ver Pipeline", callback_data="pipeline_preview")]
+
+    # Action buttons row
+    action_buttons = [
+        InlineKeyboardButton("Aplicar", callback_data="pipeline_apply"),
+        InlineKeyboardButton("Cancelar", callback_data="pipeline_cancel"),
+    ]
+
+    keyboard = [add_buttons, preview_button, action_buttons]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _format_pipeline_message(pipeline_effects: list) -> str:
+    """Format pipeline display message.
+
+    Args:
+        pipeline_effects: List of effect configs in the pipeline
+
+    Returns:
+        Formatted message string showing current pipeline
+    """
+    if not pipeline_effects:
+        return (
+            "Constructor de efectos de audio:\n\n"
+            "Efectos en pipeline: (ninguno)\n\n"
+            "Agrega efectos en el orden que deseas aplicarlos.\n"
+            "Orden recomendado: Denoise → Compress → Normalize"
+        )
+
+    effect_lines = []
+    for i, effect in enumerate(pipeline_effects, 1):
+        effect_type = effect.get("type", "unknown")
+        params = effect.get("params", {})
+
+        if effect_type == "denoise":
+            strength = params.get("strength", 5)
+            effect_lines.append(f"{i}. Denoise (intensidad: {strength})")
+        elif effect_type == "compress":
+            ratio = params.get("ratio", 4.0)
+            preset_name = params.get("preset_name", "media")
+            effect_lines.append(f"{i}. Compress (ratio: {preset_name})")
+        elif effect_type == "normalize":
+            target_lufs = params.get("target_lufs", -14.0)
+            preset_name = params.get("preset_name", "música")
+            effect_lines.append(f"{i}. Normalize (perfil: {preset_name})")
+        else:
+            effect_lines.append(f"{i}. {effect_type}")
+
+    pipeline_text = "\n".join(effect_lines)
+    return (
+        f"Constructor de efectos de audio:\n\n"
+        f"Pipeline ({len(pipeline_effects)} efectos):\n"
+        f"{pipeline_text}\n\n"
+        f"Agrega más efectos o aplica el pipeline."
+    )
+
+
+async def handle_effects_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /effects command to show pipeline builder interface.
+
+    Usage: /effects (when replying to an audio or with audio attached)
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Effects command received from user {user_id}")
+
+    # Get audio from message or reply
+    audio, is_reply = await _get_audio_from_message(update)
+
+    if not audio:
+        await update.message.reply_text(
+            "Envía /effects respondiendo a un archivo de audio o adjunta el audio al mensaje."
+        )
+        return
+
+    # Validate file size before downloading
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Initialize pipeline state in context.user_data
+    context.user_data["pipeline_file_id"] = audio.file_id
+    context.user_data["pipeline_correlation_id"] = correlation_id
+    context.user_data["pipeline_effects"] = []
+
+    # Create inline keyboard
+    reply_markup = _get_pipeline_keyboard([])
+
+    await update.message.reply_text(
+        _format_pipeline_message([]),
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Pipeline builder interface sent to user {user_id}")
+
+
+async def handle_pipeline_builder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle pipeline builder callbacks from inline keyboard.
+
+    Handles add effect, preview, apply, and cancel actions.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+    correlation_id = context.user_data.get("pipeline_correlation_id", str(uuid.uuid4())[:8])
+
+    # Get current pipeline state
+    pipeline_effects = context.user_data.get("pipeline_effects", [])
+
+    # Handle cancel
+    if callback_data == "pipeline_cancel":
+        # Clear all pipeline state
+        context.user_data.pop("pipeline_file_id", None)
+        context.user_data.pop("pipeline_correlation_id", None)
+        context.user_data.pop("pipeline_effects", None)
+        context.user_data.pop("pipeline_selecting_effect", None)
+
+        await query.edit_message_text("Pipeline cancelado.")
+        logger.info(f"[{correlation_id}] Pipeline cancelled by user {user_id}")
+        return
+
+    # Handle preview
+    if callback_data == "pipeline_preview":
+        if not pipeline_effects:
+            await query.answer("No hay efectos en el pipeline", show_alert=True)
+        else:
+            preview_text = "Pipeline actual:\n\n"
+            for i, effect in enumerate(pipeline_effects, 1):
+                effect_type = effect.get("type", "unknown")
+                params = effect.get("params", {})
+
+                if effect_type == "denoise":
+                    strength = params.get("strength", 5)
+                    preview_text += f"{i}. Denoise (intensidad: {strength})\n"
+                elif effect_type == "compress":
+                    preset_name = params.get("preset_name", "media")
+                    preview_text += f"{i}. Compress (ratio: {preset_name})\n"
+                elif effect_type == "normalize":
+                    preset_name = params.get("preset_name", "música")
+                    preview_text += f"{i}. Normalize (perfil: {preset_name})\n"
+
+            await query.answer(preview_text, show_alert=True)
+        return
+
+    # Handle add effect selection
+    if callback_data.startswith("pipeline_add:"):
+        effect_type = callback_data.split(":")[1]
+
+        if effect_type == "denoise":
+            # Show denoise strength selection keyboard
+            keyboard = [
+                [
+                    InlineKeyboardButton("1", callback_data="pipeline_denoise:1"),
+                    InlineKeyboardButton("2", callback_data="pipeline_denoise:2"),
+                    InlineKeyboardButton("3", callback_data="pipeline_denoise:3"),
+                    InlineKeyboardButton("4", callback_data="pipeline_denoise:4"),
+                    InlineKeyboardButton("5", callback_data="pipeline_denoise:5"),
+                ],
+                [
+                    InlineKeyboardButton("6", callback_data="pipeline_denoise:6"),
+                    InlineKeyboardButton("7", callback_data="pipeline_denoise:7"),
+                    InlineKeyboardButton("8", callback_data="pipeline_denoise:8"),
+                    InlineKeyboardButton("9", callback_data="pipeline_denoise:9"),
+                    InlineKeyboardButton("10", callback_data="pipeline_denoise:10"),
+                ],
+                [InlineKeyboardButton("Volver", callback_data="pipeline_back")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                "Selecciona la intensidad de reducción de ruido (1-10):\n\n"
+                "1 = Reducción ligera\n"
+                "10 = Reducción máxima",
+                reply_markup=reply_markup
+            )
+
+        elif effect_type == "compress":
+            # Show compress ratio selection keyboard
+            keyboard = [
+                [
+                    InlineKeyboardButton("Ligera", callback_data="pipeline_compress:light"),
+                    InlineKeyboardButton("Media", callback_data="pipeline_compress:medium"),
+                ],
+                [
+                    InlineKeyboardButton("Fuerte", callback_data="pipeline_compress:heavy"),
+                    InlineKeyboardButton("Extrema", callback_data="pipeline_compress:extreme"),
+                ],
+                [InlineKeyboardButton("Volver", callback_data="pipeline_back")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                "Selecciona el nivel de compresión:",
+                reply_markup=reply_markup
+            )
+
+        elif effect_type == "normalize":
+            # Show normalize preset selection keyboard
+            keyboard = [
+                [
+                    InlineKeyboardButton("Música (-14 LUFS)", callback_data="pipeline_normalize:music"),
+                ],
+                [
+                    InlineKeyboardButton("Podcast (-16 LUFS)", callback_data="pipeline_normalize:podcast"),
+                ],
+                [
+                    InlineKeyboardButton("Streaming (-23 LUFS)", callback_data="pipeline_normalize:streaming"),
+                ],
+                [InlineKeyboardButton("Volver", callback_data="pipeline_back")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                "Selecciona el perfil de normalización:",
+                reply_markup=reply_markup
+            )
+
+        return
+
+    # Handle back button
+    if callback_data == "pipeline_back":
+        reply_markup = _get_pipeline_keyboard(pipeline_effects)
+        await query.edit_message_text(
+            _format_pipeline_message(pipeline_effects),
+            reply_markup=reply_markup
+        )
+        return
+
+    # Handle denoise parameter selection
+    if callback_data.startswith("pipeline_denoise:"):
+        strength = int(callback_data.split(":")[1])
+        effect_config = {
+            "type": "denoise",
+            "params": {"strength": strength}
+        }
+        pipeline_effects.append(effect_config)
+        context.user_data["pipeline_effects"] = pipeline_effects
+
+        reply_markup = _get_pipeline_keyboard(pipeline_effects)
+        await query.edit_message_text(
+            _format_pipeline_message(pipeline_effects),
+            reply_markup=reply_markup
+        )
+        logger.info(f"[{correlation_id}] Denoise (strength={strength}) added to pipeline by user {user_id}")
+        return
+
+    # Handle compress parameter selection
+    if callback_data.startswith("pipeline_compress:"):
+        preset = callback_data.split(":")[1]
+        preset_map = {
+            "light": (2.0, "ligera"),
+            "medium": (4.0, "media"),
+            "heavy": (8.0, "fuerte"),
+            "extreme": (12.0, "extrema"),
+        }
+        ratio, preset_name = preset_map.get(preset, (4.0, "media"))
+        effect_config = {
+            "type": "compress",
+            "params": {"ratio": ratio, "preset_name": preset_name}
+        }
+        pipeline_effects.append(effect_config)
+        context.user_data["pipeline_effects"] = pipeline_effects
+
+        reply_markup = _get_pipeline_keyboard(pipeline_effects)
+        await query.edit_message_text(
+            _format_pipeline_message(pipeline_effects),
+            reply_markup=reply_markup
+        )
+        logger.info(f"[{correlation_id}] Compress (ratio={preset_name}) added to pipeline by user {user_id}")
+        return
+
+    # Handle normalize parameter selection
+    if callback_data.startswith("pipeline_normalize:"):
+        preset = callback_data.split(":")[1]
+        preset_map = {
+            "music": (-14.0, "música", "streaming y música"),
+            "podcast": (-16.0, "podcast", "podcasts y voz"),
+            "streaming": (-23.0, "streaming", "broadcast profesional"),
+        }
+        target_lufs, preset_name, use_case = preset_map.get(preset, (-14.0, "música", "streaming y música"))
+        effect_config = {
+            "type": "normalize",
+            "params": {"target_lufs": target_lufs, "preset_name": preset_name, "use_case": use_case}
+        }
+        pipeline_effects.append(effect_config)
+        context.user_data["pipeline_effects"] = pipeline_effects
+
+        reply_markup = _get_pipeline_keyboard(pipeline_effects)
+        await query.edit_message_text(
+            _format_pipeline_message(pipeline_effects),
+            reply_markup=reply_markup
+        )
+        logger.info(f"[{correlation_id}] Normalize (profile={preset_name}) added to pipeline by user {user_id}")
+        return
+
+    # Handle apply pipeline
+    if callback_data == "pipeline_apply":
+        await _handle_pipeline_apply(update, context, pipeline_effects)
+        return
+
+    logger.warning(f"[{correlation_id}] Unknown pipeline callback: {callback_data}")
+
+
+async def _handle_pipeline_apply(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    pipeline_effects: list
+) -> None:
+    """Apply the effect pipeline and process audio.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        pipeline_effects: List of effect configs to apply
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    correlation_id = context.user_data.get("pipeline_correlation_id", str(uuid.uuid4())[:8])
+
+    # Validate pipeline
+    if not pipeline_effects:
+        await query.answer("No has agregado efectos. Agrega al menos uno antes de aplicar.", show_alert=True)
+        return
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("pipeline_file_id")
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    # Update message to show processing
+    try:
+        await query.edit_message_text(f"Aplicando pipeline ({len(pipeline_effects)} efectos)...")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    logger.info(f"[{correlation_id}] Applying pipeline with {len(pipeline_effects)} effects for user {user_id}")
+
+    # Process with TempManager for automatic cleanup
+    with TempManager() as temp_mgr:
+        try:
+            # Generate safe filenames
+            input_filename = f"input_pipeline_{user_id}_{correlation_id}.audio"
+            output_filename = f"pipeline_{user_id}_{correlation_id}.mp3"
+
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download audio file
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Audio downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio for user {user_id}: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate audio integrity after download
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space before processing (estimate based on number of effects)
+            audio_size_mb = input_path.stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb * (1 + len(pipeline_effects) * 0.5)))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
+                raise ValidationError(space_error)
+
+            # Apply effects in chain using AudioEffects
+            logger.info(f"[{correlation_id}] Processing pipeline with {len(pipeline_effects)} effects for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(input_path), str(output_path))
+
+                # Build method chain based on pipeline_effects order
+                for effect in pipeline_effects:
+                    effect_type = effect.get("type")
+                    params = effect.get("params", {})
+
+                    if effect_type == "denoise":
+                        strength = params.get("strength", 5)
+                        await asyncio.wait_for(
+                            loop.run_in_executor(None, effects.denoise, float(strength)),
+                            timeout=config.PROCESSING_TIMEOUT
+                        )
+                    elif effect_type == "compress":
+                        ratio = params.get("ratio", 4.0)
+                        await asyncio.wait_for(
+                            loop.run_in_executor(None, effects.compress, ratio, -20.0),
+                            timeout=config.PROCESSING_TIMEOUT
+                        )
+                    elif effect_type == "normalize":
+                        target_lufs = params.get("target_lufs", -14.0)
+                        await asyncio.wait_for(
+                            loop.run_in_executor(None, effects.normalize, target_lufs),
+                            timeout=config.PROCESSING_TIMEOUT
+                        )
+
+                # Finalize the effect chain
+                final_output = await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.finalize),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not final_output or not Path(final_output).exists():
+                    logger.error(f"[{correlation_id}] Pipeline processing failed for user {user_id}")
+                    raise AudioEffectsError("No pude procesar el pipeline de efectos")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Pipeline processing timed out for user {user_id}")
+                raise ProcessingTimeoutError("El procesamiento del pipeline tardó demasiado") from e
+
+            # Send processed audio
+            logger.info(f"[{correlation_id}] Sending pipeline result to user {user_id}")
+            try:
+                with open(output_path, "rb") as audio_file:
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=audio_file,
+                        filename=f"pipeline_audio.mp3",
+                        title=f"Audio con pipeline ({len(pipeline_effects)} efectos)"
+                    )
+                logger.info(f"[{correlation_id}] Pipeline result sent successfully to user {user_id}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send pipeline result to user {user_id}: {e}")
+                raise
+
+            # Build effect list for success message
+            effect_list = []
+            for effect in pipeline_effects:
+                effect_type = effect.get("type", "unknown")
+                params = effect.get("params", {})
+                if effect_type == "denoise":
+                    effect_list.append(f"Denoise ({params.get('strength', 5)})")
+                elif effect_type == "compress":
+                    effect_list.append(f"Compress ({params.get('preset_name', 'media')})")
+                elif effect_type == "normalize":
+                    effect_list.append(f"Normalize ({params.get('preset_name', 'música')})")
+
+            # Update message on success
+            try:
+                await query.edit_message_text(
+                    f"¡Listo! Pipeline aplicado ({len(pipeline_effects)} efectos):\n"
+                    + "\n".join(f"  {i+1}. {name}" for i, name in enumerate(effect_list))
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update final message: {e}")
+
+            # Clean up user_data
+            context.user_data.pop("pipeline_file_id", None)
+            context.user_data.pop("pipeline_correlation_id", None)
+            context.user_data.pop("pipeline_effects", None)
+
+        except (DownloadError, ValidationError, AudioEffectsError, ProcessingTimeoutError) as e:
+            # Handle known processing errors
+            logger.error(f"[{correlation_id}] Pipeline processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error (keep state so user can retry)
+            try:
+                await query.edit_message_text(f"Error: {str(e)}\n\nPuedes intentar aplicar el pipeline de nuevo.")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        except Exception as e:
+            # Handle unexpected errors
+            logger.exception(f"[{correlation_id}] Unexpected error applying pipeline for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+
+            # Update message on error
+            try:
+                await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+        # TempManager cleanup happens automatically on context exit
