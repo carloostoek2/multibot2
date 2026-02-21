@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 10-platform-handlers — IN PROGRESS
 
-**Plan:** 10-04
+**Plan:** 10-05
 
-**Status:** Facebook and HTML Video Extractor complete. 4/4 plans in Phase 10. Phase 10 COMPLETE.
+**Status:** Platform Router complete. 5/5 plans in Phase 10. Phase 10 COMPLETE.
 
-**Last activity:** 2026-02-21 — Completed 10-04: FacebookDownloader for videos and Reels, HTMLVideoExtractor for generic HTML video extraction. Phase 10 COMPLETE.
+**Last activity:** 2026-02-21 — Completed 10-05: PlatformRouter with priority-based routing, URL detector enhancements, package integration. Phase 10 COMPLETE.
 
 ## Progress
 
@@ -23,7 +23,7 @@ v3.0 Downloader
 [████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
-Phase 10: Platform Handlers                 [██████████] 100% (4/4 plans) — COMPLETE
+Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
@@ -128,6 +128,17 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - BeautifulSoup support with regex fallback
 - Integration with GenericDownloader via download_from_html()
 
+**10-05: Platform Router** — COMPLETE
+- PlatformRouter class with priority-based URL routing
+- RouteResult dataclass with platform, confidence, and reason
+- Platform-specific handler routing (YouTube, Instagram, TikTok, Twitter/X, Facebook)
+- Generic video URL handler integration
+- yt-dlp fallback for unsupported platforms
+- HTML page extractor adapter for web pages with videos
+- Downloader caching for performance
+- Convenience functions: get_downloader_for_url, route_url
+- classify_url_enhanced for platform identification
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -191,6 +202,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 42. **BeautifulSoup optional with regex fallback** — Minimal dependencies, graceful degradation
 43. **Integration via download_from_html()** — Bridges HTML extraction to GenericDownloader
 
+**10-05 Implementation Decisions:**
+44. **Priority-based routing** — Platform-specific handlers > generic > yt-dlp > HTML extractor
+45. **Downloader caching** — Cache downloader instances by platform for performance
+46. **Lazy imports for platform checkers** — Avoid circular dependencies with dynamic imports
+47. **HTML extractor adapter pattern** — Make HTMLVideoExtractor compatible with BaseDownloader interface
+48. **Confidence levels** — High (platform match), Medium (yt-dlp), Low (HTML extraction)
+
 ## Blockers
 
 (None)
@@ -202,7 +220,8 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 3. ~~10-02: Instagram Platform Handler~~ DONE
 4. ~~10-03: TikTok and Twitter/X Platform Handlers~~ DONE
 5. ~~10-04: Facebook and HTML Video Extractor~~ DONE
-6. **Phase 11: Download Management & Progress** — Next step
+6. ~~10-05: Platform Router~~ DONE
+7. **Phase 11: Download Management & Progress** — Next step
 
 ## Project Reference
 
@@ -216,4 +235,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 10-03*
+*Last updated: 2026-02-21 after completing 10-05*
