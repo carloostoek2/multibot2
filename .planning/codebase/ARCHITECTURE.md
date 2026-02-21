@@ -1,148 +1,150 @@
 # Architecture
 
-**Analysis Date:** 2026-02-11
+**Analysis Date:** 2026-02-17
 
 ## Pattern Overview
 
-**Overall:** Layered Architecture with Handler-Based Message Processing
+**Overall:** Layered architecture with clear separation of concerns
 
 **Key Characteristics:**
-- Asynchronous message-driven architecture using python-telegram-bot v20+
-- Separation of concerns with distinct layers for configuration, processing, and error handling
-- Context manager pattern for resource cleanup (temporary files)
-- Static method pattern for stateless video processing operations
-- Decorator pattern for error handling wrapper
+- Handler layer processes Telegram updates and orchestrates workflows
+- Processor layer contains pure business logic (ffmpeg operations)
+- Service layer provides cross-cutting concerns (temp management, config, validation)
+- Error handling is centralized with domain-specific exceptions
+- All file operations use context managers for automatic cleanup
 
 ## Layers
 
-**Configuration Layer:**
-- Purpose: Environment setup and secrets management
-- Location: `bot/config.py`
-- Contains: Environment variable loading, BOT_TOKEN validation
-- Depends on: python-dotenv, os
-- Used by: Main application layer
-
-**Application Layer:**
-- Purpose: Bot initialization and handler registration
-- Location: `bot/main.py`
-- Contains: Application setup, handler routing, error handler registration
-- Depends on: Configuration layer, Handler layer, Error handling layer
-- Used by: Entry point script
-
 **Handler Layer:**
-- Purpose: Telegram message processing and user interaction
+- Purpose: Process Telegram updates, validate input, coordinate processing
 - Location: `bot/handlers.py`
-- Contains: Command handlers (/start), message handlers (video processing), timeout management
-- Depends on: TempManager, VideoProcessor, ErrorHandler
-- Used by: Application layer
+- Contains: Command handlers, message handlers, workflow orchestration
+- Depends on: Processors, TempManager, ConfigService, Validators, ErrorHandler
+- Used by: Telegram Application (python-telegram-bot)
 
-**Processing Layer:**
-- Purpose: Video transformation using ffmpeg
-- Location: `bot/video_processor.py`
-- Contains: VideoProcessor class with ffmpeg command construction and execution
-- Depends on: shutil, subprocess, pathlib
-- Used by: Handler layer
+**Processor Layer:**
+- Purpose: Pure ffmpeg-based media processing without Telegram dependencies
+- Location: `bot/video_processor.py`, `bot/format_processor.py`, `bot/split_processor.py`, `bot/join_processor.py`
+- Contains: VideoProcessor, FormatConverter, AudioExtractor, VideoSplitter, VideoJoiner
+- Depends on: ffmpeg CLI, filesystem
+- Used by: Handler layer via asyncio.run_in_executor
 
-**Resource Management Layer:**
-- Purpose: Temporary file lifecycle management
-- Location: `bot/temp_manager.py`
-- Contains: TempManager context manager for automatic cleanup
-- Depends on: tempfile, shutil, os
-- Used by: Handler layer
+**Service Layer:**
+- Purpose: Cross-cutting infrastructure concerns
+- Location: `bot/temp_manager.py`, `bot/config.py`, `bot/validators.py`
+- Contains: TempManager, BotConfig, validation functions
+- Depends on: Environment variables, filesystem, ffprobe
+- Used by: All layers
 
 **Error Handling Layer:**
-- Purpose: Centralized exception management and user-friendly error messages
+- Purpose: Centralized error handling with user-friendly Spanish messages
 - Location: `bot/error_handler.py`
-- Contains: Custom exception hierarchy, error handler function, error message mapping
-- Depends on: telegram.Update, telegram.ext.ContextTypes
-- Used by: All layers
+- Contains: Custom exceptions, error handler, processing error handler
+- Depends on: python-telegram-bot error types
+- Used by: All handlers
 
 ## Data Flow
 
 **Video Processing Flow:**
 
-1. **Receive:** Telegram webhook/polling receives video message (`bot/main.py`)
-2. **Route:** Application routes to `handle_video` handler (`bot/handlers.py`)
-3. **Initialize:** TempManager creates temporary directory (`bot/temp_manager.py`)
-4. **Download:** Video file downloaded from Telegram to temp location (`bot/handlers.py`)
-5. **Process:** VideoProcessor executes ffmpeg transformation (`bot/video_processor.py`)
-   - Validates ffmpeg availability
-   - Constructs ffmpeg command with filters
-   - Executes subprocess with timeout
-6. **Respond:** Processed video sent as video note (`bot/handlers.py`)
-7. **Cleanup:** TempManager removes temporary files (context manager exit)
+1. User sends video -> `handle_video()` in `bot/handlers.py`
+2. Validate file size -> `validators.validate_file_size()`
+3. Send "processing" message to user
+4. Create TempManager context -> `temp_manager.TempManager()`
+5. Download video -> `_download_with_retry()`
+6. Validate video integrity -> `validators.validate_video_file()`
+7. Check disk space -> `validators.check_disk_space()`
+8. Process with ffmpeg -> `VideoProcessor.process()` via run_in_executor
+9. Send result -> `update.message.reply_video_note()`
+10. Cleanup -> TempManager context exit
 
-**Error Handling Flow:**
+**Command Processing Flow:**
 
-1. Exception occurs in any layer
-2. Exception propagates to handler layer
-3. Known exceptions (DownloadError, FFmpegError, ProcessingTimeoutError) mapped to user-friendly Spanish messages
-4. Unknown exceptions logged with full stack trace
-5. User receives error message via Telegram
-6. Cleanup still executes via context manager
+1. User sends command with video -> `handle_*_command()`
+2. Extract video from message or reply -> `_get_video_from_message()`
+3. Same validation and processing flow as video handling
+4. Send result in appropriate format
 
-**State Management:**
-- No persistent state - purely request/response processing
-- Temporary state managed via TempManager context manager
-- Configuration loaded once at startup from environment variables
+**Join Session Flow:**
+
+1. `/join` command -> `handle_join_start()` creates session in `context.user_data`
+2. Videos sent during session -> `handle_join_video()` adds to session list
+3. `/done` command -> `handle_join_done()` processes all videos
+4. `/cancel` command -> `handle_join_cancel()` cleans up session
 
 ## Key Abstractions
 
-**VideoProcessor:**
-- Purpose: Encapsulate ffmpeg video transformation logic
-- Examples: `bot/video_processor.py`
-- Pattern: Class with static factory method (process_video)
-
 **TempManager:**
-- Purpose: Ensure temporary file cleanup via context manager protocol
-- Examples: `bot/temp_manager.py`
-- Pattern: Context manager (`__enter__`/`__exit__`)
+- Purpose: Automatic cleanup of temporary files
+- Location: `bot/temp_manager.py`
+- Pattern: Context manager with `__enter__`/`__exit__`
+- Usage: `with TempManager() as temp_mgr:`
+- Features: Subdirectory creation, file tracking, global cleanup on shutdown
 
-**VideoProcessingError (Exception Hierarchy):**
-- Purpose: Structured error handling with domain-specific exceptions
-- Examples: `bot/error_handler.py` - DownloadError, FFmpegError, ProcessingTimeoutError
-- Pattern: Exception inheritance hierarchy
+**VideoProcessor Pattern:**
+- Purpose: Template for all ffmpeg-based processors
+- Location: `bot/video_processor.py` (reference implementation)
+- Pattern: Class with `__init__(input_path, output_path)` and `process()` method
+- Static method `process_video()` for one-shot usage
+- Error handling via return boolean + logging
 
-**Error Handler Decorator:**
-- Purpose: Wrap handlers with standardized error handling
-- Examples: `bot/error_handler.py` - wrap_with_error_handler
-- Pattern: Decorator with functools.wraps
+**BotConfig:**
+- Purpose: Centralized, validated configuration
+- Location: `bot/config.py`
+- Pattern: Frozen dataclass with `__post_init__` validation
+- Loaded once at startup, immutable thereafter
+
+**Custom Exceptions:**
+- Purpose: Domain-specific errors with user-friendly messages
+- Location: `bot/error_handler.py`
+- Hierarchy: VideoProcessingError -> SpecificError (DownloadError, FFmpegError, etc.)
+- Error messages mapped in ERROR_MESSAGES dict for Spanish localization
 
 ## Entry Points
 
-**Primary Entry Point:**
-- Location: `run.py`
-- Triggers: Direct execution or deployment platform
-- Responsibilities: Async runtime setup, graceful shutdown on KeyboardInterrupt
+**Bot Startup:**
+- Location: `bot/main.py`
+- Triggers: `python run.py`
+- Responsibilities: Configure logging, register handlers, start polling
 
-**Bot Application Entry Point:**
-- Location: `bot/main.py` - main()
-- Triggers: Called by run.py
-- Responsibilities: Application builder pattern, handler registration, polling initialization
+**Handler Registration:**
+- Location: `bot/main.py` lines 71-79
+- Pattern: CommandHandler for commands, MessageHandler with filters for videos
+- Error handler registered globally
 
-**Error Handler Entry Point:**
-- Location: `bot/error_handler.py` - error_handler()
-- Triggers: Registered as global error handler in Application
-- Responsibilities: Exception logging, user message mapping, error response sending
+**Signal Handling:**
+- Location: `bot/main.py` lines 36-58
+- Triggers: SIGINT, SIGTERM
+- Responsibilities: Cleanup active temp managers, graceful shutdown
 
 ## Error Handling
 
-**Strategy:** Layer-specific exceptions with centralized mapping to user-friendly messages
+**Strategy:** Fail-fast with user-friendly messages
 
 **Patterns:**
-- Custom exception hierarchy inheriting from VideoProcessingError
-- Error type to message mapping dictionary (ERROR_MESSAGES)
-- Graceful degradation with try/except blocks at handler level
-- Automatic cleanup via context managers (finally behavior)
+- Validation before processing (size, integrity, disk space)
+- Custom exceptions for each error type
+- Centralized error handler maps exceptions to Spanish messages
+- Retry logic with exponential backoff for transient network errors
+- Correlation IDs for request tracing across logs
 
 ## Cross-Cutting Concerns
 
-**Logging:** Standard Python logging with module-level loggers, structured format including timestamp, name, level, message
+**Logging:**
+- Location: Configured in `bot/main.py`
+- Pattern: Standard Python logging with module-level loggers
+- Format: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`
+- Level: Configurable via LOG_LEVEL env var
 
-**Validation:** Input validation via python-telegram-bot filters (filters.VIDEO), environment variable validation at startup
+**Validation:**
+- Location: `bot/validators.py`
+- Pattern: Functions return (is_valid, error_message) tuple
+- Types: File size, video integrity (ffprobe), disk space
 
-**Authentication:** Token-based authentication via BOT_TOKEN environment variable, handled by python-telegram-bot library
+**Authentication:**
+- Pattern: Telegram bot token via environment variable
+- No user authentication beyond Telegram's built-in verification
 
 ---
 
-*Architecture analysis: 2026-02-11*
+*Architecture analysis: 2026-02-17*
