@@ -8,11 +8,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Platform handlers will be imported here as they are created
-# from .youtube import YouTubeDownloader
-# from .instagram import InstagramDownloader
-# etc.
+# Import platform handlers
+from .youtube import (
+    YouTubeDownloader,
+    is_youtube_shorts,
+    is_youtube_url,
+)
 
 __all__ = [
-    # Platform handlers will be listed here
+    # YouTube platform handler
+    'YouTubeDownloader',
+    'is_youtube_shorts',
+    'is_youtube_url',
 ]

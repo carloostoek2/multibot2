@@ -42,6 +42,13 @@ from .url_detector import (
 from .generic_downloader import GenericDownloader
 from .ytdlp_downloader import YtDlpDownloader
 
+# Import platform handlers
+from .platforms import (
+    YouTubeDownloader,
+    is_youtube_shorts,
+    is_youtube_url,
+)
+
 
 # DownloadResult for backwards compatibility
 # (New code should use the more specific result types from implementations)
@@ -115,6 +122,10 @@ __all__ = [
     # Downloader implementations
     "GenericDownloader",
     "YtDlpDownloader",
+    # Platform handlers
+    "YouTubeDownloader",
+    "is_youtube_shorts",
+    "is_youtube_url",
     # Helper functions
     "get_downloader_for_url",
 ]
