@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 10-platform-handlers — IN PROGRESS
 
-**Plan:** 10-03
+**Plan:** 10-04
 
-**Status:** TikTok and Twitter/X platform handlers complete. 3/N plans in Phase 10.
+**Status:** Facebook and HTML Video Extractor complete. 4/4 plans in Phase 10. Phase 10 COMPLETE.
 
-**Last activity:** 2026-02-21 — Completed 10-03: TikTokDownloader with watermark-free option and slideshow detection, TwitterDownloader with quality selection and tweet metadata
+**Last activity:** 2026-02-21 — Completed 10-04: FacebookDownloader for videos and Reels, HTMLVideoExtractor for generic HTML video extraction. Phase 10 COMPLETE.
 
 ## Progress
 
@@ -23,7 +23,7 @@ v3.0 Downloader
 [████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
-Phase 10: Platform Handlers                 [██████░░░░] 60% (3/5 plans)
+Phase 10: Platform Handlers                 [██████████] 100% (4/4 plans) — COMPLETE
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
@@ -117,6 +117,17 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - GIF detection and support for both twitter.com and x.com domains
 - Spanish error messages for restricted/deleted content
 
+**10-04: Facebook and HTML Video Extractor** — COMPLETE
+- FacebookDownloader extends YtDlpDownloader for videos and Reels
+- URL detection: is_facebook_url, is_facebook_reel, is_facebook_watch
+- Enhanced metadata: page_name, engagement stats (reactions, comments, shares)
+- Aspect ratio hints: 9:16 for Reels, 16:9 for regular videos
+- Spanish error messages for private/unavailable content
+- HTMLVideoExtractor parses HTML pages for video URLs
+- Extraction from video tags, meta tags (Open Graph, Twitter Card), JSON-LD
+- BeautifulSoup support with regex fallback
+- Integration with GenericDownloader via download_from_html()
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -174,6 +185,12 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 38. **GIF detection via format string** — Check for 'gif' in formats list
 39. **Support both Twitter domains** — Handle twitter.com and x.com URLs identically
 
+**10-04 Implementation Decisions:**
+40. **Facebook follows same pattern as other platforms** — Extend YtDlpDownloader with overrides
+41. **HTML extractor as utility class** — Not a BaseDownloader, used for URL discovery
+42. **BeautifulSoup optional with regex fallback** — Minimal dependencies, graceful degradation
+43. **Integration via download_from_html()** — Bridges HTML extraction to GenericDownloader
+
 ## Blockers
 
 (None)
@@ -184,7 +201,8 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 2. ~~10-01: YouTube Platform Handler~~ DONE
 3. ~~10-02: Instagram Platform Handler~~ DONE
 4. ~~10-03: TikTok and Twitter/X Platform Handlers~~ DONE
-5. **10-04: Facebook Platform Handler** — Next step
+5. ~~10-04: Facebook and HTML Video Extractor~~ DONE
+6. **Phase 11: Download Management & Progress** — Next step
 
 ## Project Reference
 
