@@ -38,15 +38,40 @@ from .url_detector import (
     is_video_url,
 )
 
-# Placeholder imports for future modules
-# from .ytdlp_downloader import YtDlpDownloader
-# from .generic_downloader import GenericDownloader
+# Import downloader implementations
+from .generic_downloader import GenericDownloader
+from .ytdlp_downloader import YtDlpDownloader
 
 
 # DownloadResult for backwards compatibility
 # (New code should use the more specific result types from implementations)
 from dataclasses import dataclass
 from typing import Optional
+
+
+async def get_downloader_for_url(url: str) -> Optional[BaseDownloader]:
+    """Get appropriate downloader for a URL.
+
+    Returns GenericDownloader for direct video URLs.
+    Returns YtDlpDownloader for platform URLs (when implemented).
+
+    Args:
+        url: The URL to find a downloader for
+
+    Returns:
+        Appropriate downloader instance, or None if no downloader can handle the URL
+    """
+    # Try generic first (faster check for direct video URLs)
+    generic = GenericDownloader()
+    if await generic.can_handle(url):
+        return generic
+
+    # Fall back to yt-dlp for platform URLs
+    ytdlp = YtDlpDownloader()
+    if await ytdlp.can_handle(url):
+        return ytdlp
+
+    return None
 
 
 @dataclass
@@ -87,7 +112,10 @@ __all__ = [
     "detect_urls",
     "classify_url",
     "is_video_url",
+    # Downloader implementations
+    "GenericDownloader",
+    # Helper functions
+    "get_downloader_for_url",
     # Placeholder for future exports
     # "YtDlpDownloader",
-    # "GenericDownloader",
 ]
