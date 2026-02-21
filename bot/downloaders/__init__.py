@@ -4,6 +4,19 @@ This package provides URL detection, classification, and downloading
 capabilities for the Telegram bot. It supports platform-specific
 downloads (YouTube, Instagram, TikTok, Twitter/X, Facebook) as well
 as generic video URL downloads.
+
+Quick Start:
+    # Route URL to appropriate downloader
+    from bot.downloaders import route_url
+    result = await route_url('https://youtube.com/watch?v=...')
+
+    # Download with automatic handler selection
+    downloader = result.downloader
+    result = await downloader.download(url, options)
+
+    # Or use the convenience function
+    from bot.downloaders import get_downloader_for_url
+    downloader = await get_downloader_for_url(url)
 """
 import logging
 
@@ -33,8 +46,9 @@ from .exceptions import (
 from .url_detector import (
     URLDetector,
     URLType,
-    detect_urls,
     classify_url,
+    classify_url_enhanced,
+    detect_urls,
     is_video_url,
 )
 
@@ -48,26 +62,26 @@ from .platforms import (
     YouTubeDownloader,
     is_youtube_shorts,
     is_youtube_url,
-    # Instagram (from 10-02)
+    # Instagram
     InstagramDownloader,
     InstagramContentType,
     is_instagram_reel,
     is_instagram_story,
     is_instagram_url,
-    # TikTok (from 10-03)
+    # TikTok
     TikTokDownloader,
     is_tiktok_url,
     is_tiktok_slideshow,
-    # Twitter/X (from 10-03)
+    # Twitter/X
     TwitterDownloader,
     is_twitter_url,
-    # Facebook (from 10-04)
+    # Facebook
     FacebookDownloader,
     is_facebook_url,
     is_facebook_reel,
 )
 
-# Import HTML extractor (from 10-04)
+# Import HTML extractor
 from .html_extractor import (
     HTMLVideoExtractor,
     VideoURL,
@@ -75,36 +89,17 @@ from .html_extractor import (
     download_from_html,
 )
 
+# Import platform router (new)
+from .platform_router import (
+    PlatformRouter,
+    RouteResult,
+    get_downloader_for_url,
+    route_url,
+)
 
 # DownloadResult for backwards compatibility
-# (New code should use the more specific result types from implementations)
 from dataclasses import dataclass
 from typing import Optional
-
-
-async def get_downloader_for_url(url: str) -> Optional[BaseDownloader]:
-    """Get appropriate downloader for a URL.
-
-    Returns GenericDownloader for direct video URLs.
-    Returns YtDlpDownloader for platform URLs.
-
-    Args:
-        url: The URL to find a downloader for
-
-    Returns:
-        Appropriate downloader instance, or None if no downloader can handle the URL
-    """
-    # Try generic first (faster check for direct video URLs)
-    generic = GenericDownloader()
-    if await generic.can_handle(url):
-        return generic
-
-    # Fall back to yt-dlp for platform URLs
-    ytdlp = YtDlpDownloader()
-    if await ytdlp.can_handle(url):
-        return ytdlp
-
-    return None
 
 
 @dataclass
@@ -142,8 +137,9 @@ __all__ = [
     # URL detection
     "URLDetector",
     "URLType",
-    "detect_urls",
     "classify_url",
+    "classify_url_enhanced",
+    "detect_urls",
     "is_video_url",
     # Downloader implementations
     "GenericDownloader",
@@ -152,28 +148,27 @@ __all__ = [
     "YouTubeDownloader",
     "is_youtube_shorts",
     "is_youtube_url",
-    # Instagram (from 10-02)
     "InstagramDownloader",
     "InstagramContentType",
     "is_instagram_reel",
     "is_instagram_story",
     "is_instagram_url",
-    # TikTok (from 10-03)
     "TikTokDownloader",
     "is_tiktok_url",
     "is_tiktok_slideshow",
-    # Twitter/X (from 10-03)
     "TwitterDownloader",
     "is_twitter_url",
-    # Facebook (from 10-04)
     "FacebookDownloader",
     "is_facebook_url",
     "is_facebook_reel",
-    # HTML extractor (from 10-04)
+    # HTML extractor
     "HTMLVideoExtractor",
     "VideoURL",
     "extract_videos_from_html",
     "download_from_html",
-    # Helper functions
+    # Platform router (new)
+    "PlatformRouter",
+    "RouteResult",
     "get_downloader_for_url",
+    "route_url",
 ]
