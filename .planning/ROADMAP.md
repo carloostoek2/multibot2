@@ -66,6 +66,14 @@
 
 **Requirements:** DL-01, DL-02, DL-03, DL-04, DL-05, DL-06, DL-07, QF-01, QF-02, QF-03, QF-04, QF-05, EH-01, EH-02
 
+**Plans:** 4 plans
+
+**Plan list:**
+- [x] 09-01-PLAN.md — URL Detection and Validation (auto-detect URLs, entity extraction, URL classification) — completed 2026-02-21
+- [x] 09-02-PLAN.md — Base Downloader Architecture (abstract interface, DownloadOptions, exception hierarchy) — completed 2026-02-21
+- [x] 09-03-PLAN.md — yt-dlp Integration (platform downloader with metadata extraction and progress hooks) — completed 2026-02-21
+- [x] 09-04-PLAN.md — Generic HTTP Downloader (direct video URL support with streaming and integrity validation) — completed 2026-02-21
+
 **Success Criteria:**
 1. Bot automatically detects URLs in any message without requiring /download command
 2. URLs are validated for format and accessibility before processing
@@ -145,9 +153,9 @@
 
 ```
 v3.0 Downloader
-[░░░░░░░░░░░░░░░░░░░░] 0% (0/4 phases)
+[████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
 
-Phase 9:  Downloader Core Infrastructure    [░░░░░░░░░░] 0% (0/N plans)
+Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — completed 2026-02-21
 Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
@@ -215,7 +223,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 ---
 
-*Last updated: 2026-02-21 — v3.0 Downloader milestone started*
+*Last updated: 2026-02-21 — Phase 9 complete (4/4 plans executed)*
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 *For v2.0 archive, see .planning/milestones/v2.0-ROADMAP.md*
