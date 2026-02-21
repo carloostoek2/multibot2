@@ -48,8 +48,16 @@ class DownloadResult:
     metadata: Optional[dict] = None
 
 
-# Placeholder imports - these will be fully implemented in subsequent plans
-# from .url_detector import URLDetector, URLType, detect_urls, classify_url
+# Import URL detector components
+from .url_detector import (
+    URLDetector,
+    URLType,
+    detect_urls,
+    classify_url,
+    is_video_url,
+)
+
+# Placeholder imports for future modules
 # from .base import BaseDownloader
 # from .ytdlp_downloader import YtDlpDownloader
 # from .generic_downloader import GenericDownloader
@@ -63,11 +71,13 @@ __all__ = [
     "UnsupportedURLError",
     # Data classes
     "DownloadResult",
+    # URL detection
+    "URLDetector",
+    "URLType",
+    "detect_urls",
+    "classify_url",
+    "is_video_url",
     # Placeholder for future exports
-    # "URLDetector",
-    # "URLType",
-    # "detect_urls",
-    # "classify_url",
     # "BaseDownloader",
     # "YtDlpDownloader",
     # "GenericDownloader",
