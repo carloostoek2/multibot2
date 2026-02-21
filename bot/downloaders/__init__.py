@@ -44,9 +44,16 @@ from .ytdlp_downloader import YtDlpDownloader
 
 # Import platform handlers
 from .platforms import (
+    # YouTube
     YouTubeDownloader,
     is_youtube_shorts,
     is_youtube_url,
+    # Instagram (from 10-02)
+    InstagramDownloader,
+    InstagramContentType,
+    is_instagram_reel,
+    is_instagram_story,
+    is_instagram_url,
 )
 
 
@@ -126,6 +133,12 @@ __all__ = [
     "YouTubeDownloader",
     "is_youtube_shorts",
     "is_youtube_url",
+    # Instagram (from 10-02)
+    "InstagramDownloader",
+    "InstagramContentType",
+    "is_instagram_reel",
+    "is_instagram_story",
+    "is_instagram_url",
     # Helper functions
     "get_downloader_for_url",
 ]
