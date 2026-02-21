@@ -1,2 +1,8 @@
 python-telegram-bot>=20.0
 python-dotenv>=1.0.0
+
+# Downloader dependencies
+yt-dlp>=2026.2.4
+aiohttp>=3.9.0
+aiofiles>=23.0.0
+ffmpeg-python>=0.2.0
