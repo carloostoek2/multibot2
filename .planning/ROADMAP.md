@@ -93,6 +93,15 @@
 
 **Requirements:** YT-01, YT-02, YT-03, YT-04, IG-01, IG-02, IG-03, TT-01, TT-02, TW-01, TW-02, FB-01, FB-02, GV-01, GV-02, GV-03, GV-04
 
+**Plans:** 5 plans
+
+**Plan list:**
+- [x] 10-01-PLAN.md — YouTube Handler (YouTube-specific downloader with Shorts detection and enhanced metadata) — completed 2026-02-21
+- [x] 10-02-PLAN.md — Instagram Handler (Instagram posts, Reels, and Stories with content type detection) — completed 2026-02-21
+- [x] 10-03-PLAN.md — TikTok and Twitter/X Handlers (watermark-free preference, slideshow detection, quality selection) — completed 2026-02-21
+- [x] 10-04-PLAN.md — Facebook and HTML Extractor (Facebook videos/Reels, generic HTML video extraction) — completed 2026-02-21
+- [x] 10-05-PLAN.md — Platform Router (automatic URL-to-downloader routing with priority-based selection) — completed 2026-02-21
+
 **Success Criteria:**
 1. YouTube videos and Shorts download successfully (video and audio modes)
 2. Instagram posts, Reels, and Stories download successfully
@@ -153,10 +162,10 @@
 
 ```
 v3.0 Downloader
-[████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
+[████████░░░░░░░░░░░░] 50% (2/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — completed 2026-02-21
-Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
+Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — completed 2026-02-21
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
@@ -223,7 +232,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 ---
 
-*Last updated: 2026-02-21 — Phase 9 complete (4/4 plans executed)*
+*Last updated: 2026-02-21 — Phase 10 execution complete (5/5 plans finished)*
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 *For v2.0 archive, see .planning/milestones/v2.0-ROADMAP.md*
