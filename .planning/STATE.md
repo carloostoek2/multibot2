@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 09-downloader-core
 
-**Plan:** 09-01
+**Plan:** 09-02
 
-**Status:** Plan 09-01 complete - URL auto-detection infrastructure implemented
+**Status:** Plan 09-02 complete - Base downloader architecture implemented
 
-**Last activity:** 2026-02-21 — Completed 09-01: URL detection, classification, and download config
+**Last activity:** 2026-02-21 — Completed 09-02: BaseDownloader ABC, DownloadOptions, exception hierarchy
 
 ## Progress
 
@@ -22,7 +22,7 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 v3.0 Downloader
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/4 phases)
 
-Phase 9:  Downloader Core Infrastructure    [██░░░░░░░░] 25% (1/4 plans)
+Phase 9:  Downloader Core Infrastructure    [████░░░░░░] 50% (2/4 plans)
 Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
@@ -63,6 +63,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - Download configuration with Telegram limits (50MB)
 - yt-dlp format strings configurable via environment
 
+**09-02: Base Downloader Architecture** — COMPLETE
+- BaseDownloader abstract class with async contract
+- DownloadOptions frozen dataclass with validation
+- Comprehensive exception hierarchy (7 exception types)
+- User-friendly Spanish error messages
+- Correlation ID support for request tracing (DM-02)
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -78,6 +85,12 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 8. **Simple domain matching** — Use simple patterns, let yt-dlp handle complex validation
 9. **Config validation** — Enforce Telegram 50MB limit at configuration level
 
+**09-02 Implementation Decisions:**
+10. **Frozen dataclass for DownloadOptions** — Immutability prevents accidental mutation
+11. **8-character correlation IDs** — Sufficient uniqueness with readability
+12. **Spanish user messages** — Align with existing bot language
+13. **URLDetectionError alias** — Maintains backwards compatibility with existing code
+
 ## Blockers
 
 (None)
@@ -86,9 +99,10 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 1. ~~Plan Phase 9: Downloader Core Infrastructure~~ DONE
 2. ~~Start with URL detection and validation~~ DONE
-3. Implement generic video download capability (09-02)
+3. ~~Implement base downloader architecture~~ DONE
 4. Implement yt-dlp integration for platforms (09-03)
-5. Add download progress tracking (09-04)
+5. Implement generic HTTP downloader (09-04)
+6. Add download progress tracking (09-05)
 
 ## Project Reference
 
@@ -102,4 +116,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 09-01*
+*Last updated: 2026-02-21 after completing 09-02*
