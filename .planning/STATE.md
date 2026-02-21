@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 09-downloader-core
 
-**Plan:** 09-03
+**Plan:** 09-04
 
-**Status:** Plan 09-03 complete - YtDlpDownloader implemented for 1000+ platforms
+**Status:** Plan 09-04 complete - GenericDownloader implemented for direct video URLs
 
-**Last activity:** 2026-02-21 — Completed 09-03: YtDlpDownloader with async thread pool, progress hooks, file size validation
+**Last activity:** 2026-02-21 — Completed 09-04: GenericDownloader with aiohttp streaming, Content-Type validation, progress callbacks
 
 ## Progress
 
@@ -22,7 +22,7 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 v3.0 Downloader
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/4 phases)
 
-Phase 9:  Downloader Core Infrastructure    [██████░░░░] 75% (3/4 plans)
+Phase 9:  Downloader Core Infrastructure    [████████░░] 100% (4/4 plans)
 Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
@@ -79,6 +79,16 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - Audio extraction via FFmpegExtractAudio postprocessor (QF-03)
 - Proper error handling with correlation IDs (EH-01, EH-03)
 
+**09-04: Generic HTTP Downloader** — COMPLETE
+- GenericDownloader class for direct video file URLs (.mp4, .webm, .mov, etc.)
+- aiohttp streaming downloads (8KB chunks) with async file I/O
+- Content-Type validation before download (DL-05)
+- File size validation from Content-Length header (QF-05)
+- Real-time progress callbacks with percent/bytes
+- File integrity validation (size check, non-empty, optional python-magic)
+- Automatic cleanup of partial files on failure
+- 12 video extensions and MIME types supported
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -107,6 +117,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 17. **Pre-download size check** — Extract metadata first to validate size before downloading
 18. **Format string with filesize filter** — `best[filesize<50M]/best` prefers Telegram-compatible sizes
 
+**09-04 Implementation Decisions:**
+19. **aiohttp for generic downloads** — Lighter than httpx, purpose-built for async HTTP
+20. **HEAD request before GET** — Extract metadata (size, content-type) without downloading
+21. **8KB chunk size** — Balance between memory usage and I/O efficiency
+22. **MIME type + extension fallback** — Check Content-Type header, fall back to URL extension
+23. **Generic first in routing** — Faster check for direct video URLs before trying yt-dlp
+
 ## Blockers
 
 (None)
@@ -117,7 +134,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 2. ~~Start with URL detection and validation~~ DONE
 3. ~~Implement base downloader architecture~~ DONE
 4. ~~Implement yt-dlp integration for platforms (09-03)~~ DONE
-5. Implement generic HTTP downloader (09-04)
+5. ~~Implement generic HTTP downloader (09-04)~~ DONE
 6. Add download progress tracking (09-05)
 
 ## Project Reference
@@ -132,4 +149,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 09-03*
+*Last updated: 2026-02-21 after completing 09-04*
