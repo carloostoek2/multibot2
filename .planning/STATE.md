@@ -8,23 +8,23 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 ## Current Position
 
-**Phase:** 10-platform-handlers — IN PROGRESS
+**Phase:** 11-download-management-progress — PLANNED
 
-**Plan:** 10-05
+**Plan:** 11-01 (ready to start)
 
-**Status:** Platform Router complete. 5/5 plans in Phase 10. Phase 10 COMPLETE.
+**Status:** Phase 11 planned. 5 plans ready for execution.
 
-**Last activity:** 2026-02-21 — Completed 10-05: PlatformRouter with priority-based routing, URL detector enhancements, package integration. Phase 10 COMPLETE.
+**Last activity:** 2026-02-21 — Planned Phase 11: Download Management & Progress with 5 plans across 3 waves.
 
 ## Progress
 
 ```
 v3.0 Downloader
-[████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
+[████░░░░░░░░░░░░░░░░] 50% (2/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
-Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
+Phase 11: Download Management & Progress    [○○○○○○○○○○] 0% (0/5 plans) — PLANNED
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
 
@@ -208,6 +208,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 46. **Lazy imports for platform checkers** — Avoid circular dependencies with dynamic imports
 47. **HTML extractor adapter pattern** — Make HTMLVideoExtractor compatible with BaseDownloader interface
 48. **Confidence levels** — High (platform match), Medium (yt-dlp), Low (HTML extraction)
+- [Phase 10]: Priority-based routing: platform-specific > generic > yt-dlp > HTML extractor
 
 ## Blockers
 
@@ -221,7 +222,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 4. ~~10-03: TikTok and Twitter/X Platform Handlers~~ DONE
 5. ~~10-04: Facebook and HTML Video Extractor~~ DONE
 6. ~~10-05: Platform Router~~ DONE
-7. **Phase 11: Download Management & Progress** — Next step
+7. **Phase 11: Download Management & Progress** — PLANNED, ready for execution
 
 ## Project Reference
 
