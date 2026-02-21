@@ -2,41 +2,35 @@
 
 ## Current Milestone
 
-**v2.0: Navaja Suiza de Audio** — COMPLETE ✓ (shipped 2026-02-21)
+**v3.0: Downloader** — IN PROGRESS
 
-Next: Use `/gsd:new-milestone` to start v2.1 or v3.0 planning.
+Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Facebook y URLs genéricas.
 
 ## Current Position
 
-**MILESTONE v2.0 COMPLETE**
+**Phase:** Not started (defining requirements complete)
 
-All 6 phases (3-8) completed with 20 plans total.
-- Phase 3: Voice Notes & VMP — 3/3 plans ✓
-- Phase 4: Audio Split/Join — 3/3 plans ✓
-- Phase 5: Audio Format Conversion — 3/3 plans ✓
-- Phase 6: Audio Enhancement — 3/3 plans ✓
-- Phase 7: Audio Effects — 4/4 plans ✓
-- Phase 8: Inline UI — 4/4 plans ✓
+**Plan:** —
 
-Last activity: 2026-02-21 — v2.0 milestone archived
+**Status:** Ready to plan Phase 9
+
+**Last activity:** 2026-02-21 — Milestone v3.0 initialized
 
 ## Progress
 
 ```
-v2.0 Navaja Suiza de Audio
-[████████████████████] 100% (6/6 phases) ✓ SHIPPED 2026-02-21
+v3.0 Downloader
+[░░░░░░░░░░░░░░░░░░░░] 0% (0/4 phases)
 
-Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
-Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
-Phase 5: Audio Format Conversion               [██████████] 100% (3/3 plans) ✓
-Phase 6: Audio Enhancement                     [██████████] 100% (3/3 plans) ✓
-Phase 7: Audio Effects                         [██████████] 100% (4/4 plans) ✓
-Phase 8: Inline User Interface                 [██████████] 100% (4/4 plans) ✓
+Phase 9:  Downloader Core Infrastructure    [░░░░░░░░░░] 0% (0/N plans)
+Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
+Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
+Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
 
 ## Accumulated Context
 
-**v1.0 SHIPPED:**
+**v1.0 SHIPPED (2026-02-14):**
 - Bot de Telegram que convierte videos en notas de video circulares
 - Procesamiento automático sin comandos
 - Funcionalidades avanzadas: conversión de formato, extracción de audio, split/join de video
@@ -44,7 +38,7 @@ Phase 8: Inline User Interface                 [██████████] 
 - Manejo robusto de errores con retry logic y graceful shutdown
 - ~2,971 LOC, 56 commits
 
-**v2.0 SHIPPED:**
+**v2.0 SHIPPED (2026-02-21):**
 - Herramienta versátil de procesamiento de audio tipo "navaja suiza"
 - 6 phases (3-8), 20 plans, ~9,254 LOC
 - Voice notes, split/join, format conversion (5 formats)
@@ -53,145 +47,25 @@ Phase 8: Inline User Interface                 [██████████] 
 - Inline contextual menus with Cancel/Back navigation
 - Timeline: Dec 2025 → Feb 2026
 
-### Roadmap Evolution
-
-- Phase 8 added: Interfaz de usuario con menú inline — Menú contextual automático que detecta tipo de archivo (video/audio) y presenta opciones disponibles sin necesidad de aprender comandos
-
-**Phase 3 Progress:**
-- Plan 03-01: Audio Processing Infrastructure — COMPLETED
-  - VoiceNoteConverter: MP3 → OGG Opus (voice notes)
-  - VoiceToMp3Converter: OGG Opus → MP3
-  - Audio validation functions (duration, integrity)
-  - Audio configuration (bitrate, duration limits)
-- Plan 03-02: Voice Note Handler — COMPLETED
-  - handle_audio_file: Process audio files as voice notes
-  - VoiceConversionError: Error handling for voice conversion
-  - Integration with TempManager for cleanup
-- Plan 03-03: Voice Message Processing — COMPLETED
-  - handle_voice_message: Convert voice messages to MP3
-  - VoiceToMp3Error: Error handling for voice to MP3 conversion
-  - Handlers registered: filters.VOICE, filters.AUDIO
-
-**Phase 4 Progress:**
-- Plan 04-01: Audio Split Infrastructure — COMPLETED
-- Plan 04-02: Audio Join Infrastructure — COMPLETED
-- Plan 04-03: Audio Split/Join Handlers — COMPLETED
-  - handle_split_audio_command: /split_audio command for splitting audio files
-  - handle_join_audio_start/done/cancel: /join_audio command for joining audio files
-  - handle_join_audio_file: Collects audio files during join session
-  - Session-based state management with context.user_data
-  - Shared /done and /cancel routing between video and audio join
-  - Updated help text with new commands
+**v3.0 IN PROGRESS:**
+- Downloader capabilities for popular platforms
+- Auto-detection of URLs without commands
+- Generic video URL support
+- Concurrent downloads with progress tracking
+- Integration with existing video/audio tools
 
 ## Active Plans
 
-- Plan 03-01: Audio Processing Infrastructure — COMPLETED (2026-02-18)
-- Plan 03-02: Voice Note Handler — COMPLETED (2026-02-18)
-- Plan 03-03: Voice Message Processing — COMPLETED (2026-02-18)
-- Plan 04-01: Audio Split Infrastructure — COMPLETED (2026-02-18)
-- Plan 04-02: Audio Join Infrastructure — COMPLETED (2026-02-18)
-- Plan 04-03: Audio Split/Join Handlers — COMPLETED (2026-02-18)
-  - handle_split_audio_command: /split_audio command for splitting audio files
-  - handle_join_audio_start/done/cancel: /join_audio command for joining audio files
-  - handle_join_audio_file: Collects audio files during join session
-- Plan 05-01: Audio Format Conversion Infrastructure — COMPLETED (2026-02-19)
-  - AudioFormatConverter: Convert between MP3, WAV, OGG, AAC, FLAC
-  - detect_audio_format: Automatic format detection using ffprobe
-  - AudioFormatConversionError: Error handling for format conversion
-- Plan 05-02: Audio Format Conversion Handlers — COMPLETED (2026-02-19)
-  - handle_convert_audio_command: /convert_audio command with inline keyboard
-  - handle_format_selection: Callback handler for format selection
-  - Support for MP3, WAV, OGG, AAC, FLAC format conversion
-- Plan 05-03: Metadata Preservation — COMPLETED (2026-02-19)
-  - extract_metadata: Extract ID3/Vorbis tags using ffprobe
-  - has_metadata_support: Check format metadata capabilities
-  - _log_metadata_preservation: Debug logging for metadata operations
-- Plan 06-01: Audio Enhancement Infrastructure — COMPLETED (2026-02-19)
-  - AudioEnhancer: Bass boost, treble boost, 3-band equalizer
-  - AudioEnhancementError: Error handling for audio enhancement
-  - ffmpeg filters: bass, treble, equalizer
-- Plan 06-02: Bass/Treble Boost Handlers — COMPLETED (2026-02-19)
-  - handle_bass_boost_command: /bass_boost command with intensity keyboard
-  - handle_treble_boost_command: /treble_boost command with intensity keyboard
-  - handle_intensity_selection: Callback handler for intensity selection
-  - Inline keyboard layout: 5+5 buttons for intensity 1-10
-- Plan 06-03: Equalizer Handler — COMPLETED (2026-02-19)
-  - handle_equalize_command: /equalize command with 3-band equalizer interface
-  - handle_equalizer_adjustment: Callback handler for +/- button adjustments
-  - _handle_equalizer_apply: Process audio with AudioEnhancer.equalize()
-  - Inline keyboard layout: 3 rows for bass/mid/treble + reset/apply buttons
-- Plan 07-01: Audio Effects Infrastructure — COMPLETED (2026-02-20)
-  - AudioEffects: Professional audio effects with method chaining
-  - denoise(): FFT noise reduction using afftdn filter
-  - compress(): Dynamic range compression using acompressor filter
-  - normalize(): EBU R128 loudness normalization using loudnorm filter
-  - AudioEffectsError: Error handling for audio effects
-- Plan 07-02: Denoise and Compress Handlers — COMPLETED (2026-02-20)
-  - handle_denoise_command: /denoise command with strength keyboard (1-10)
-  - handle_compress_command: /compress command with ratio presets (light/medium/heavy/extreme)
-  - handle_effect_selection: Unified callback handler for both effects
-  - Integration with AudioEffects class for processing
-- Plan 07-03: Normalize Handler — COMPLETED (2026-02-20)
-  - handle_normalize_command: /normalize command with preset keyboard (music/podcast/streaming)
-  - handle_normalize_selection: Callback handler for preset selection
-  - EBU R128 loudness normalization with 3 presets: -14/-16/-23 LUFS
-  - Integration with AudioEffects.normalize() for professional loudness normalization
-- Plan 07-04: Effects Pipeline Handler — COMPLETED (2026-02-20)
-  - handle_effects_command: /effects command with pipeline builder interface
-  - handle_pipeline_builder: Callback handler for add/preview/apply/cancel actions
-  - _handle_pipeline_apply: Process audio with chained AudioEffects methods
-  - Support for chaining denoise, compress, and normalize effects in sequence
-- Plan 08-01: Video Inline Menu — COMPLETED (2026-02-20)
-  - _get_video_menu_keyboard(): Inline menu with 4 video action options
-  - handle_video_menu_callback: Routes video actions (videonote, extract_audio, convert, split)
-  - handle_video_format_selection: Handles video format and audio extraction format selection
-  - Context storage pattern for file_id and correlation_id across callbacks
-- Plan 08-02: Audio Inline Menu — COMPLETED (2026-02-20)
-  - _get_audio_menu_keyboard(): Inline menu with 9 audio action options
-  - handle_audio_menu_callback: Routes audio actions (voicenote, convert, effects, etc.)
-  - handle_audio_menu_format_selection: Handles audio format selection from menu
-- Plan 08-03: Register Inline Menu Callback Handlers — COMPLETED (2026-02-20)
-  - All 4 new callback handlers registered in main.py
-  - 10 total callback patterns with no conflicts
-  - Pattern specificity comment added
-  - Help text updated to mention inline menus
-- Plan 08-04: Add Navigation (Cancel/Back) to Inline Menus — COMPLETED (2026-02-20)
-  - handle_cancel_callback: Universal cancel with comprehensive context cleanup
-  - handle_back_callback: Back navigation to video/audio parent menus
-  - Cancel/Back buttons added to 10 inline keyboards
-  - Navigation handlers registered before other callbacks for priority
+(None — milestone just started)
 
 ## Decisions Made
 
-1. **Voice bitrate 24k** — Optimized for speech transmission, efficient for Telegram
-2. **MP3 bitrate 192k** — Good quality for voice playback, widely compatible
-3. **Max voice duration 20 minutes** — Telegram voice note hard limit
-4. **Spanish error messages** — Consistent with existing validators.py convention
-5. **English logging** — Consistent with video_processor.py codebase pattern
-6. **Handler order matters** — VIDEO → VOICE → AUDIO for proper filter matching
-7. **Voice file extension .oga** — Telegram uses .oga for voice messages (OGG Opus)
-8. **Shared /done and /cancel commands** — Route based on session state (video first, then audio)
-- [Phase 05-audio-format-conversion]: Error handling follows existing pattern: Spanish messages, English logging
-- [Phase 05-audio-format-conversion]: Format detection uses ffprobe format_name field for reliability
-- [Phase 05-audio-format-conversion]: Codec settings optimized: MP3 at 192k (quality 2), FLAC compression level 5
-- [Phase 05-audio-format-conversion]: Inline keyboard layout: 3 + 2 buttons for format selection
-- [Phase 05-audio-format-conversion]: Input format detection prevents unnecessary conversion
-- [Phase 05-audio-format-conversion]: Metadata extraction uses ffprobe JSON output for structured parsing
-- [Phase 05-audio-format-conversion]: WAV format has limited metadata support (INFO chunks only)
-- [Phase 06-audio-enhancement]: Use ffmpeg bass/treble filters (simpler than firequalizer)
-- [Phase 06-audio-enhancement]: Output to MP3 format for maximum compatibility
-- [Phase 06-audio-enhancement]: Intensity 1-10 maps to 2-20dB for bass, 1.5-15dB for treble
-- [Phase 06-audio-enhancement]: EQ gain -10 to +10 maps to -15 to +15dB
-- [Phase 06-audio-enhancement]: Shared state keys allow only one enhancement session at a time
-- [Phase 06-audio-enhancement]: Keyboard layout 5+5 for intensity selection (better UX than 3+2)
-- [Phase 07-audio-effects]: Effect pipeline uses temp files for intermediate results
-- [Phase 07-audio-effects]: finalize() method required to complete chained effects
-- [Phase 07-audio-effects]: Context manager support for automatic cleanup
-- [Phase 07-audio-effects]: afftdn nr parameter maps strength 1-10 to 0.01-0.5 range
-- [Phase 07-audio-effects]: loudnorm uses LRA=11 for general audio (not speech-specific)
-- [Phase 07-audio-effects]: Pipeline state uses "pipeline_" prefix to avoid conflicts with individual effect handlers
-- [Phase 07-audio-effects]: Effects are applied in user-specified order (not auto-optimized)
-- [Phase 07-audio-effects]: Method chaining ensures single ffmpeg execution where possible
+**v3.0 Decisions (Pending Validation):**
+1. **yt-dlp for platform downloads** — Mature library, broad platform support
+2. **Auto-detect URLs in messages** — No /download command required
+3. **Generic video URL support** — Any URL with video file downloadable
+4. **Unlimited concurrent downloads** — Individual tracking per download
+5. **Real-time progress (5-10%)** — Visual feedback with percentage bar
 
 ## Blockers
 
@@ -199,34 +73,20 @@ Phase 8: Inline User Interface                 [██████████] 
 
 ## Next Actions
 
-1. Phase 8: Interfaz de usuario con menú inline — COMPLETED
-2. All 4 plans completed (08-01, 08-02, 08-03, 08-04)
-3. Ready to proceed to next phase
+1. Plan Phase 9: Downloader Core Infrastructure
+2. Start with URL detection and validation
+3. Implement generic video download capability
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-14)
-See: .planning/ROADMAP.md (v2.0 roadmap created 2026-02-14)
-See: .planning/phases/03-voice-notes-voice-message-processing/03-01-SUMMARY.md
-See: .planning/phases/03-voice-notes-voice-message-processing/03-02-SUMMARY.md
-See: .planning/phases/03-voice-notes-voice-message-processing/03-03-SUMMARY.md
-See: .planning/phases/04-audio-split-join/04-01-SUMMARY.md
-See: .planning/phases/04-audio-split-join/04-02-SUMMARY.md
-See: .planning/phases/04-audio-split-join/04-03-SUMMARY.md
-See: .planning/phases/05-audio-format-conversion/05-01-SUMMARY.md
-See: .planning/phases/05-audio-format-conversion/05-02-SUMMARY.md
-See: .planning/phases/05-audio-format-conversion/05-03-SUMMARY.md
-See: .planning/phases/06-audio-enhancement/06-01-SUMMARY.md
-See: .planning/phases/06-audio-enhancement/06-02-SUMMARY.md
-See: .planning/phases/06-audio-enhancement/06-03-SUMMARY.md
-See: .planning/phases/07-audio-effects/07-01-SUMMARY.md
-See: .planning/phases/07-audio-effects/07-02-SUMMARY.md
-See: .planning/phases/07-audio-effects/07-03-SUMMARY.md
-See: .planning/phases/07-audio-effects/07-04-SUMMARY.md
+See: .planning/PROJECT.md (updated 2026-02-21)
+See: .planning/REQUIREMENTS.md (v3.0 requirements)
+See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
-**Core value:** Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram.
-**Current focus:** v2.0 Navaja Suiza de Audio — Procesamiento completo de audio
+**Core value:** El usuario envía un video, archivo de audio, o URL de video y recibe el resultado procesado inmediatamente, sin fricción.
+
+**Current focus:** v3.0 Downloader — Descargas desde plataformas populares
 
 ---
 
-*Last updated: 2026-02-21 after completing v2.0 milestone (all 6 phases, 20 plans)*
+*Last updated: 2026-02-21 after starting v3.0 milestone*
