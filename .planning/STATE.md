@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 10-platform-handlers — IN PROGRESS
 
-**Plan:** 10-02
+**Plan:** 10-03
 
-**Status:** Instagram platform handler complete. 2/N plans in Phase 10.
+**Status:** TikTok and Twitter/X platform handlers complete. 3/N plans in Phase 10.
 
-**Last activity:** 2026-02-21 — Completed 10-02: InstagramDownloader with Reels/Stories support, enhanced metadata (username, caption, likes)
+**Last activity:** 2026-02-21 — Completed 10-03: TikTokDownloader with watermark-free option and slideshow detection, TwitterDownloader with quality selection and tweet metadata
 
 ## Progress
 
@@ -23,7 +23,7 @@ v3.0 Downloader
 [████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
-Phase 10: Platform Handlers                 [████░░░░░░] 40% (2/5 plans)
+Phase 10: Platform Handlers                 [██████░░░░] 60% (3/5 plans)
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
@@ -107,6 +107,16 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - Helper functions: `is_instagram_reel()`, `is_instagram_story()`, `extract_shortcode()`
 - Human-readable count formatting (1.5K, 2.3M)
 
+**10-03: TikTok and Twitter/X Platform Handlers** — COMPLETE
+- TikTokDownloader extends YtDlpDownloader with watermark-free option and slideshow detection
+- Watermark-free preference via format string `best[format_id!*=watermark]/best`
+- Enhanced metadata: author, stats (plays, likes, shares, comments), music info, aspect ratio (9:16)
+- TwitterDownloader extends YtDlpDownloader with quality selection and tweet metadata
+- Tweet metadata: tweet_id, username, tweet_text, engagement stats (replies, retweets, likes, views)
+- Video variants list for quality selection with `select_best_variant()` helper
+- GIF detection and support for both twitter.com and x.com domains
+- Spanish error messages for restricted/deleted content
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -156,6 +166,14 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 32. **Instagram-specific HTTP headers** — Custom User-Agent to avoid blocks
 33. **Caption formatting utility** — Normalize whitespace and truncate for display
 
+**10-03 Implementation Decisions:**
+34. **Watermark-free format preference** — Use `best[format_id!*=watermark]/best` for best-effort watermark removal
+35. **Slideshow detection via album/carousel** — Check for `album`, `carousel`, `image_list` keys in yt-dlp info
+36. **Video variants sorted by height** — Sort by resolution descending for quality selection
+37. **select_best_variant() helper** — Choose best quality under size limit for Telegram compatibility
+38. **GIF detection via format string** — Check for 'gif' in formats list
+39. **Support both Twitter domains** — Handle twitter.com and x.com URLs identically
+
 ## Blockers
 
 (None)
@@ -165,8 +183,8 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 1. ~~Phase 9: Downloader Core Infrastructure~~ DONE (4/4 plans)
 2. ~~10-01: YouTube Platform Handler~~ DONE
 3. ~~10-02: Instagram Platform Handler~~ DONE
-4. **10-03: TikTok Platform Handler** — Next step
-5. Continue with Twitter/X, Facebook platform handlers
+4. ~~10-03: TikTok and Twitter/X Platform Handlers~~ DONE
+5. **10-04: Facebook Platform Handler** — Next step
 
 ## Project Reference
 
@@ -180,4 +198,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 10-02*
+*Last updated: 2026-02-21 after completing 10-03*
