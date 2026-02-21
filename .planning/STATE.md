@@ -8,13 +8,13 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 ## Current Position
 
-**Phase:** 09-downloader-core — COMPLETE
+**Phase:** 10-platform-handlers — IN PROGRESS
 
-**Plan:** —
+**Plan:** 10-01
 
-**Status:** Phase 9 complete (4/4 plans). Ready for Phase 10 planning.
+**Status:** YouTube platform handler complete. 1/N plans in Phase 10.
 
-**Last activity:** 2026-02-21 — Completed 09-04: GenericDownloader with aiohttp streaming, Content-Type validation, progress callbacks
+**Last activity:** 2026-02-21 — Completed 10-01: YouTubeDownloader with Shorts detection, enhanced metadata, age-restriction handling
 
 ## Progress
 
@@ -23,7 +23,7 @@ v3.0 Downloader
 [████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
-Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
+Phase 10: Platform Handlers                 [██░░░░░░░░] 20% (1/5 plans)
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
@@ -89,6 +89,15 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - Automatic cleanup of partial files on failure
 - 12 video extensions and MIME types supported
 
+**10-01: YouTube Platform Handler** — COMPLETE
+- YouTubeDownloader extends YtDlpDownloader with platform-specific features
+- YouTube Shorts detection via `is_youtube_shorts()` function
+- Enhanced metadata extraction (view_count, like_count, upload_date, tags, categories)
+- Age-restricted content detection with Spanish error messages
+- View count formatting for display (1.2M views, 500K views)
+- Aspect ratio hints for Shorts (9:16 vertical format)
+- Support for all YouTube URL formats (watch, shorts, youtu.be, embed)
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -124,6 +133,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 22. **MIME type + extension fallback** — Check Content-Type header, fall back to URL extension
 23. **Generic first in routing** — Faster check for direct video URLs before trying yt-dlp
 
+**10-01 Implementation Decisions:**
+24. **Extend YtDlpDownloader for platform handlers** — Reuse thread pool, progress hooks, base metadata
+25. **Regex-first URL detection** — Fast pattern matching before yt-dlp validation
+26. **Aspect ratio hints for Shorts** — Signal 9:16 format for downstream processing
+27. **Spanish error messages** — Consistent with existing bot language for age-restricted content
+28. **View count formatting** — Human-readable display format (1.2M, 500K)
+
 ## Blockers
 
 (None)
@@ -131,8 +147,9 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 ## Next Actions
 
 1. ~~Phase 9: Downloader Core Infrastructure~~ DONE (4/4 plans)
-2. **Plan Phase 10: Platform Handlers** — Next step
-3. Implement platform-specific handlers for YouTube, Instagram, TikTok, Twitter/X, Facebook
+2. ~~10-01: YouTube Platform Handler~~ DONE
+3. **10-02: Instagram Platform Handler** — Next step
+4. Continue with TikTok, Twitter/X, Facebook platform handlers
 
 ## Project Reference
 
@@ -146,4 +163,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 09-04*
+*Last updated: 2026-02-21 after completing 10-01*
