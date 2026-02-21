@@ -8,7 +8,7 @@ Available platforms:
 - Instagram (via InstagramDownloader)
 - TikTok (via TikTokDownloader)
 - Twitter/X (via TwitterDownloader)
-- Facebook (planned)
+- Facebook (via FacebookDownloader)
 
 Example:
     from bot.downloaders.platforms import InstagramDownloader
@@ -59,6 +59,15 @@ from .twitter import (
     is_twitter_url,
 )
 
+# Import Facebook handlers (from 10-04)
+from .facebook import (
+    FACEBOOK_PATTERNS,
+    FacebookDownloader,
+    extract_facebook_video_id,
+    is_facebook_reel,
+    is_facebook_url,
+)
+
 __all__ = [
     # YouTube platform handler
     'YouTubeDownloader',
@@ -86,4 +95,10 @@ __all__ = [
     'extract_tweet_id',
     'extract_username',
     'TWITTER_PATTERNS',
+    # Facebook platform handler (from 10-04)
+    'FacebookDownloader',
+    'is_facebook_url',
+    'is_facebook_reel',
+    'extract_facebook_video_id',
+    'FACEBOOK_PATTERNS',
 ]

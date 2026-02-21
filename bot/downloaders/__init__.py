@@ -61,6 +61,18 @@ from .platforms import (
     # Twitter/X (from 10-03)
     TwitterDownloader,
     is_twitter_url,
+    # Facebook (from 10-04)
+    FacebookDownloader,
+    is_facebook_url,
+    is_facebook_reel,
+)
+
+# Import HTML extractor (from 10-04)
+from .html_extractor import (
+    HTMLVideoExtractor,
+    VideoURL,
+    extract_videos_from_html,
+    download_from_html,
 )
 
 
@@ -153,6 +165,15 @@ __all__ = [
     # Twitter/X (from 10-03)
     "TwitterDownloader",
     "is_twitter_url",
+    # Facebook (from 10-04)
+    "FacebookDownloader",
+    "is_facebook_url",
+    "is_facebook_reel",
+    # HTML extractor (from 10-04)
+    "HTMLVideoExtractor",
+    "VideoURL",
+    "extract_videos_from_html",
+    "download_from_html",
     # Helper functions
     "get_downloader_for_url",
 ]
