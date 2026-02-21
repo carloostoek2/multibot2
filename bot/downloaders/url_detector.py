@@ -7,7 +7,7 @@ type (platform-specific vs generic video URLs).
 import re
 import logging
 from enum import Enum, auto
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 from bot.downloaders import URLDetectionError, UnsupportedURLError
@@ -260,12 +260,54 @@ def is_video_url(url: str) -> bool:
     return URLDetector.is_supported(url)
 
 
+def classify_url_enhanced(url: str) -> Tuple[URLType, Optional[str]]:
+    """Classify URL with platform identification.
+
+    Returns:
+        Tuple of (URLType, platform_name)
+    """
+    basic_type = URLDetector.classify_url(url)
+
+    if basic_type == URLType.PLATFORM:
+        # Try to identify specific platform
+        checkers = _get_platform_checkers()
+        for platform, checker in checkers.items():
+            if checker(url):
+                return URLType.PLATFORM, platform
+        return URLType.PLATFORM, "unknown"
+
+    return basic_type, None
+
+
+# Import platform checkers for enhanced detection
+# Use lazy import to avoid circular dependencies
+def _get_platform_checkers():
+    try:
+        from .platforms import (
+            is_youtube_url,
+            is_instagram_url,
+            is_tiktok_url,
+            is_twitter_url,
+            is_facebook_url,
+        )
+        return {
+            "youtube": is_youtube_url,
+            "instagram": is_instagram_url,
+            "tiktok": is_tiktok_url,
+            "twitter": is_twitter_url,
+            "facebook": is_facebook_url,
+        }
+    except ImportError:
+        return {}
+
+
 # Export public API
 __all__ = [
     "URLType",
     "URLDetector",
     "detect_urls",
     "classify_url",
+    "classify_url_enhanced",
     "is_video_url",
     "PLATFORM_PATTERNS",
     "VIDEO_EXTENSIONS",
