@@ -23,7 +23,6 @@ class BotConfig:
 
     # Timeouts (seconds)
     PROCESSING_TIMEOUT: int = 60
-    DOWNLOAD_TIMEOUT: int = 60
     JOIN_TIMEOUT: int = 120
     JOIN_SESSION_TIMEOUT: int = 300
 
@@ -48,6 +47,28 @@ class BotConfig:
     JOIN_MAX_AUDIO_FILES: int = 20
     JOIN_MIN_AUDIO_FILES: int = 2
     JOIN_AUDIO_TIMEOUT: int = 120
+
+    # Download configuration (per QF-01, QF-02, QF-03, QF-05, DM-01, EH-03)
+    # File size limits (Telegram bot upload limit is 50MB)
+    DOWNLOAD_MAX_SIZE_MB: int = 50
+    DOWNLOAD_MAX_SIZE_GENERIC_MB: int = 50
+
+    # Timeout settings (seconds)
+    DOWNLOAD_TIMEOUT: int = 300  # 5 minutes for downloads
+    DOWNLOAD_METADATA_TIMEOUT: int = 30  # 30 seconds for metadata extraction
+
+    # Quality settings (yt-dlp format strings)
+    DOWNLOAD_VIDEO_FORMAT: str = "best[filesize<50M]/best"
+    DOWNLOAD_AUDIO_FORMAT: str = "bestaudio[filesize<50M]/bestaudio"
+    DOWNLOAD_AUDIO_QUALITY: str = "320"  # MP3 bitrate
+    DOWNLOAD_VIDEO_PREFERENCE: str = "mp4"  # Preferred container
+
+    # Concurrent download settings (DM-01)
+    DOWNLOAD_MAX_CONCURRENT: int = 5
+
+    # Retry settings (EH-03)
+    DOWNLOAD_MAX_RETRIES: int = 3
+    DOWNLOAD_RETRY_DELAY: int = 2  # seconds between retries
 
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -134,6 +155,50 @@ class BotConfig:
                 f"LOG_LEVEL must be one of {valid_log_levels} (got: {self.LOG_LEVEL})"
             )
 
+        # Validate download configuration
+        download_timeout_fields = [
+            ("DOWNLOAD_TIMEOUT", self.DOWNLOAD_TIMEOUT),
+            ("DOWNLOAD_METADATA_TIMEOUT", self.DOWNLOAD_METADATA_TIMEOUT),
+        ]
+        for name, value in download_timeout_fields:
+            if not isinstance(value, int) or value <= 0:
+                errors.append(f"{name} must be a positive integer (got: {value})")
+
+        # Validate download size limits (Telegram limit is 50MB for bots)
+        if not isinstance(self.DOWNLOAD_MAX_SIZE_MB, int) or self.DOWNLOAD_MAX_SIZE_MB <= 0:
+            errors.append(
+                f"DOWNLOAD_MAX_SIZE_MB must be a positive integer (got: {self.DOWNLOAD_MAX_SIZE_MB})"
+            )
+        if self.DOWNLOAD_MAX_SIZE_MB > 50:
+            errors.append(
+                f"DOWNLOAD_MAX_SIZE_MB must be 50 or less (Telegram limit) (got: {self.DOWNLOAD_MAX_SIZE_MB})"
+            )
+
+        if not isinstance(self.DOWNLOAD_MAX_SIZE_GENERIC_MB, int) or self.DOWNLOAD_MAX_SIZE_GENERIC_MB <= 0:
+            errors.append(
+                f"DOWNLOAD_MAX_SIZE_GENERIC_MB must be a positive integer (got: {self.DOWNLOAD_MAX_SIZE_GENERIC_MB})"
+            )
+        if self.DOWNLOAD_MAX_SIZE_GENERIC_MB > 50:
+            errors.append(
+                f"DOWNLOAD_MAX_SIZE_GENERIC_MB must be 50 or less (Telegram limit) (got: {self.DOWNLOAD_MAX_SIZE_GENERIC_MB})"
+            )
+
+        # Validate concurrent download limit
+        if not isinstance(self.DOWNLOAD_MAX_CONCURRENT, int) or self.DOWNLOAD_MAX_CONCURRENT < 1:
+            errors.append(
+                f"DOWNLOAD_MAX_CONCURRENT must be at least 1 (got: {self.DOWNLOAD_MAX_CONCURRENT})"
+            )
+
+        # Validate retry settings
+        if not isinstance(self.DOWNLOAD_MAX_RETRIES, int) or self.DOWNLOAD_MAX_RETRIES < 0:
+            errors.append(
+                f"DOWNLOAD_MAX_RETRIES must be a non-negative integer (got: {self.DOWNLOAD_MAX_RETRIES})"
+            )
+        if not isinstance(self.DOWNLOAD_RETRY_DELAY, int) or self.DOWNLOAD_RETRY_DELAY < 0:
+            errors.append(
+                f"DOWNLOAD_RETRY_DELAY must be a non-negative integer (got: {self.DOWNLOAD_RETRY_DELAY})"
+            )
+
         # Raise if any validation errors
         if errors:
             raise ValueError(
@@ -168,7 +233,6 @@ def load_config() -> BotConfig:
     return BotConfig(
         BOT_TOKEN=os.getenv("BOT_TOKEN", ""),
         PROCESSING_TIMEOUT=_int_env("PROCESSING_TIMEOUT", 60),
-        DOWNLOAD_TIMEOUT=_int_env("DOWNLOAD_TIMEOUT", 60),
         JOIN_TIMEOUT=_int_env("JOIN_TIMEOUT", 120),
         JOIN_SESSION_TIMEOUT=_int_env("JOIN_SESSION_TIMEOUT", 300),
         MAX_FILE_SIZE_MB=_int_env("MAX_FILE_SIZE_MB", 20),
@@ -185,6 +249,18 @@ def load_config() -> BotConfig:
         JOIN_MAX_AUDIO_FILES=_int_env("JOIN_MAX_AUDIO_FILES", 20),
         JOIN_MIN_AUDIO_FILES=_int_env("JOIN_MIN_AUDIO_FILES", 2),
         JOIN_AUDIO_TIMEOUT=_int_env("JOIN_AUDIO_TIMEOUT", 120),
+        # Download configuration
+        DOWNLOAD_MAX_SIZE_MB=_int_env("DOWNLOAD_MAX_SIZE_MB", 50),
+        DOWNLOAD_MAX_SIZE_GENERIC_MB=_int_env("DOWNLOAD_MAX_SIZE_GENERIC_MB", 50),
+        DOWNLOAD_TIMEOUT=_int_env("DOWNLOAD_TIMEOUT", 300),
+        DOWNLOAD_METADATA_TIMEOUT=_int_env("DOWNLOAD_METADATA_TIMEOUT", 30),
+        DOWNLOAD_VIDEO_FORMAT=os.getenv("DOWNLOAD_VIDEO_FORMAT", "best[filesize<50M]/best"),
+        DOWNLOAD_AUDIO_FORMAT=os.getenv("DOWNLOAD_AUDIO_FORMAT", "bestaudio[filesize<50M]/bestaudio"),
+        DOWNLOAD_AUDIO_QUALITY=os.getenv("DOWNLOAD_AUDIO_QUALITY", "320"),
+        DOWNLOAD_VIDEO_PREFERENCE=os.getenv("DOWNLOAD_VIDEO_PREFERENCE", "mp4"),
+        DOWNLOAD_MAX_CONCURRENT=_int_env("DOWNLOAD_MAX_CONCURRENT", 5),
+        DOWNLOAD_MAX_RETRIES=_int_env("DOWNLOAD_MAX_RETRIES", 3),
+        DOWNLOAD_RETRY_DELAY=_int_env("DOWNLOAD_RETRY_DELAY", 2),
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
     )
