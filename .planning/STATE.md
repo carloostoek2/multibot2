@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 10-platform-handlers — IN PROGRESS
 
-**Plan:** 10-01
+**Plan:** 10-02
 
-**Status:** YouTube platform handler complete. 1/N plans in Phase 10.
+**Status:** Instagram platform handler complete. 2/N plans in Phase 10.
 
-**Last activity:** 2026-02-21 — Completed 10-01: YouTubeDownloader with Shorts detection, enhanced metadata, age-restriction handling
+**Last activity:** 2026-02-21 — Completed 10-02: InstagramDownloader with Reels/Stories support, enhanced metadata (username, caption, likes)
 
 ## Progress
 
@@ -23,7 +23,7 @@ v3.0 Downloader
 [████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
-Phase 10: Platform Handlers                 [██░░░░░░░░] 20% (1/5 plans)
+Phase 10: Platform Handlers                 [████░░░░░░] 40% (2/5 plans)
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
@@ -98,6 +98,15 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - Aspect ratio hints for Shorts (9:16 vertical format)
 - Support for all YouTube URL formats (watch, shorts, youtu.be, embed)
 
+**10-02: Instagram Platform Handler** — COMPLETE
+- InstagramDownloader extends YtDlpDownloader with Instagram-specific features
+- Content type detection: POST (`/p/`), REEL (`/reel/`, `/reels/`), STORY (`/stories/`)
+- Enhanced metadata extraction (username, caption, likes_count, comments_count, view_count)
+- Aspect ratio hints for Reels (9:16 vertical format)
+- Spanish error messages for private content, expired stories, rate limiting
+- Helper functions: `is_instagram_reel()`, `is_instagram_story()`, `extract_shortcode()`
+- Human-readable count formatting (1.5K, 2.3M)
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -140,6 +149,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 27. **Spanish error messages** — Consistent with existing bot language for age-restricted content
 28. **View count formatting** — Human-readable display format (1.2M, 500K)
 
+**10-02 Implementation Decisions:**
+29. **Content type enum for Instagram** — POST, REEL, STORY classification via InstagramContentType
+30. **Shortcode extraction** — Parse unique identifiers from various Instagram URL patterns
+31. **Extended metadata extraction** — Re-extract with yt-dlp for Instagram-specific fields (likes, comments)
+32. **Instagram-specific HTTP headers** — Custom User-Agent to avoid blocks
+33. **Caption formatting utility** — Normalize whitespace and truncate for display
+
 ## Blockers
 
 (None)
@@ -148,8 +164,9 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 1. ~~Phase 9: Downloader Core Infrastructure~~ DONE (4/4 plans)
 2. ~~10-01: YouTube Platform Handler~~ DONE
-3. **10-02: Instagram Platform Handler** — Next step
-4. Continue with TikTok, Twitter/X, Facebook platform handlers
+3. ~~10-02: Instagram Platform Handler~~ DONE
+4. **10-03: TikTok Platform Handler** — Next step
+5. Continue with Twitter/X, Facebook platform handlers
 
 ## Project Reference
 
@@ -163,4 +180,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 10-01*
+*Last updated: 2026-02-21 after completing 10-02*
