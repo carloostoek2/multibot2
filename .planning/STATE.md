@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 09-downloader-core
 
-**Plan:** 09-02
+**Plan:** 09-03
 
-**Status:** Plan 09-02 complete - Base downloader architecture implemented
+**Status:** Plan 09-03 complete - YtDlpDownloader implemented for 1000+ platforms
 
-**Last activity:** 2026-02-21 — Completed 09-02: BaseDownloader ABC, DownloadOptions, exception hierarchy
+**Last activity:** 2026-02-21 — Completed 09-03: YtDlpDownloader with async thread pool, progress hooks, file size validation
 
 ## Progress
 
@@ -22,7 +22,7 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 v3.0 Downloader
 [░░░░░░░░░░░░░░░░░░░░] 0% (0/4 phases)
 
-Phase 9:  Downloader Core Infrastructure    [████░░░░░░] 50% (2/4 plans)
+Phase 9:  Downloader Core Infrastructure    [██████░░░░] 75% (3/4 plans)
 Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
 Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
@@ -70,6 +70,15 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - User-friendly Spanish error messages
 - Correlation ID support for request tracing (DM-02)
 
+**09-03: yt-dlp Downloader** — COMPLETE
+- YtDlpDownloader class implementing BaseDownloader
+- Support for 1000+ platforms (YouTube, Instagram, TikTok, Twitter/X, Facebook)
+- Thread pool async pattern for non-blocking operations
+- Real-time progress hooks via asyncio.run_coroutine_threadsafe
+- Pre-download file size validation (QF-05)
+- Audio extraction via FFmpegExtractAudio postprocessor (QF-03)
+- Proper error handling with correlation IDs (EH-01, EH-03)
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -91,6 +100,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 12. **Spanish user messages** — Align with existing bot language
 13. **URLDetectionError alias** — Maintains backwards compatibility with existing code
 
+**09-03 Implementation Decisions:**
+14. **Thread pool for yt-dlp operations** — All yt-dlp calls via asyncio.to_thread() to avoid blocking
+15. **process=False for can_handle** — Fast URL validation without full metadata extraction
+16. **run_coroutine_threadsafe for progress** — Thread-safe callback scheduling from worker threads
+17. **Pre-download size check** — Extract metadata first to validate size before downloading
+18. **Format string with filesize filter** — `best[filesize<50M]/best` prefers Telegram-compatible sizes
+
 ## Blockers
 
 (None)
@@ -100,7 +116,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 1. ~~Plan Phase 9: Downloader Core Infrastructure~~ DONE
 2. ~~Start with URL detection and validation~~ DONE
 3. ~~Implement base downloader architecture~~ DONE
-4. Implement yt-dlp integration for platforms (09-03)
+4. ~~Implement yt-dlp integration for platforms (09-03)~~ DONE
 5. Implement generic HTTP downloader (09-04)
 6. Add download progress tracking (09-05)
 
@@ -116,4 +132,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 09-02*
+*Last updated: 2026-02-21 after completing 09-03*
