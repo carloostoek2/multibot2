@@ -6,30 +6,47 @@ downloads (YouTube, Instagram, TikTok, Twitter/X, Facebook) as well
 as generic video URL downloads.
 """
 import logging
-from dataclasses import dataclass
-from typing import Optional
 
 # Set up package logger
 logger = logging.getLogger(__name__)
 
+# Import base classes and types
+from .base import (
+    BaseDownloader,
+    DownloadOptions,
+    TELEGRAM_MAX_FILE_SIZE,
+)
 
-class DownloadError(Exception):
-    """Base exception for download operations.
+# Import exception hierarchy
+from .exceptions import (
+    DownloadError,
+    DownloadFailedError,
+    FileTooLargeError,
+    MetadataExtractionError,
+    NetworkError,
+    URLDetectionError,  # Backwards compatibility alias
+    URLValidationError,
+    UnsupportedURLError,
+)
 
-    Raised when a download fails due to network issues, invalid URLs,
-    platform restrictions, or other download-related errors.
-    """
-    pass
+# Import URL detector components
+from .url_detector import (
+    URLDetector,
+    URLType,
+    detect_urls,
+    classify_url,
+    is_video_url,
+)
+
+# Placeholder imports for future modules
+# from .ytdlp_downloader import YtDlpDownloader
+# from .generic_downloader import GenericDownloader
 
 
-class URLDetectionError(DownloadError):
-    """Exception raised when URL detection or extraction fails."""
-    pass
-
-
-class UnsupportedURLError(DownloadError):
-    """Exception raised when a URL type is not supported."""
-    pass
+# DownloadResult for backwards compatibility
+# (New code should use the more specific result types from implementations)
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -48,29 +65,22 @@ class DownloadResult:
     metadata: Optional[dict] = None
 
 
-# Import URL detector components
-from .url_detector import (
-    URLDetector,
-    URLType,
-    detect_urls,
-    classify_url,
-    is_video_url,
-)
-
-# Placeholder imports for future modules
-# from .base import BaseDownloader
-# from .ytdlp_downloader import YtDlpDownloader
-# from .generic_downloader import GenericDownloader
-
-
 # Public API exports
 __all__ = [
-    # Exceptions
-    "DownloadError",
-    "URLDetectionError",
-    "UnsupportedURLError",
-    # Data classes
+    # Base classes and types
+    "BaseDownloader",
+    "DownloadOptions",
     "DownloadResult",
+    "TELEGRAM_MAX_FILE_SIZE",
+    # Exception hierarchy
+    "DownloadError",
+    "DownloadFailedError",
+    "FileTooLargeError",
+    "MetadataExtractionError",
+    "NetworkError",
+    "URLDetectionError",  # Backwards compatibility
+    "URLValidationError",
+    "UnsupportedURLError",
     # URL detection
     "URLDetector",
     "URLType",
@@ -78,7 +88,6 @@ __all__ = [
     "classify_url",
     "is_video_url",
     # Placeholder for future exports
-    # "BaseDownloader",
     # "YtDlpDownloader",
     # "GenericDownloader",
 ]
