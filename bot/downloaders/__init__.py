@@ -54,6 +54,13 @@ from .platforms import (
     is_instagram_reel,
     is_instagram_story,
     is_instagram_url,
+    # TikTok (from 10-03)
+    TikTokDownloader,
+    is_tiktok_url,
+    is_tiktok_slideshow,
+    # Twitter/X (from 10-03)
+    TwitterDownloader,
+    is_twitter_url,
 )
 
 
@@ -139,6 +146,13 @@ __all__ = [
     "is_instagram_reel",
     "is_instagram_story",
     "is_instagram_url",
+    # TikTok (from 10-03)
+    "TikTokDownloader",
+    "is_tiktok_url",
+    "is_tiktok_slideshow",
+    # Twitter/X (from 10-03)
+    "TwitterDownloader",
+    "is_twitter_url",
     # Helper functions
     "get_downloader_for_url",
 ]

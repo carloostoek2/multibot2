@@ -6,8 +6,8 @@ with enhanced metadata extraction and platform-specific optimizations.
 Available platforms:
 - YouTube (via YouTubeDownloader)
 - Instagram (via InstagramDownloader)
-- TikTok (planned)
-- Twitter/X (planned)
+- TikTok (via TikTokDownloader)
+- Twitter/X (via TwitterDownloader)
 - Facebook (planned)
 
 Example:
@@ -41,6 +41,24 @@ from .instagram import (
     is_instagram_url,
 )
 
+# Import TikTok handlers (from 10-03)
+from .tiktok import (
+    TIKTOK_PATTERNS,
+    TikTokDownloader,
+    extract_tiktok_id,
+    is_tiktok_slideshow,
+    is_tiktok_url,
+)
+
+# Import Twitter/X handlers (from 10-03)
+from .twitter import (
+    TWITTER_PATTERNS,
+    TwitterDownloader,
+    extract_tweet_id,
+    extract_username,
+    is_twitter_url,
+)
+
 __all__ = [
     # YouTube platform handler
     'YouTubeDownloader',
@@ -56,4 +74,16 @@ __all__ = [
     'extract_shortcode',
     'extract_username_from_url',
     'INSTAGRAM_PATTERNS',
+    # TikTok platform handler (from 10-03)
+    'TikTokDownloader',
+    'is_tiktok_url',
+    'is_tiktok_slideshow',
+    'extract_tiktok_id',
+    'TIKTOK_PATTERNS',
+    # Twitter/X platform handler (from 10-03)
+    'TwitterDownloader',
+    'is_twitter_url',
+    'extract_tweet_id',
+    'extract_username',
+    'TWITTER_PATTERNS',
 ]
