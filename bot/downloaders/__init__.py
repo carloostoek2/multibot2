@@ -89,12 +89,23 @@ from .html_extractor import (
     download_from_html,
 )
 
-# Import platform router (new)
+# Import platform router
 from .platform_router import (
     PlatformRouter,
     RouteResult,
     get_downloader_for_url,
     route_url,
+)
+
+# Import progress tracker (new)
+from .progress_tracker import (
+    ProgressTracker,
+    create_progress_callback,
+    format_bytes,
+    format_eta,
+    format_progress_bar,
+    format_progress_message,
+    format_speed,
 )
 
 # DownloadResult for backwards compatibility
@@ -166,9 +177,17 @@ __all__ = [
     "VideoURL",
     "extract_videos_from_html",
     "download_from_html",
-    # Platform router (new)
+    # Platform router
     "PlatformRouter",
     "RouteResult",
     "get_downloader_for_url",
     "route_url",
+    # Progress tracker (new)
+    "ProgressTracker",
+    "create_progress_callback",
+    "format_bytes",
+    "format_eta",
+    "format_progress_bar",
+    "format_progress_message",
+    "format_speed",
 ]
