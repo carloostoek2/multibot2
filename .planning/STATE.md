@@ -2,22 +2,29 @@
 
 ## Current Milestone
 
-**v2.0: Navaja Suiza de Audio** — In progress
+**v2.0: Navaja Suiza de Audio** — COMPLETE ✓ (shipped 2026-02-21)
 
-Goal: Expandir el bot con comandos completos de procesamiento de audio.
+Next: Use `/gsd:new-milestone` to start v2.1 or v3.0 planning.
 
 ## Current Position
 
-Phase: 08-interfaz-usuario-menu-inline
-Plan: 04 (completed)
-Status: Phase 8 COMPLETE - All inline menu handlers registered with navigation
-Last activity: 2026-02-20 — Plan 08-04 completed (Add Navigation Cancel/Back to Inline Menus)
+**MILESTONE v2.0 COMPLETE**
+
+All 6 phases (3-8) completed with 20 plans total.
+- Phase 3: Voice Notes & VMP — 3/3 plans ✓
+- Phase 4: Audio Split/Join — 3/3 plans ✓
+- Phase 5: Audio Format Conversion — 3/3 plans ✓
+- Phase 6: Audio Enhancement — 3/3 plans ✓
+- Phase 7: Audio Effects — 4/4 plans ✓
+- Phase 8: Inline UI — 4/4 plans ✓
+
+Last activity: 2026-02-21 — v2.0 milestone archived
 
 ## Progress
 
 ```
 v2.0 Navaja Suiza de Audio
-[░░░░░░░░░░░░░░░░░░░░] 0% (0/5 phases)
+[████████████████████] 100% (6/6 phases) ✓ SHIPPED 2026-02-21
 
 Phase 3: Voice Notes & Voice Message Processing [██████████] 100% (3/3 plans) ✓
 Phase 4: Audio Split/Join                      [██████████] 100% (3/3 plans) ✓
@@ -37,10 +44,14 @@ Phase 8: Inline User Interface                 [██████████] 
 - Manejo robusto de errores con retry logic y graceful shutdown
 - ~2,971 LOC, 56 commits
 
-**v2.0 Roadmap Defined:**
-- 5 phases (3-7)
-- 21 requirements mapped
-- Focus: Procesamiento completo de audio
+**v2.0 SHIPPED:**
+- Herramienta versátil de procesamiento de audio tipo "navaja suiza"
+- 6 phases (3-8), 20 plans, ~9,254 LOC
+- Voice notes, split/join, format conversion (5 formats)
+- Audio enhancement: bass/treble boost, 3-band EQ
+- Professional effects: denoise, compress, normalize, pipeline
+- Inline contextual menus with Cancel/Back navigation
+- Timeline: Dec 2025 → Feb 2026
 
 ### Roadmap Evolution
 
@@ -218,4 +229,4 @@ See: .planning/phases/07-audio-effects/07-04-SUMMARY.md
 
 ---
 
-*Last updated: 2026-02-20 after completing Plan 08-04 (Add Navigation Cancel/Back to Inline Menus)*
+*Last updated: 2026-02-21 after completing v2.0 milestone (all 6 phases, 20 plans)*

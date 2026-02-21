@@ -1,12 +1,12 @@
 # Roadmap: Video Note Bot
 
 **Project:** Video Note Bot
-**Current Version:** v2.0 IN PROGRESS
+**Current Version:** v2.0 SHIPPED
 
 ## Milestones
 
 - ✅ **v1.0 MVP** — Phases 1-2 (shipped 2026-02-14)
-- 🚧 **v2.0 Navaja Suiza de Audio** — Phases 3-8 (in progress)
+- ✅ **v2.0 Navaja Suiza de Audio** — Phases 3-8 (shipped 2026-02-21)
 
 ---
 
@@ -23,154 +23,36 @@
 
 ---
 
-## Phase 3: Voice Notes & Voice Message Processing
+<details>
+<summary>✅ v1.0 MVP (Phases 1-2) — SHIPPED 2026-02-14</summary>
 
-**Goal:** Usuarios pueden convertir archivos MP3 a notas de voz de Telegram y viceversa.
+- [x] Phase 1: Core Video Processing (3/3 plans) — completed 2026-02-13
+- [x] Phase 1.1: Expandir procesamiento (3/3 plans) — completed 2026-02-13
+- [x] Phase 2: Error Handling & Config (5/5 plans) — completed 2026-02-14
 
-**Requirements:** VN-01, VN-02, VN-03, VMP-01, VMP-02
+**Archive:** [v1.0 Roadmap](milestones/v1.0-ROADMAP.md) | [v1.0 Requirements](milestones/v1.0-REQUIREMENTS.md)
 
-**Dependencies:** None (builds on v1.0 foundation)
+</details>
 
-**Success Criteria:**
+<details>
+<summary>✅ v2.0 Navaja Suiza de Audio (Phases 3-8) — SHIPPED 2026-02-21</summary>
 
-1. Usuario envía archivo MP3 y recibe nota de audio (voice note) de Telegram en formato OGG Opus
-2. Archivos MP3 de más de 20 minutos son truncados automáticamente al límite de Telegram
-3. Usuario envía nota de voz (voice message) y recibe archivo MP3 descargable
-4. Bot detecta automáticamente notas de voz entrantes sin necesidad de comandos
-5. Conversión preserva calidad de audio dentro de límites razonables de tamaño
+- [x] Phase 3: Voice Notes & Voice Message Processing (3/3 plans) — completed 2026-02-18
+- [x] Phase 4: Audio Split/Join (3/3 plans) — completed 2026-02-18
+- [x] Phase 5: Audio Format Conversion (3/3 plans) — completed 2026-02-19
+- [x] Phase 6: Audio Enhancement (3/3 plans) — completed 2026-02-19
+- [x] Phase 7: Audio Effects (4/4 plans) — completed 2026-02-20
+- [x] Phase 8: Interfaz de usuario con menú inline (4/4 plans) — completed 2026-02-20
 
-**Plans:** 3 plans
+**Archive:** [v2.0 Roadmap](milestones/v2.0-ROADMAP.md) | [v2.0 Requirements](milestones/v2.0-REQUIREMENTS.md)
 
-Plans:
-- [x] 03-01-PLAN.md — Crear módulo audio_processor.py con clases de conversión (VoiceNoteConverter, VoiceToMp3Converter), configuración y validación
-- [x] 03-02-PLAN.md — Implementar handler para archivos de audio a voice notes (MP3 → OGG Opus)
-- [x] 03-03-PLAN.md — Implementar detección automática y conversión de voice messages a MP3
-
----
-
-## Phase 4: Audio Split/Join
-
-**Goal:** Usuarios pueden dividir archivos de audio en segmentos y unir múltiples archivos.
-
-**Requirements:** ASJ-01, ASJ-02, ASJ-03, ASJ-04, ASJ-05
-
-**Dependencies:** Phase 3 (usa infraestructura de procesamiento de audio)
-
-**Success Criteria:**
-
-1. Usuario puede usar comando /split_audio para dividir audio en segmentos de duración especificada (ej: cada 30 segundos)
-2. Usuario puede usar comando /split_audio para dividir audio en N segmentos iguales
-3. Usuario puede usar comando /join_audio para unir múltiples archivos de audio en uno solo
-4. Split genera archivos numerados secuencialmente (part1, part2, etc.)
-5. Join acepta múltiples archivos en un solo mensaje o en secuencia
-
-**Plans:** 3 plans
-
-Plans:
-- [x] 04-01-PLAN.md — Crear AudioSplitter class para dividir archivos de audio por duración o número de partes
-- [x] 04-02-PLAN.md — Crear AudioJoiner class para unir múltiples archivos de audio
-- [x] 04-03-PLAN.md — Implementar comandos /split_audio y /join_audio con handlers
+</details>
 
 ---
 
-## Phase 5: Audio Format Conversion
+### 📋 Next Milestone (Planned)
 
-**Goal:** Usuarios pueden convertir archivos de audio entre múltiples formatos.
-
-**Requirements:** AFC-01, AFC-02, AFC-03
-
-**Dependencies:** Phase 3 (usa infraestructura base de conversión)
-
-**Success Criteria:**
-
-1. Usuario puede usar comando /convert_audio con selección de formato de salida (MP3, WAV, OGG, AAC, FLAC)
-2. Conversión soporta todos los formatos: MP3, WAV, OGG, AAC, FLAC
-3. Metadatos del audio (título, artista, etc.) se preservan cuando el formato lo permite
-4. Bot detecta formato de entrada automáticamente
-5. Archivos convertidos mantienen calidad apropiada para el formato seleccionado
-
-**Plans:** 3 plans
-
-Plans:
-- [ ] 05-01-PLAN.md — Crear AudioFormatConverter class con soporte para MP3, WAV, OGG, AAC, FLAC y detección automática de formato
-- [x] 05-02-PLAN.md — Implementar comando /convert_audio con selección de formato vía teclado inline
-- [x] 05-03-PLAN.md — Implementar preservación de metadatos durante la conversión
-
-**Plans:** 3 plans
-
-Plans:
-- [x] 05-01-PLAN.md — Crear AudioFormatConverter class con soporte para MP3, WAV, OGG, AAC, FLAC y detección automática de formato
-- [x] 05-02-PLAN.md — Implementar comando /convert_audio con selección de formato vía teclado inline
-- [x] 05-03-PLAN.md — Implementar preservación de metadatos durante la conversión
-
----
-
-## Phase 6: Audio Enhancement
-
-**Goal:** Usuarios pueden aplicar mejoras de audio: bass boost, treble boost, y ecualización.
-
-**Requirements:** AE-01, AE-02, AE-03, AE-04
-
-**Dependencies:** Phase 3 (usa infraestructura de procesamiento ffmpeg)
-
-**Success Criteria:**
-
-1. Usuario puede usar comando /bass_boost con parámetro de intensidad para aumentar frecuencias bajas
-2. Usuario puede usar comando /treble_boost con parámetro de intensidad para aumentar frecuencias altas
-3. Usuario puede usar comando /equalize para ajustar 3 bandas: bass, mid, treble
-4. Parámetros de intensidad son ajustables (ej: nivel 1-10 o porcentaje)
-5. Procesamiento aplica filtros ffmpeg apropiados sin distorsión excesiva
-
-**Plans:** 3 plans
-
-Plans:
-- [x] 06-01-PLAN.md — Crear AudioEnhancer class con bass boost, treble boost y ecualizador de 3 bandas
-- [x] 06-02-PLAN.md — Implementar comandos /bass_boost y /treble_boost con selección de intensidad
-- [x] 06-03-PLAN.md — Implementar comando /equalize con interfaz interactiva de 3 bandas
-
----
-
-## Phase 7: Audio Effects
-
-**Goal:** Usuarios pueden aplicar efectos profesionales: reducción de ruido, compresión, normalización.
-
-**Requirements:** AFX-01, AFX-02, AFX-03, AFX-04
-
-**Dependencies:** Phase 3, Phase 6 (usa infraestructura de filtros ffmpeg)
-
-**Success Criteria:**
-
-1. Usuario puede usar comando /denoise para aplicar reducción de ruido de fondo
-2. Usuario puede usar comando /compress para aplicar compresión de rango dinámico
-3. Usuario puede usar comando /normalize para normalizar el volumen del audio
-4. Nivel de efecto es ajustable donde aplique (intensidad de reducción de ruido, ratio de compresión)
-5. Efectos pueden combinarse en pipeline (ej: denoise → normalize)
-
----
-
-## Phase 8: Interfaz de usuario con menú inline para archivos de video y audio
-
-**Goal:** Usuarios pueden acceder a todas las funcionalidades vía menú inline contextual según tipo de archivo, eliminando la necesidad de aprender comandos.
-
-**Requirements:** UI-01, UI-02, UI-03
-
-**Dependencies:** Phases 1-7 (todas las funcionalidades de video y audio deben estar implementadas)
-
-**Success Criteria:**
-
-1. Al recibir un archivo de video, el bot presenta automáticamente un menú inline con opciones disponibles para video (nota de video, extraer audio, convertir formato, etc.)
-2. Al recibir un archivo de audio, el bot presenta automáticamente un menú inline con opciones disponibles para audio (voice note, convertir formato, efectos, mejora, etc.)
-3. El menú es contextual y solo muestra opciones relevantes para el tipo de archivo recibido
-4. No se requieren comandos para acceder a las funcionalidades principales
-5. Los comandos existentes siguen funcionando para usuarios avanzados (compatibilidad hacia atrás)
-
-**Plans:** 4 plans
-
-Plans:
-- [x] 08-01-PLAN.md — Implementar menú inline para archivos de video con opciones: nota de video, extraer audio, convertir formato, dividir video
-- [x] 08-02-PLAN.md — Implementar menú inline para archivos de audio con opciones: nota de voz, convertir formato, efectos (bass/treble/ecualizar), mejoras (denoise/compress/normalize), pipeline
-- [x] 08-03-PLAN.md — Registrar handlers de callback en main.py y actualizar imports, asegurando compatibilidad con comandos existentes
-- [x] 08-04-PLAN.md — Agregar navegación (Cancelar/Volver) a todos los menús inline de múltiples pasos
+No phases planned yet. Use `/gsd:new-milestone` to start planning v2.1 or v3.0.
 
 ---
 
@@ -192,7 +74,7 @@ Plans:
 
 ---
 
-*Last updated: 2026-02-20 — Phase 8 complete with 4 plans*
+*Last updated: 2026-02-21 — v2.0 milestone complete*
 
 ---
 
@@ -215,5 +97,4 @@ Plans:
 ---
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
-
-*Last updated: 2026-02-19 — Phase 5 planned*
+*For v2.0 archive, see .planning/milestones/v2.0-ROADMAP.md*

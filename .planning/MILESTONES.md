@@ -36,3 +36,40 @@ v1.0
 ---
 
 *For current status, see .planning/ROADMAP.md*
+
+## v2.0 Navaja Suiza de Audio — SHIPPED 2026-02-21
+
+**Phases:** 3-8 (6 phases)
+**Plans:** 20 total
+**Commits:** 59 feature commits
+**Lines of Code:** ~9,254 Python
+**Timeline:** 2026-02-18 → 2026-02-20 (2 days active development)
+
+### Delivered
+
+Herramienta versátil de procesamiento de audio tipo "navaja suiza" para archivos de audio en Telegram, con menús inline contextuales que eliminan la necesidad de aprender comandos.
+
+### Key Accomplishments
+
+1. **Voice Notes & Voice Message Processing** — MP3 ↔ OGG Opus bidirectional conversion with automatic truncation for 20+ min files
+2. **Audio Split/Join** — `/split_audio` to divide by duration or N parts, `/join_audio` to merge multiple files
+3. **Audio Format Conversion** — Support for MP3, WAV, OGG, AAC, FLAC with metadata preservation (ID3/Vorbis tags)
+4. **Audio Enhancement** — `/bass_boost` and `/treble_boost` with intensity 1-10, `/equalize` with 3-band EQ
+5. **Professional Audio Effects** — `/denoise` (FFT noise reduction), `/compress` (dynamic range), `/normalize` (EBU R128 loudness)
+6. **Effects Pipeline** — `/effects` command to chain multiple effects (denoise → compress → normalize)
+7. **Inline Menu Interface** — Automatic contextual menus for video/audio files with 13 action options, no commands needed
+8. **Navigation UX** — Universal Cancel/Back buttons on all submenus with full context cleanup
+
+### Archive
+
+- [v2.0 Roadmap](milestones/v2.0-ROADMAP.md)
+- [v2.0 Requirements](milestones/v2.0-REQUIREMENTS.md)
+
+### Git Tag
+
+```
+v2.0
+```
+
+---
+

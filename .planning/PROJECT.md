@@ -2,22 +2,22 @@
 
 ## What This Is
 
-Un bot de Telegram que recibe videos enviados por usuarios y los convierte automáticamente en notas de video (video notes) circulares de Telegram, sin necesidad de comandos ni interacción adicional. Incluye funcionalidades avanzadas de procesamiento: cambio de formato, extracción de audio, división y unión de videos.
+Un bot de Telegram que recibe videos y archivos de audio enviados por usuarios y los procesa automáticamente. Convierte videos a notas de video circulares, y ofrece una "navaja suiza" de procesamiento de audio: conversión de formatos, split/join, efectos profesionales (denoise, compresión, normalización), ecualización, y menús inline contextuales que eliminan la necesidad de aprender comandos.
 
 ## Current State
 
-**v1.0 SHIPPED** — 2026-02-14
+**v2.0 SHIPPED** — 2026-02-21
 
-Bot funcional con procesamiento automático de videos a video notes, manejo robusto de errores, y configuración completa vía variables de entorno.
+Bot completo con procesamiento automático de videos a video notes y "navaja suiza" de audio: conversión de formatos, efectos profesionales, ecualización, split/join, y menús inline contextuales.
 
-- 11 planes completados (3 fases)
-- ~2,971 líneas de Python
-- 56 commits
-- Timeline: 62 días
+- 31 planes completados (8 fases)
+- ~9,254 líneas de Python
+- 115+ commits
+- Timeline: Dec 2025 → Feb 2026 (~68 días)
 
 ## Core Value
 
-El usuario envía un video y recibe inmediatamente una nota de video circular, sin fricción ni pasos intermedios.
+El usuario envía un video o archivo de audio y recibe el resultado procesado inmediatamente, sin fricción. Para usuarios avanzados, comandos poderosos. Para todos, menús inline contextuales que eliminan la curva de aprendizaje.
 
 ## Requirements
 
@@ -38,12 +38,54 @@ El usuario envía un video y recibe inmediatamente una nota de video circular, s
 - ✓ CONF-01 — Configuración mediante variables de entorno
 - ✓ CONF-02 — Logging básico de operaciones
 
+### Validated (v2.0 Navaja Suiza de Audio)
+
+**Voice Notes & Voice Messages:**
+- ✓ VN-01 — Convertir MP3 a voice notes de Telegram (OGG Opus)
+- ✓ VN-02 — Truncar automáticamente archivos de más de 20 minutos
+- ✓ VN-03 — Preservar calidad de audio en conversiones
+- ✓ VMP-01 — Detectar automáticamente notas de voz entrantes
+- ✓ VMP-02 — Convertir voice messages a MP3 descargable
+
+**Audio Split/Join:**
+- ✓ ASJ-01 — Dividir audio en segmentos por duración
+- ✓ ASJ-02 — Dividir audio en N segmentos iguales
+- ✓ ASJ-03 — Unir múltiples archivos de audio
+- ✓ ASJ-04 — Generar archivos numerados secuencialmente
+- ✓ ASJ-05 — Aceptar múltiples archivos en secuencia
+
+**Audio Format Conversion:**
+- ✓ AFC-01 — Selección de formato de salida vía teclado inline
+- ✓ AFC-02 — Soportar MP3, WAV, OGG, AAC, FLAC
+- ✓ AFC-03 — Preservar metadatos cuando el formato lo permite
+
+**Audio Enhancement:**
+- ✓ AE-01 — Bass boost con intensidad ajustable
+- ✓ AE-02 — Treble boost con intensidad ajustable
+- ✓ AE-03 — Ecualizador de 3 bandas (bass, mid, treble)
+- ✓ AE-04 — Parámetros sin distorsión excesiva
+
+**Audio Effects:**
+- ✓ AFX-01 — Reducción de ruido con intensidad ajustable
+- ✓ AFX-02 — Compresión de rango dinámico
+- ✓ AFX-03 — Normalización EBU R128
+- ✓ AFX-04 — Pipeline para combinar efectos
+
+**User Interface:**
+- ✓ UI-01 — Menú inline automático para archivos de video
+- ✓ UI-02 — Menú inline automático para archivos de audio
+- ✓ UI-03 — Menús contextuales sin necesidad de comandos
+
 ### Active (Next Milestone)
 
-- [ ] FEAT-01 — Soporte para videos enviados como archivo (document)
-- [ ] FEAT-02 — Barra de progreso mientras se procesa el video
-- [ ] FEAT-03 — Estadísticas de uso
-- [ ] FEAT-04 — Opción de ajustar el punto de recorte
+_Planning for v2.1 or v3.0 — use `/gsd:new-milestone` to define requirements_
+
+Potential areas:
+- Barra de progreso durante procesamiento de archivos grandes
+- Estadísticas básicas de uso
+- Ajuste del punto de recorte en video notes (centrado/arriba/abajo)
+- Soporte para archivos más grandes con procesamiento en chunks
+- Más formatos de audio/video
 
 ### Out of Scope
 
@@ -71,10 +113,13 @@ El usuario envía un video y recibe inmediatamente una nota de video circular, s
 - Manejo de errores con retry logic y correlation IDs
 
 **Estado Técnico:**
-- 11 planes completados en 3 fases
+- 31 planes completados en 8 fases (v1.0 + v2.0)
 - Código estable, probado en Android/Termux
 - Manejo de errores robusto para producción
 - Documentación de configuración completa (.env.example)
+- ~9,254 LOC Python, 115+ commits
+- Audio: 5 formatos soportados, 7 efectos profesionales, 3 herramientas de mejora
+- UI: 13 acciones vía menú inline contextual
 
 ## Constraints
 
@@ -87,6 +132,15 @@ El usuario envía un video y recibe inmediatamente una nota de video circular, s
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
+| **v2.0 Decisions** |||
+| Voice bitrate 24k | Optimized for speech transmission | ✓ Good |
+| MP3 bitrate 192k | Good quality, widely compatible | ✓ Good |
+| Max voice duration 20 min | Telegram voice note hard limit | ✓ Good |
+| Method chaining for effects | Single ffmpeg execution where possible | ✓ Good |
+| Effect pipeline with temp files | Clean intermediate results | ✓ Good |
+| Inline contextual menus | No commands needed for basic use | ✓ Good |
+| Universal cancel callback | Consistent UX across all flows | ✓ Good |
+| **v1.0 Decisions** |||
 | python-telegram-bot v20+ | Librería estable para bots con async/await | ✓ Good |
 | ffmpeg | Standard para procesamiento de video | ✓ Good |
 | Procesamiento síncrono | Simplifica MVP, un video a la vez | ✓ Good |
@@ -100,27 +154,35 @@ El usuario envía un video y recibe inmediatamente una nota de video circular, s
 | Exponential backoff retries | Resilience contra fallos | ✓ Good |
 | Correlation IDs para tracing | Debugging en producción | ✓ Good |
 
-## Current Milestone: v2.0 Navaja Suiza de Audio
+## Completed Milestones
 
-**Goal:** Expandir el bot con comandos completos de procesamiento de audio, convirtiéndolo en una herramienta versátil tipo "navaja suiza" para archivos de audio.
+### v2.0 Navaja Suiza de Audio — SHIPPED 2026-02-21
 
-**Target features:**
-- Conversión MP3 → nota de audio de Telegram (voice note)
-- Split/Join de archivos de audio
-- Conversión entre formatos (MP3, WAV, OGG, AAC, FLAC)
-- Audio enhancement: boost de bajos, boost de agudos, ecualización
-- Efectos: reducción de ruido, compresión, normalización
-- Conversión automática de notas de voz recibidas → MP3
+**Delivered:** Herramienta versátil de procesamiento de audio con 20 planes en 6 fases, menús inline contextuales, y navegación UX completa.
 
-## Next Milestone Goals (Future)
+**Key accomplishments:**
+- Voice Notes & Voice Message Processing (bidirectional conversion)
+- Audio Split/Join commands
+- Audio Format Conversion (5 formats with metadata preservation)
+- Audio Enhancement (bass/treble boost, 3-band EQ)
+- Professional Audio Effects (denoise, compress, normalize, pipeline)
+- Inline Menu Interface (13 actions, no commands needed)
 
-**v2.1 Ideas:**
-- Soporte para videos como documentos (no solo video messages)
-- Barra de progreso durante procesamiento
-- Estadísticas básicas de uso
-- Ajuste del punto de recorte (centrado/arriba/abajo)
+### v1.0 MVP — SHIPPED 2026-02-14
+
+**Delivered:** Bot de Telegram para conversión automática de videos a notas de video circulares.
+
+**Key accomplishments:**
+- Core video processing automation
+- Format conversion & audio extraction
+- Video split/join
+- Error handling & configuration
+
+## Next Milestone
+
+_No milestone planned. Use `/gsd:new-milestone` to start v2.1 or v3.0 planning._
 
 ---
 
-*Last updated: 2026-02-14 after starting v2.0 milestone*
+*Last updated: 2026-02-21 after completing v2.0 milestone*
 </content>
