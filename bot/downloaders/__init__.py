@@ -53,7 +53,7 @@ async def get_downloader_for_url(url: str) -> Optional[BaseDownloader]:
     """Get appropriate downloader for a URL.
 
     Returns GenericDownloader for direct video URLs.
-    Returns YtDlpDownloader for platform URLs (when implemented).
+    Returns YtDlpDownloader for platform URLs.
 
     Args:
         url: The URL to find a downloader for
@@ -114,8 +114,7 @@ __all__ = [
     "is_video_url",
     # Downloader implementations
     "GenericDownloader",
+    "YtDlpDownloader",
     # Helper functions
     "get_downloader_for_url",
-    # Placeholder for future exports
-    # "YtDlpDownloader",
 ]
