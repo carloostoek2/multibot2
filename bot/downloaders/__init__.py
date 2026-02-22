@@ -117,6 +117,13 @@ from .retry_handler import (
     is_retryable_error,
 )
 
+# Import download lifecycle
+from .download_lifecycle import (
+    DownloadLifecycle,
+    IsolatedDownload,
+    cleanup_download,
+)
+
 # DownloadResult for backwards compatibility
 from dataclasses import dataclass
 from typing import Optional
@@ -197,7 +204,7 @@ __all__ = [
     "RouteResult",
     "get_downloader_for_url",
     "route_url",
-    # Progress tracker (new)
+    # Progress tracker
     "ProgressTracker",
     "create_progress_callback",
     "format_bytes",
@@ -205,4 +212,8 @@ __all__ = [
     "format_progress_bar",
     "format_progress_message",
     "format_speed",
+    # Download lifecycle
+    "DownloadLifecycle",
+    "IsolatedDownload",
+    "cleanup_download",
 ]
