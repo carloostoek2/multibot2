@@ -492,7 +492,8 @@ if __name__ == "__main__":
         temp_path_created = None
 
         # Test básico de contexto
-        with IsolatedDownload(correlation_id) as temp_dir:
+        isolated = IsolatedDownload(correlation_id)
+        with isolated as temp_dir:
             temp_path_created = temp_dir
             print(f"  Directorio temporal creado: {temp_dir}")
 
@@ -507,9 +508,10 @@ if __name__ == "__main__":
             assert os.path.exists(test_file), "Archivo no creado"
             print(f"  ✓ Archivo creado exitosamente")
 
-            # Verificar get_path
-            path_via_get = IsolatedDownload(correlation_id).get_path("other.txt")
-            # Nota: este es un nuevo IsolatedDownload, no el del contexto
+            # Verificar get_path usando el mismo contexto
+            path_via_get = isolated.get_path("other.txt")
+            assert path_via_get.startswith(temp_dir), "get_path no retorna path correcto"
+            print(f"  ✓ get_path funciona: {path_via_get}")
 
         # Verificar que se limpió al salir del contexto
         assert not os.path.exists(temp_path_created), "Directorio no fue limpiado"
@@ -695,30 +697,24 @@ if __name__ == "__main__":
 
         correlation_id = "test008"
 
-        # Crear un TempManager
-        tm = TempManager(correlation_id=correlation_id)
-        temp_dir = tm.temp_dir
+        # Crear un directorio temporal con el patrón de IsolatedDownload
+        import tempfile
+        temp_root = tempfile.gettempdir()
+        prefix = f"videonote_dl_{correlation_id}_"
+        temp_dir = tempfile.mkdtemp(prefix=prefix, dir=temp_root)
 
         # Verificar que existe
         assert os.path.exists(temp_dir), "Directorio no creado"
         print(f"  Directorio creado: {temp_dir}")
-
-        # Limpiar manualmente (simulando que el TempManager se pierde)
-        import shutil
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-        # Ahora probar cleanup_download
-        # Primero crear otro directorio con el mismo pattern
-        tm2 = TempManager(correlation_id=correlation_id)
-        temp_dir2 = tm2.temp_dir
 
         # Usar cleanup_download
         result = cleanup_download(correlation_id)
         assert result, "cleanup_download no encontró el directorio"
         print(f"  ✓ cleanup_download encontró y limpió directorio")
 
-        # Limpiar cualquier residual
-        tm2.cleanup()
+        # Verificar que se limpió
+        assert not os.path.exists(temp_dir), "Directorio no fue limpiado"
+        print(f"  ✓ Directorio verificado como limpiado")
 
         print("  ✓ Test 8 pasado")
 
