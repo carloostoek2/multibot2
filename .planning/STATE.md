@@ -10,9 +10,9 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 11-download-management-progress — IN PROGRESS
 
-**Plan:** 11-04 (ready to start)
+**Plan:** 11-05 (ready to start)
 
-**Status:** 11-01 (DownloadManager) COMPLETE, 11-02 (ProgressTracker) COMPLETE, 11-03 (RetryHandler) COMPLETE. 2 plans remaining.
+**Status:** 11-01 (DownloadManager) COMPLETE, 11-02 (ProgressTracker) COMPLETE, 11-03 (RetryHandler) COMPLETE, 11-04 (DownloadLifecycle) COMPLETE. 1 plan remaining.
 
 **Last activity:** 2026-02-21 — Planned Phase 11: Download Management & Progress with 5 plans across 3 waves.
 
@@ -24,7 +24,7 @@ v3.0 Downloader
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
-Phase 11: Download Management & Progress    [██████░░░░] 60% (3/5 plans) — IN PROGRESS
+Phase 11: Download Management & Progress    [████████░░] 80% (4/5 plans) — IN PROGRESS
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
 
@@ -164,6 +164,15 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - download_with_retry() method in BaseDownloader
 - Comprehensive test suite with 5 test categories
 
+**11-04: Download Lifecycle Management** — COMPLETE
+- DownloadLifecycle class with isolated temp directories
+- IsolatedDownload context manager for automatic cleanup
+- State machine tracking (CREATED → DOWNLOADING → COMPLETED/FAILED/CANCELLED → CLEANED)
+- TempManager enhanced with correlation_id support
+- DownloadManager integrated with lifecycle for temp isolation
+- cleanup_download() utility for manual cleanup
+- 8 comprehensive tests demonstrating all scenarios
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -255,6 +264,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 62. **RateLimitError with retry_after** — Respects platform rate limit headers
 63. **TimeoutConfig dataclass** — Type-safe timeout configuration
 
+**11-04 Implementation Decisions:**
+64. **Context manager for temp isolation** — IsolatedDownload guarantees cleanup on all exit paths
+65. **State machine for lifecycle tracking** — Debuggable state transitions with history
+66. **Correlation ID in directory names** — Easy identification: videonote_dl_{correlation_id}_{random}
+67. **Configurable cleanup behavior** — Separate flags for success/failure scenarios
+68. **Per-task lifecycle instances** — Clear isolation boundaries, no global state
+
 ## Blockers
 
 (None)
@@ -269,7 +285,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 6. ~~10-05: Platform Router~~ DONE
 7. ~~11-01: Download Manager~~ DONE
 8. ~~11-02: Progress Tracker~~ DONE
-9. **Phase 11: Download Management & Progress** — IN PROGRESS (2 plans remaining)
+9. **Phase 11: Download Management & Progress** — IN PROGRESS (1 plan remaining)
 
 ## Project Reference
 
@@ -283,4 +299,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-22 after completing 11-03 RetryHandler*
+*Last updated: 2026-02-22 after completing 11-04 DownloadLifecycle*
