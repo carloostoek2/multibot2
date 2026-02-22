@@ -37,6 +37,7 @@ from .exceptions import (
     FileTooLargeError,
     MetadataExtractionError,
     NetworkError,
+    RateLimitError,
     URLDetectionError,  # Backwards compatibility alias
     URLValidationError,
     UnsupportedURLError,
@@ -108,6 +109,14 @@ from .progress_tracker import (
     format_speed,
 )
 
+# Import retry handler (new)
+from .retry_handler import (
+    RetryHandler,
+    TimeoutConfig,
+    create_timeout_guard,
+    is_retryable_error,
+)
+
 # DownloadResult for backwards compatibility
 from dataclasses import dataclass
 from typing import Optional
@@ -142,9 +151,15 @@ __all__ = [
     "FileTooLargeError",
     "MetadataExtractionError",
     "NetworkError",
+    "RateLimitError",
     "URLDetectionError",  # Backwards compatibility
     "URLValidationError",
     "UnsupportedURLError",
+    # Retry handler
+    "RetryHandler",
+    "TimeoutConfig",
+    "create_timeout_guard",
+    "is_retryable_error",
     # URL detection
     "URLDetector",
     "URLType",
