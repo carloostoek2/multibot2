@@ -133,7 +133,7 @@ class DownloadConfig:
             output_path=output_path or "/tmp",
             extract_audio=self.extract_audio,
             preferred_quality=self.preferred_quality,
-            max_file_size=TELEGRAM_MAX_FILE_SIZE,
+            max_filesize=TELEGRAM_MAX_FILE_SIZE,
         )
 
 
@@ -592,9 +592,11 @@ if __name__ == "__main__":
         print("  Custom config values correct")
 
         # to_download_options
-        options = config.to_download_options("/custom/path")
-        assert options.output_path == "/custom/path"
-        assert options.max_file_size == TELEGRAM_MAX_FILE_SIZE
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            options = config.to_download_options(tmpdir)
+            assert options.output_path == tmpdir
+            assert options.max_filesize == TELEGRAM_MAX_FILE_SIZE
         print("  to_download_options works correctly")
 
         print("  Test 1 passed")
