@@ -8,11 +8,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 ## Current Position
 
-**Phase:** 11-download-management-progress — IN PROGRESS
+**Phase:** 11-download-management-progress — COMPLETE
 
-**Plan:** 11-05 (ready to start)
+**Plan:** 11-05 COMPLETE
 
-**Status:** 11-01 (DownloadManager) COMPLETE, 11-02 (ProgressTracker) COMPLETE, 11-03 (RetryHandler) COMPLETE, 11-04 (DownloadLifecycle) COMPLETE. 1 plan remaining.
+**Status:** All 5 plans in Phase 11 complete. Ready for Phase 12: Integration & Polish.
 
 **Last activity:** 2026-02-21 — Planned Phase 11: Download Management & Progress with 5 plans across 3 waves.
 
@@ -20,11 +20,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 ```
 v3.0 Downloader
-[████░░░░░░░░░░░░░░░░] 50% (2/4 phases)
+[██████░░░░░░░░░░░░░░] 75% (3/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
-Phase 11: Download Management & Progress    [████████░░] 80% (4/5 plans) — IN PROGRESS
+Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — COMPLETE
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
 
@@ -173,6 +173,17 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - cleanup_download() utility for manual cleanup
 - 8 comprehensive tests demonstrating all scenarios
 
+**11-05: DownloadFacade (Unified API)** — COMPLETE
+- DownloadFacade class integrating all download components
+- DownloadConfig dataclass for centralized configuration
+- download_url() convenience function for one-off downloads
+- Async context manager support for lifecycle management
+- Progress tracking integration with throttled updates
+- Automatic retry with exponential backoff
+- Handler integration: handle_url_message() for URL detection
+- send_downloaded_file() helper for sending downloaded content
+- 10 comprehensive integration tests
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -271,6 +282,14 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 67. **Configurable cleanup behavior** — Separate flags for success/failure scenarios
 68. **Per-task lifecycle instances** — Clear isolation boundaries, no global state
 
+**11-05 Implementation Decisions:**
+69. **Unified API with facade pattern** — Single interface hides complexity of coordinating multiple components
+70. **Async context manager for facade** — Ensures proper cleanup and resource management
+71. **download_url convenience function** — One-off downloads without lifecycle management
+72. **Progress integration at facade level** — Throttled updates via configurable message functions
+73. **Specific exception handling** — FileTooLargeError, URLValidationError, UnsupportedURLError caught and converted to Spanish messages
+74. **Handler integration with URL detection** — Automatic URL detection and download initiation in message handlers
+
 ## Blockers
 
 (None)
@@ -285,7 +304,8 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 6. ~~10-05: Platform Router~~ DONE
 7. ~~11-01: Download Manager~~ DONE
 8. ~~11-02: Progress Tracker~~ DONE
-9. **Phase 11: Download Management & Progress** — IN PROGRESS (1 plan remaining)
+9. ~~Phase 11: Download Management & Progress~~ DONE (5/5 plans)
+10. **Phase 12: Integration & Polish** — NEXT
 
 ## Project Reference
 
@@ -299,4 +319,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-22 after completing 11-04 DownloadLifecycle*
+*Last updated: 2026-02-22 after completing 11-05 DownloadFacade*
