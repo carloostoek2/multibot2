@@ -12,6 +12,7 @@ Características principales:
 """
 import asyncio
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -24,8 +25,10 @@ if __name__ == "__main__":
     # Add parent directory to path for direct execution
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from bot.downloaders.base import BaseDownloader, DownloadOptions
+    from bot.downloaders.download_lifecycle import DownloadLifecycle
 else:
     from .base import BaseDownloader, DownloadOptions
+    from .download_lifecycle import DownloadLifecycle
 
 if TYPE_CHECKING:
     from . import DownloadResult
@@ -70,6 +73,8 @@ class DownloadTask:
         completed_at: Timestamp de finalización (None si no terminó)
         progress: Diccionario con última actualización de progreso
         _cancel_event: Evento asyncio para señalizar cancelación
+        lifecycle: Instancia de DownloadLifecycle para gestión de recursos
+        temp_dir: Directorio temporal aislado para esta descarga
     """
     correlation_id: str
     url: str
@@ -83,6 +88,8 @@ class DownloadTask:
     completed_at: Optional[datetime] = None
     progress: Dict[str, Any] = field(default_factory=dict)
     _cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    lifecycle: Optional[DownloadLifecycle] = None
+    temp_dir: Optional[str] = None
 
     def mark_started(self) -> None:
         """Marca la tarea como iniciada."""
@@ -335,6 +342,9 @@ class DownloadManager:
     async def _execute_download(self, task: DownloadTask) -> None:
         """Ejecuta una descarga individual dentro del semáforo.
 
+        Utiliza DownloadLifecycle para aislamiento de directorios temporales
+        y limpieza automática.
+
         Args:
             task: La tarea de descarga a ejecutar
         """
@@ -349,6 +359,15 @@ class DownloadManager:
 
             task.mark_started()
 
+            # Crear el lifecycle para gestión de recursos
+            lifecycle = DownloadLifecycle(
+                correlation_id=task.correlation_id,
+                options=task.options,
+                cleanup_on_success=True,
+                cleanup_on_failure=True
+            )
+            task.lifecycle = lifecycle
+
             try:
                 # Crear callback de progreso si las opciones lo permiten
                 original_callback = task.options.progress_callback
@@ -359,33 +378,60 @@ class DownloadManager:
                     if original_callback:
                         original_callback(progress_data)
 
-                # Crear nuevas opciones con nuestro callback
-                options_with_progress = task.options.with_overrides(
-                    progress_callback=progress_wrapper
-                )
+                # Definir la función de descarga que usará el lifecycle
+                async def download_in_temp(temp_dir: str) -> Any:
+                    """Ejecuta la descarga en el directorio temporal aislado."""
+                    # Actualizar el temp_dir de la tarea
+                    task.temp_dir = temp_dir
 
-                # Ejecutar la descarga
-                result = await task.downloader.download(
-                    task.url,
-                    options_with_progress
+                    # Crear nuevas opciones con el callback y path temporal
+                    options_with_progress = task.options.with_overrides(
+                        output_path=temp_dir,
+                        progress_callback=progress_wrapper
+                    )
+
+                    # Ejecutar la descarga
+                    return await task.downloader.download(
+                        task.url,
+                        options_with_progress
+                    )
+
+                # Ejecutar a través del lifecycle (maneja temp dir y cleanup)
+                result = await lifecycle.execute(
+                    download_func=download_in_temp,
+                    progress_callback=progress_wrapper
                 )
 
                 # Verificar si fue cancelada durante la descarga
                 if task.is_cancelled():
                     return
 
-                task.mark_completed(result)
+                # Extraer el resultado real del DownloadResult del lifecycle
+                if hasattr(result, 'success'):
+                    task.mark_completed(result)
+                else:
+                    task.mark_completed(result)
 
             except asyncio.CancelledError:
                 task.mark_cancelled()
+                # Asegurar limpieza del lifecycle
+                if task.lifecycle:
+                    task.lifecycle.cleanup()
                 raise
             except Exception as e:
                 task.mark_failed(e)
+                # Asegurar limpieza del lifecycle
+                if task.lifecycle:
+                    task.lifecycle.cleanup()
 
             finally:
                 # Remover de activas
                 async with self._lock:
                     self._active_downloads.pop(task.correlation_id, None)
+
+                # Asegurar limpieza si no se hizo automáticamente
+                if task.lifecycle and task.lifecycle.is_active:
+                    task.lifecycle.cleanup()
 
     def get_task(self, correlation_id: str) -> Optional[DownloadTask]:
         """Obtiene una tarea por su ID de correlación.
@@ -409,6 +455,9 @@ class DownloadManager:
     async def cancel(self, correlation_id: str) -> bool:
         """Cancela una descarga pendiente o activa.
 
+        Si la tarea tiene un lifecycle activo, se llama a cleanup()
+        para limpiar el directorio temporal.
+
         Args:
             correlation_id: ID de correlación de la tarea a cancelar
 
@@ -419,6 +468,12 @@ class DownloadManager:
         task = self._active_downloads.get(correlation_id)
         if task:
             task.mark_cancelled()
+
+            # Limpiar el lifecycle si existe
+            if task.lifecycle:
+                task.lifecycle.cleanup()
+                logger.info(f"[{correlation_id}] Lifecycle limpiado tras cancelación")
+
             logger.info(f"[{correlation_id}] Descarga activa marcada para cancelación")
             return True
 
@@ -427,6 +482,24 @@ class DownloadManager:
         # Por simplicidad, marcamos como cancelada si se encuentra durante el procesamiento
         logger.warning(f"[{correlation_id}] No se encontró descarga activa para cancelar")
         return False
+
+    def get_temp_path(self, correlation_id: str, filename: str) -> Optional[str]:
+        """Obtiene la ruta dentro del directorio temporal de una descarga.
+
+        Args:
+            correlation_id: ID de correlación de la descarga
+            filename: Nombre del archivo
+
+        Returns:
+            Ruta al archivo en el directorio temporal, o None si no se encuentra
+        """
+        task = self.get_task(correlation_id)
+        if not task or not task.temp_dir:
+            return None
+
+        # Asegurar que filename no contenga separadores de ruta
+        safe_filename = os.path.basename(filename)
+        return os.path.join(task.temp_dir, safe_filename)
 
     def get_active_count(self) -> int:
         """Obtiene el número de descargas activas.
