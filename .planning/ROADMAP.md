@@ -122,6 +122,15 @@
 
 **Requirements:** DM-01, DM-02, DM-03, DM-04, DM-05, PT-01, PT-02, PT-03, PT-04, PT-05, EH-03, EH-04, EH-05
 
+**Plans:** 5 plans
+
+**Plan list:**
+- [x] 11-01-PLAN.md — Download Manager (concurrent downloads, tracking, queue management) — completed 2026-02-21
+- [x] 11-02-PLAN.md — Progress Tracking (real-time updates, progress bar visualization) — completed 2026-02-21
+- [x] 11-03-PLAN.md — Enhanced Error Handling (retry logic, rate limiting, timeouts) — completed 2026-02-21
+- [x] 11-04-PLAN.md — Download Lifecycle (temp isolation, automatic cleanup) — completed 2026-02-21
+- [x] 11-05-PLAN.md — Unified API Facade (integration with bot handlers) — completed 2026-02-21
+
 **Success Criteria:**
 1. Multiple downloads can run concurrently without interference
 2. Each download has unique correlation ID for tracing
@@ -162,11 +171,11 @@
 
 ```
 v3.0 Downloader
-[████████░░░░░░░░░░░░] 50% (2/4 phases)
+[████████████░░░░░░░░] 75% (3/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — completed 2026-02-21
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — completed 2026-02-21
-Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
+Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — completed 2026-02-21
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
 
@@ -232,7 +241,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 ---
 
-*Last updated: 2026-02-21 — Phase 10 execution complete (5/5 plans finished)*
+*Last updated: 2026-02-21 — Phase 11 complete (5/5 plans executed)*
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 *For v2.0 archive, see .planning/milestones/v2.0-ROADMAP.md*
