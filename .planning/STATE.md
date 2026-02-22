@@ -8,11 +8,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 ## Current Position
 
-**Phase:** 11-download-management-progress — PLANNED
+**Phase:** 11-download-management-progress — IN PROGRESS
 
-**Plan:** 11-01 (ready to start)
+**Plan:** 11-03 (ready to start)
 
-**Status:** Phase 11 planned. 5 plans ready for execution.
+**Status:** 11-01 (DownloadManager) COMPLETE, 11-02 (ProgressTracker) COMPLETE. 3 plans remaining.
 
 **Last activity:** 2026-02-21 — Planned Phase 11: Download Management & Progress with 5 plans across 3 waves.
 
@@ -24,7 +24,7 @@ v3.0 Downloader
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
-Phase 11: Download Management & Progress    [○○○○○○○○○○] 0% (0/5 plans) — PLANNED
+Phase 11: Download Management & Progress    [████░░░░░░] 40% (2/5 plans) — IN PROGRESS
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
 
@@ -139,6 +139,23 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - Convenience functions: get_downloader_for_url, route_url
 - classify_url_enhanced for platform identification
 
+**11-01: Download Manager** — COMPLETE
+- DownloadManager class for concurrent download management
+- DownloadTask dataclass with status tracking
+- DownloadStatus enum (PENDING, DOWNLOADING, COMPLETED, FAILED, CANCELLED)
+- Concurrent execution with semaphore-based limiting
+- Per-user download tracking and limits
+- Task lifecycle management (submit, cancel, get_status, list_active)
+- Integration with existing downloader infrastructure
+
+**11-02: Progress Tracker** — COMPLETE
+- ProgressTracker class with throttled updates (3s interval, 5% change)
+- Visual progress bars using Unicode block characters (█▌▏░)
+- format_bytes(), format_speed(), format_eta() utilities
+- format_progress_message() with Spanish messages and emoji indicators (⬇️✅❌)
+- create_progress_callback() for Telegram bot integration
+- Progress summary statistics (bytes, speed, duration)
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -208,7 +225,20 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 46. **Lazy imports for platform checkers** — Avoid circular dependencies with dynamic imports
 47. **HTML extractor adapter pattern** — Make HTMLVideoExtractor compatible with BaseDownloader interface
 48. **Confidence levels** — High (platform match), Medium (yt-dlp), Low (HTML extraction)
-- [Phase 10]: Priority-based routing: platform-specific > generic > yt-dlp > HTML extractor
+
+**11-01 Implementation Decisions:**
+49. **Semaphore-based concurrency** — Limit concurrent downloads to prevent resource exhaustion
+50. **Per-user download tracking** — Dict[user_id, list[tasks]] for user-specific limits
+51. **Task ID generation** — UUID-based unique identifiers for each download task
+52. **Async task lifecycle** — submit() creates task, _execute_download() runs actual download
+53. **Callback-based progress** — Integrate with progress_tracker via callbacks
+
+**11-02 Implementation Decisions:**
+54. **Unicode block characters for progress bars** — █ (full), ▌ (half), ▏ (quarter), ░ (empty)
+55. **Dual throttling strategy** — Time-based (3s) + percentage-based (5%) per PT-02 requirements
+56. **Always update on status change** — Completed/error states bypass throttling
+57. **Async callback support** — Handle both sync and async on_update callbacks
+58. **Spanish messages with emoji indicators** — ⬇️ downloading, ✅ completed, ❌ error
 
 ## Blockers
 
@@ -222,7 +252,9 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 4. ~~10-03: TikTok and Twitter/X Platform Handlers~~ DONE
 5. ~~10-04: Facebook and HTML Video Extractor~~ DONE
 6. ~~10-05: Platform Router~~ DONE
-7. **Phase 11: Download Management & Progress** — PLANNED, ready for execution
+7. ~~11-01: Download Manager~~ DONE
+8. ~~11-02: Progress Tracker~~ DONE
+9. **Phase 11: Download Management & Progress** — IN PROGRESS (3 plans remaining)
 
 ## Project Reference
 
@@ -236,4 +268,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 10-05*
+*Last updated: 2026-02-21 after completing 11-02*
