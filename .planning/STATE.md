@@ -10,9 +10,9 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 11-download-management-progress — IN PROGRESS
 
-**Plan:** 11-03 (ready to start)
+**Plan:** 11-04 (ready to start)
 
-**Status:** 11-01 (DownloadManager) COMPLETE, 11-02 (ProgressTracker) COMPLETE, 11-03 (DownloadSession) ready. 3 plans remaining.
+**Status:** 11-01 (DownloadManager) COMPLETE, 11-02 (ProgressTracker) COMPLETE, 11-03 (RetryHandler) COMPLETE. 2 plans remaining.
 
 **Last activity:** 2026-02-21 — Planned Phase 11: Download Management & Progress with 5 plans across 3 waves.
 
@@ -24,7 +24,7 @@ v3.0 Downloader
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
-Phase 11: Download Management & Progress    [████░░░░░░] 40% (2/5 plans) — IN PROGRESS
+Phase 11: Download Management & Progress    [██████░░░░] 60% (3/5 plans) — IN PROGRESS
 Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
 ```
 
@@ -156,6 +156,14 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - create_progress_callback() for Telegram bot integration
 - Progress summary statistics (bytes, speed, duration)
 
+**11-03: Retry Handler** — COMPLETE
+- RetryHandler class with exponential backoff and jitter
+- is_retryable_error() for intelligent error classification
+- RateLimitError exception with retry_after and platform attributes
+- TimeoutConfig dataclass for type-safe timeout configuration
+- download_with_retry() method in BaseDownloader
+- Comprehensive test suite with 5 test categories
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -240,6 +248,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 57. **Async callback support** — Handle both sync and async on_update callbacks
 58. **Spanish messages with emoji indicators** — ⬇️ downloading, ✅ completed, ❌ error
 
+**11-03 Implementation Decisions:**
+59. **max_retries=3 default** — Per EH-03 requirement for retry logic
+60. **Exponential backoff with jitter** — Prevents thundering herd on recovery
+61. **Error classification function** — Avoid retrying permanent failures (FileTooLargeError, etc.)
+62. **RateLimitError with retry_after** — Respects platform rate limit headers
+63. **TimeoutConfig dataclass** — Type-safe timeout configuration
+
 ## Blockers
 
 (None)
@@ -254,7 +269,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 6. ~~10-05: Platform Router~~ DONE
 7. ~~11-01: Download Manager~~ DONE
 8. ~~11-02: Progress Tracker~~ DONE
-9. **Phase 11: Download Management & Progress** — IN PROGRESS (3 plans remaining)
+9. **Phase 11: Download Management & Progress** — IN PROGRESS (2 plans remaining)
 
 ## Project Reference
 
@@ -268,4 +283,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-21 after completing 11-01 DownloadManager*
+*Last updated: 2026-02-22 after completing 11-03 RetryHandler*
