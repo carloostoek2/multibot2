@@ -1,8 +1,10 @@
 """Telegram bot handlers for video processing."""
 import asyncio
 import logging
+import os
 import uuid
 from pathlib import Path
+from typing import Any
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from telegram.error import NetworkError, TimedOut
@@ -45,7 +47,23 @@ from bot.audio_format_converter import AudioFormatConverter, detect_audio_format
 from bot.audio_enhancer import AudioEnhancer
 from bot.audio_effects import AudioEffects
 
+# Import downloaders for URL handling
+from bot.downloaders import (
+    DownloadFacade,
+    download_url,
+    URLDetector,
+)
+from bot.downloaders.exceptions import (
+    DownloadError,
+    FileTooLargeError,
+    URLValidationError,
+    UnsupportedURLError,
+)
+
 logger = logging.getLogger(__name__)
+
+# URL detector instance for detecting URLs in messages
+url_detector = URLDetector()
 
 async def _download_with_retry(file, destination_path: str, max_retries: int = 3, correlation_id: str = None) -> bool:
     """Download file with retry logic for transient failures.
@@ -5031,3 +5049,152 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     else:
         logger.warning(f"Unknown back menu type: {menu_type}")
+
+
+# =============================================================================
+# URL Download Handlers
+# =============================================================================
+
+async def send_downloaded_file(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any
+) -> None:
+    """Send downloaded file to user.
+
+    Determines file type from metadata and sends appropriately
+    (video for video files, audio for audio files).
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result with file_path and metadata
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+
+    title = metadata.get('title', 'Video')
+    caption = f"Descarga completada: {title}"
+
+    try:
+        if file_ext in audio_extensions:
+            # Send as audio
+            with open(file_path, 'rb') as audio_file:
+                await update.message.reply_audio(
+                    audio=audio_file,
+                    caption=caption,
+                    title=title,
+                    performer=metadata.get('artist') or metadata.get('uploader')
+                )
+        else:
+            # Send as video
+            with open(file_path, 'rb') as video_file:
+                await update.message.reply_video(
+                    video=video_file,
+                    caption=caption,
+                    supports_streaming=True
+                )
+        logger.info(f"Downloaded file sent to user {update.effective_user.id}")
+    except Exception as e:
+        logger.error(f"Failed to send downloaded file: {e}")
+        await update.message.reply_text(
+            "Error al enviar el archivo descargado."
+        )
+
+
+async def handle_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle messages containing URLs for download.
+
+    Detects URLs in text messages, validates them, and initiates
+    download with progress updates.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    message_text = update.message.text
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    # Detect URLs in message
+    urls = url_detector.detect_urls(message_text)
+    if not urls:
+        return  # No URLs, ignore
+
+    # Process first URL (or all if implementing multi-download)
+    url = urls[0]
+    correlation_id = str(uuid.uuid4())[:8]
+
+    logger.info(f"[{correlation_id}] URL detected from user {user_id}: {url}")
+
+    # Send initial message
+    status_message = await update.message.reply_text(
+        "Analizando enlace...",
+        quote=True
+    )
+
+    # Create facade
+    facade = DownloadFacade()
+
+    try:
+        await facade.start()
+
+        # Download with progress
+        result = await facade.download_with_progress(
+            url=url,
+            chat_id=chat_id,
+            message_func=lambda text: context.bot.send_message(chat_id, text),
+            edit_message_func=lambda text: status_message.edit_text(text)
+        )
+
+        if result.success:
+            # Send downloaded file
+            await send_downloaded_file(update, context, result)
+            # Clean up status message
+            try:
+                await status_message.delete()
+            except Exception:
+                pass
+        else:
+            await status_message.edit_text(
+                f"Error en la descarga: {result.error_message or 'Error desconocido'}"
+            )
+
+    except FileTooLargeError as e:
+        logger.warning(f"[{correlation_id}] File too large: {e}")
+        await status_message.edit_text(e.to_user_message())
+    except URLValidationError as e:
+        logger.warning(f"[{correlation_id}] URL validation error: {e}")
+        await status_message.edit_text(e.to_user_message())
+    except UnsupportedURLError as e:
+        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
+        await status_message.edit_text(e.to_user_message())
+    except DownloadError as e:
+        logger.error(f"[{correlation_id}] Download error: {e}")
+        await status_message.edit_text(e.to_user_message())
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Unexpected error: {e}")
+        await status_message.edit_text(
+            "Ocurrió un error inesperado. Por favor intenta de nuevo."
+        )
+    finally:
+        await facade.stop()

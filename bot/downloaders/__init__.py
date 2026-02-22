@@ -124,6 +124,20 @@ from .download_lifecycle import (
     cleanup_download,
 )
 
+# Import download manager
+from .download_manager import (
+    DownloadManager,
+    DownloadStatus,
+    DownloadTask,
+)
+
+# Import unified API (facade)
+from .download_facade import (
+    DownloadFacade,
+    DownloadConfig,
+    download_url,
+)
+
 # DownloadResult for backwards compatibility
 from dataclasses import dataclass
 from typing import Optional
@@ -162,11 +176,6 @@ __all__ = [
     "URLDetectionError",  # Backwards compatibility
     "URLValidationError",
     "UnsupportedURLError",
-    # Retry handler
-    "RetryHandler",
-    "TimeoutConfig",
-    "create_timeout_guard",
-    "is_retryable_error",
     # URL detection
     "URLDetector",
     "URLType",
@@ -204,7 +213,11 @@ __all__ = [
     "RouteResult",
     "get_downloader_for_url",
     "route_url",
-    # Progress tracker
+    # Download management
+    "DownloadManager",
+    "DownloadStatus",
+    "DownloadTask",
+    # Progress tracking
     "ProgressTracker",
     "create_progress_callback",
     "format_bytes",
@@ -212,8 +225,17 @@ __all__ = [
     "format_progress_bar",
     "format_progress_message",
     "format_speed",
-    # Download lifecycle
+    # Retry handling
+    "RetryHandler",
+    "TimeoutConfig",
+    "create_timeout_guard",
+    "is_retryable_error",
+    # Lifecycle management
     "DownloadLifecycle",
     "IsolatedDownload",
     "cleanup_download",
+    # Unified API (facade)
+    "DownloadFacade",
+    "DownloadConfig",
+    "download_url",
 ]
