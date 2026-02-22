@@ -152,6 +152,14 @@
 
 **Requirements:** UI-01, UI-02, UI-03, UI-04, UI-05, UI-06, INT-01, INT-02, INT-03, INT-04
 
+**Plans:** 4 plans
+
+**Plan list:**
+- [ ] 12-01-PLAN.md — Download Command and URL Detection (/download command, auto-detect URLs, format selection, large download confirmation)
+- [ ] 12-02-PLAN.md — Post-Download Integration (video note conversion, audio processing, recent downloads list)
+- [ ] 12-03-PLAN.md — Cancel and Progress Enhancement (cancel button during download, enhanced progress tracking, /downloads command)
+- [ ] 12-04-PLAN.md — Combined Flow and Integration Tests (Download + Convert flow, end-to-end tests, error handling polish)
+
 **Success Criteria:**
 1. /download command works with explicit URL argument
 2. Inline menu appears automatically when URL is detected in message
@@ -176,7 +184,7 @@ v3.0 Downloader
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — completed 2026-02-21
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — completed 2026-02-21
 Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — completed 2026-02-21
-Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
+Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/4 plans)
 ```
 
 ---
@@ -241,7 +249,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 ---
 
-*Last updated: 2026-02-21 — Phase 11 complete (5/5 plans executed)*
+*Last updated: 2026-02-21 — Phase 12 planned (4/4 plans created)*
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 *For v2.0 archive, see .planning/milestones/v2.0-ROADMAP.md*
