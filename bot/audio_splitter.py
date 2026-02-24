@@ -21,6 +21,7 @@ class AudioSplitter:
     Supports splitting by:
     - Duration: Create segments of N seconds each
     - Number of parts: Divide audio into N equal parts
+    - Time range: Extract segment from start_time to end_time
 
     Supports common formats: MP3, OGG, WAV, AAC, FLAC
     """
@@ -269,3 +270,79 @@ class AudioSplitter:
         except Exception as e:
             logger.error(f"Unexpected error during audio splitting: {e}")
             raise AudioSplitError("Error inesperado al dividir el audio") from e
+
+    def split_by_time_range(self, start_time: float, end_time: float) -> str:
+        """Extract a segment from the audio between start and end times.
+
+        Args:
+            start_time: Start time in seconds (e.g., 30.5 for 30 seconds and 500ms)
+            end_time: End time in seconds (must be greater than start_time)
+
+        Returns:
+            Path to the extracted segment file
+
+        Raises:
+            AudioSplitError: If splitting fails or times are invalid
+        """
+        if start_time < 0:
+            raise AudioSplitError("El tiempo de inicio no puede ser negativo")
+
+        if end_time <= start_time:
+            raise AudioSplitError("El tiempo final debe ser mayor al tiempo de inicio")
+
+        duration = end_time - start_time
+        if duration < 1:
+            raise AudioSplitError("La duración mínima es 1 segundo")
+
+        if not self._check_ffmpeg():
+            logger.error("ffmpeg is not installed or not in PATH")
+            raise AudioSplitError("ffmpeg no está disponible")
+
+        if not self.input_path.exists():
+            logger.error(f"Input file not found: {self.input_path}")
+            raise AudioSplitError(f"Archivo no encontrado: {self.input_path}")
+
+        # Get audio duration to validate end_time
+        audio_duration = self.get_audio_duration()
+        if end_time > audio_duration:
+            logger.warning(f"End time ({end_time}s) exceeds audio duration ({audio_duration}s), adjusting")
+            end_time = audio_duration
+
+        # Ensure output directory exists
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build output filename
+        output_filename = f"{self._basename}_{int(start_time)}s_to_{int(end_time)}s{self._ext}"
+        output_path = self.output_dir / output_filename
+
+        # Build ffmpeg command for extracting time range
+        cmd = [
+            "ffmpeg",
+            "-y",  # Overwrite output if exists
+            "-i", str(self.input_path),  # Input file
+            "-ss", str(start_time),  # Start time
+            "-t", str(duration),  # Duration (end - start)
+            "-c", "copy",  # Copy streams without re-encoding
+            "-copyts",  # Copy timestamps
+            str(output_path),
+        ]
+
+        try:
+            logger.debug(f"Running ffmpeg: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            logger.info(f"Audio segment extracted: {output_path}")
+            return str(output_path)
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ffmpeg failed with code {e.returncode}")
+            logger.error(f"ffmpeg stderr: {e.stderr}")
+            raise AudioSplitError("Error extrayendo segmento del audio") from e
+        except Exception as e:
+            logger.error(f"Unexpected error during audio segment extraction: {e}")
+            raise AudioSplitError("Error inesperado al extraer segmento") from e

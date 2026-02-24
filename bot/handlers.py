@@ -6,11 +6,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes, CallbackQueryHandler
+from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import NetworkError, TimedOut
 
 from bot.temp_manager import TempManager
 from bot.video_processor import VideoProcessor
+from bot.video_merger import VideoAudioMerger
 from bot.format_processor import FormatConverter, AudioExtractor
 from bot.split_processor import VideoSplitter
 from bot.join_processor import VideoJoiner
@@ -29,6 +30,7 @@ from bot.error_handler import (
     AudioFormatConversionError,
     AudioEnhancementError,
     AudioEffectsError,
+    VideoMergeError,
     handle_processing_error,
 )
 from bot.config import config
@@ -251,7 +253,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/denoise - Reduce el ruido de fondo del audio (intensidad ajustable)\n"
         "/compress - Comprime el rango dinámico del audio (nivel ajustable)\n"
         "/normalize - Normaliza el volumen del audio (EBU R128)\n"
-        "/effects - Aplica múltiples efectos en cadena (pipeline)"
+        "/effects - Aplica múltiples efectos en cadena (pipeline)\n\n"
+        "💡 También puedes usar los menús inline:\n"
+        "- Envía un video → Menú con opciones (Nota de Video, Extraer Audio, Merge con Audio, etc.)\n"
+        "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)"
     )
 
 
@@ -581,6 +586,12 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
 
 # Default segment duration for split command
 DEFAULT_SEGMENT_DURATION = 60
+DEFAULT_AUDIO_SEGMENT_DURATION = 60
+
+# Split session states
+SPLIT_WAITING_START_TIME = "waiting_start_time"
+SPLIT_WAITING_END_TIME = "waiting_end_time"
+SPLIT_CONFIRMING = "confirming"
 
 
 async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1864,6 +1875,7 @@ async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     and sends it back as a Telegram voice note.
 
     If there's an active audio join session, routes to handle_join_audio_file instead.
+    If there's an active video-audio merge session, routes to handle_merge_audio_received.
 
     Args:
         update: Telegram update object
@@ -1875,6 +1887,12 @@ async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if context.user_data.get("join_audio_session"):
         # Route to join audio handler
         await handle_join_audio_file(update, context)
+        return
+
+    # Check if there's an active video-audio merge session
+    if context.user_data.get("merge_video_file_id"):
+        # Route to merge audio handler
+        await handle_merge_audio_received(update, context)
         return
 
     correlation_id = str(uuid.uuid4())[:8]
@@ -1907,6 +1925,626 @@ async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         reply_markup=reply_markup
     )
     logger.info(f"[{correlation_id}] Audio menu displayed to user {user_id}")
+
+
+async def handle_merge_audio_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio file received during video-audio merge process.
+
+    Downloads the video and audio files, merges them, and sends the result.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = context.user_data.get("merge_video_correlation_id", str(uuid.uuid4())[:8])
+    logger.info(f"[{correlation_id}] Audio received for merge from user {user_id}")
+
+    # Get audio from message
+    audio = update.message.audio
+    if not audio:
+        logger.warning(f"[{correlation_id}] No audio found in message from user {user_id}")
+        await update.message.reply_text("No encontré un archivo de audio en tu mensaje.")
+        # Clean up merge context
+        context.user_data.pop("merge_video_file_id", None)
+        context.user_data.pop("merge_video_correlation_id", None)
+        return
+
+    # Validate file size
+    if audio.file_size:
+        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] Audio file size validation failed: {error_msg}")
+            await update.message.reply_text(error_msg)
+            context.user_data.pop("merge_video_file_id", None)
+            context.user_data.pop("merge_video_correlation_id", None)
+            return
+
+    # Send processing message
+    processing_message = None
+    try:
+        processing_message = await update.message.reply_text(
+            "Uniendo video con audio..."
+        )
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not send processing message: {e}")
+
+    # Process with TempManager
+    with TempManager() as temp_mgr:
+        try:
+            # Retrieve video file_id from context
+            video_file_id = context.user_data.get("merge_video_file_id")
+            if not video_file_id:
+                logger.error(f"[{correlation_id}] No video file_id in context")
+                raise DownloadError("No encontré el video original. Intenta de nuevo.")
+
+            # Generate safe filenames
+            video_filename = f"merge_video_{user_id}_{correlation_id}.mp4"
+            audio_filename = f"merge_audio_{user_id}_{correlation_id}.audio"
+            output_filename = f"merged_{user_id}_{correlation_id}.mp4"
+
+            video_path = temp_mgr.get_temp_path(video_filename)
+            audio_path = temp_mgr.get_temp_path(audio_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download video
+            logger.info(f"[{correlation_id}] Downloading video for merge")
+            try:
+                file = await context.bot.get_file(video_file_id)
+                await _download_with_retry(file, video_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Video downloaded to {video_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download video: {e}")
+                raise DownloadError("No pude descargar el video") from e
+
+            # Download audio
+            logger.info(f"[{correlation_id}] Downloading audio for merge")
+            try:
+                file = await audio.get_file()
+                await _download_with_retry(file, audio_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Audio downloaded to {audio_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            # Validate files
+            is_valid, error_msg = validate_video_file(str(video_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Video validation failed: {error_msg}")
+                raise ValidationError(error_msg)
+
+            is_valid, error_msg = validate_audio_file(str(audio_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Audio validation failed: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Check disk space
+            video_size_mb = Path(video_path).stat().st_size / (1024 * 1024)
+            audio_size_mb = Path(audio_path).stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(video_size_mb + audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                logger.warning(f"[{correlation_id}] Disk space check failed: {space_error}")
+                raise ValidationError(space_error)
+
+            # Merge video and audio
+            logger.info(f"[{correlation_id}] Merging video and audio")
+            try:
+                loop = asyncio.get_event_loop()
+                merger = VideoAudioMerger(str(video_path), str(audio_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, merger.merge),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Video-audio merge failed")
+                    raise VideoMergeError("No pude unir el video con el audio")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Merge timed out")
+                raise ProcessingTimeoutError("La unión tardó demasiado") from e
+
+            # Send merged video
+            logger.info(f"[{correlation_id}] Sending merged video")
+            try:
+                with open(output_path, "rb") as video_file:
+                    await update.message.reply_video(video=video_file)
+                logger.info(f"[{correlation_id}] Merged video sent successfully")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to send merged video: {e}")
+                raise
+
+            # Delete processing message
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+
+            # Clean up context
+            context.user_data.pop("merge_video_file_id", None)
+            context.user_data.pop("merge_video_correlation_id", None)
+
+        except (DownloadError, VideoMergeError, ProcessingTimeoutError, ValidationError) as e:
+            logger.error(f"[{correlation_id}] Merge processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+            # Clean up context
+            context.user_data.pop("merge_video_file_id", None)
+            context.user_data.pop("merge_video_correlation_id", None)
+
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error in merge: {e}")
+            await handle_processing_error(update, e, user_id)
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+            # Clean up context
+            context.user_data.pop("merge_video_file_id", None)
+            context.user_data.pop("merge_video_correlation_id", None)
+
+
+# Video Split Interactive Handlers
+
+async def handle_video_split_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start interactive video split process.
+
+    Downloads the video, gets its duration, and asks user for start time.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    query = update.callback_query
+    callback_data = query.data
+    correlation_id = str(uuid.uuid4())[:8]
+
+    # Parse video file_id from callback (format: video_split:<file_id>)
+    if not callback_data.startswith("video_split:"):
+        logger.warning(f"[{correlation_id}] Invalid callback data for video split")
+        return
+
+    file_id = callback_data.split(":", 1)[1]
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id in callback data")
+        await query.edit_message_text("Error: no se encontró el video.")
+        return
+
+    logger.info(f"[{correlation_id}] Video split started by user {user_id}")
+
+    # Store file info in context
+    context.user_data["split_video_session"] = {
+        "file_id": file_id,
+        "correlation_id": correlation_id,
+        "state": SPLIT_WAITING_START_TIME,
+    }
+
+    await query.edit_message_text(
+        "✂️ *Dividir Video*\n\n"
+        "Primero necesito saber la duración del video para ayudarte.\n\n"
+        "⏳ Procesando...",
+        parse_mode="Markdown"
+    )
+
+    # Download video and get duration
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"split_video_{user_id}_{correlation_id}.mp4"
+            input_path = temp_mgr.get_temp_path(input_filename)
+
+            # Download video
+            file = await context.bot.get_file(file_id)
+            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+            # Get duration
+            splitter = VideoSplitter(str(input_path), str(temp_mgr.get_temp_path("output")))
+            duration = splitter.get_video_duration()
+
+            context.user_data["split_video_session"]["duration"] = duration
+            context.user_data["split_video_session"]["input_path"] = input_path
+
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+
+            await query.edit_message_text(
+                f"✂️ *Dividir Video*\n\n"
+                f"📊 Duración del video: *{minutes}m {seconds}s*\n\n"
+                f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
+                f"Puede ser un número decimal (ej: 30.5)",
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Error preparing video split: {e}")
+            await query.edit_message_text(
+                "Error al preparar el video. Intenta de nuevo."
+            )
+            context.user_data.pop("split_video_session", None)
+
+
+async def handle_video_split_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle start time input for video split.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    session = context.user_data.get("split_video_session")
+
+    if not session or session.get("type") != "video":
+        # Not a video split session, ignore
+        return
+
+    correlation_id = session.get("correlation_id", "unknown")
+    logger.info(f"[{correlation_id}] Start time input received from user {user_id}")
+
+    try:
+        start_time = float(update.message.text.strip())
+    except (ValueError, AttributeError):
+        await update.message.reply_text(
+            "Por favor envía un número válido (ej: 30 o 30.5)"
+        )
+        return
+
+    duration = session.get("duration", 0)
+    if start_time < 0:
+        await update.message.reply_text(
+            "El tiempo de inicio no puede ser negativo."
+        )
+        return
+
+    if start_time >= duration:
+        await update.message.reply_text(
+            f"El tiempo de inicio debe ser menor a la duración del video ({duration}s)."
+        )
+        return
+
+    # Store start time
+    session["start_time"] = start_time
+    session["state"] = SPLIT_WAITING_END_TIME
+
+    remaining = duration - start_time
+    await update.message.reply_text(
+        f"✅ Tiempo de inicio: *{start_time}s*\n\n"
+        f"Ahora envía el tiempo *final* en segundos.\n"
+        f"Debe ser mayor a {start_time}s y menor a {duration}s.\n\n"
+        f"Tiempo máximo disponible: *{remaining:.1f}s*",
+        parse_mode="Markdown"
+    )
+
+
+async def handle_video_split_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle end time input for video split and process the cut.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    session = context.user_data.get("split_video_session")
+
+    if not session or session.get("type") != "video":
+        return
+
+    correlation_id = session.get("correlation_id", "unknown")
+    logger.info(f"[{correlation_id}] End time input received from user {user_id}")
+
+    try:
+        end_time = float(update.message.text.strip())
+    except (ValueError, AttributeError):
+        await update.message.reply_text(
+            "Por favor envía un número válido (ej: 60 o 90.5)"
+        )
+        return
+
+    start_time = session.get("start_time", 0)
+    duration = session.get("duration", 0)
+
+    if end_time <= start_time:
+        await update.message.reply_text(
+            f"El tiempo final debe ser mayor al tiempo de inicio ({start_time}s)."
+        )
+        return
+
+    if end_time > duration:
+        await update.message.reply_text(
+            f"El tiempo final no puede exceder la duración del video ({duration}s)."
+        )
+        return
+
+    segment_duration = end_time - start_time
+    if segment_duration < 1:
+        await update.message.reply_text(
+            "La duración mínima del segmento es 1 segundo."
+        )
+        return
+
+    # Store end time and proceed to cut
+    session["end_time"] = end_time
+    session["state"] = SPLIT_CONFIRMING
+
+    # Send processing message
+    processing_message = await update.message.reply_text(
+        f"✂️ Extrayendo segmento de {start_time}s a {end_time}s...\n"
+        f"Duración: {segment_duration:.1f}s"
+    )
+
+    with TempManager() as temp_mgr:
+        try:
+            input_path = session["input_path"]
+            output_dir = temp_mgr.get_temp_path(f"split_output_{correlation_id}")
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+            splitter = VideoSplitter(str(input_path), str(output_dir))
+            output_path = splitter.split_by_time_range(start_time, end_time)
+
+            # Send video segment
+            await update.message.reply_video(
+                video=open(output_path, "rb"),
+                caption=f"Segmento extraído ({start_time}s - {end_time}s)"
+            )
+
+            await processing_message.delete()
+            logger.info(f"[{correlation_id}] Video segment sent successfully")
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Error splitting video: {e}")
+            await processing_message.delete()
+            await update.message.reply_text(
+                "Error al extraer el segmento. Intenta de nuevo."
+            )
+        finally:
+            context.user_data.pop("split_video_session", None)
+
+
+async def handle_audio_split_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start interactive audio split process.
+
+    Downloads the audio, gets its duration, and asks user for start time.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    query = update.callback_query
+    callback_data = query.data
+    correlation_id = str(uuid.uuid4())[:8]
+
+    # Parse audio file_id from callback (format: audio_split:<file_id>)
+    if not callback_data.startswith("audio_split:"):
+        logger.warning(f"[{correlation_id}] Invalid callback data for audio split")
+        return
+
+    file_id = callback_data.split(":", 1)[1]
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id in callback data")
+        await query.edit_message_text("Error: no se encontró el audio.")
+        return
+
+    logger.info(f"[{correlation_id}] Audio split started by user {user_id}")
+
+    # Store file info in context
+    context.user_data["split_audio_session"] = {
+        "file_id": file_id,
+        "correlation_id": correlation_id,
+        "state": SPLIT_WAITING_START_TIME,
+        "type": "audio",
+    }
+
+    await query.edit_message_text(
+        "✂️ *Dividir Audio*\n\n"
+        "Primero necesito saber la duración del audio para ayudarte.\n\n"
+        "⏳ Procesando...",
+        parse_mode="Markdown"
+    )
+
+    # Download audio and get duration
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"split_audio_{user_id}_{correlation_id}.audio"
+            input_path = temp_mgr.get_temp_path(input_filename)
+
+            # Download audio
+            file = await context.bot.get_file(file_id)
+            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+            # Get duration
+            splitter = AudioSplitter(str(input_path), str(temp_mgr.get_temp_path("output")))
+            duration = splitter.get_audio_duration()
+
+            context.user_data["split_audio_session"]["duration"] = duration
+            context.user_data["split_audio_session"]["input_path"] = input_path
+
+            minutes = int(duration // 60)
+            seconds = int(duration % 60)
+
+            await query.edit_message_text(
+                f"✂️ *Dividir Audio*\n\n"
+                f"📊 Duración del audio: *{minutes}m {seconds}s*\n\n"
+                f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
+                f"Puede ser un número decimal (ej: 30.5)",
+                parse_mode="Markdown"
+            )
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Error preparing audio split: {e}")
+            await query.edit_message_text(
+                "Error al preparar el audio. Intenta de nuevo."
+            )
+            context.user_data.pop("split_audio_session", None)
+
+
+async def handle_audio_split_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle start time input for audio split.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    session = context.user_data.get("split_audio_session")
+
+    if not session:
+        return
+
+    correlation_id = session.get("correlation_id", "unknown")
+    logger.info(f"[{correlation_id}] Audio start time input received from user {user_id}")
+
+    try:
+        start_time = float(update.message.text.strip())
+    except (ValueError, AttributeError):
+        await update.message.reply_text(
+            "Por favor envía un número válido (ej: 30 o 30.5)"
+        )
+        return
+
+    duration = session.get("duration", 0)
+    if start_time < 0:
+        await update.message.reply_text(
+            "El tiempo de inicio no puede ser negativo."
+        )
+        return
+
+    if start_time >= duration:
+        await update.message.reply_text(
+            f"El tiempo de inicio debe ser menor a la duración del audio ({duration}s)."
+        )
+        return
+
+    # Store start time
+    session["start_time"] = start_time
+    session["state"] = SPLIT_WAITING_END_TIME
+
+    remaining = duration - start_time
+    await update.message.reply_text(
+        f"✅ Tiempo de inicio: *{start_time}s*\n\n"
+        f"Ahora envía el tiempo *final* en segundos.\n"
+        f"Debe ser mayor a {start_time}s y menor a {duration}s.\n\n"
+        f"Tiempo máximo disponible: *{remaining:.1f}s*",
+        parse_mode="Markdown"
+    )
+
+
+async def handle_audio_split_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle end time input for audio split and process the cut.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    session = context.user_data.get("split_audio_session")
+
+    if not session:
+        return
+
+    correlation_id = session.get("correlation_id", "unknown")
+    logger.info(f"[{correlation_id}] Audio end time input received from user {user_id}")
+
+    try:
+        end_time = float(update.message.text.strip())
+    except (ValueError, AttributeError):
+        await update.message.reply_text(
+            "Por favor envía un número válido (ej: 60 o 90.5)"
+        )
+        return
+
+    start_time = session.get("start_time", 0)
+    duration = session.get("duration", 0)
+
+    if end_time <= start_time:
+        await update.message.reply_text(
+            f"El tiempo final debe ser mayor al tiempo de inicio ({start_time}s)."
+        )
+        return
+
+    if end_time > duration:
+        await update.message.reply_text(
+            f"El tiempo final no puede exceder la duración del audio ({duration}s)."
+        )
+        return
+
+    segment_duration = end_time - start_time
+    if segment_duration < 1:
+        await update.message.reply_text(
+            "La duración mínima del segmento es 1 segundo."
+        )
+        return
+
+    # Store end time and proceed to cut
+    session["end_time"] = end_time
+    session["state"] = SPLIT_CONFIRMING
+
+    # Send processing message
+    processing_message = await update.message.reply_text(
+        f"✂️ Extrayendo segmento de {start_time}s a {end_time}s...\n"
+        f"Duración: {segment_duration:.1f}s"
+    )
+
+    with TempManager() as temp_mgr:
+        try:
+            input_path = session["input_path"]
+            output_dir = temp_mgr.get_temp_path(f"split_output_{correlation_id}")
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+            splitter = AudioSplitter(str(input_path), str(output_dir))
+            output_path = splitter.split_by_time_range(start_time, end_time)
+
+            # Send audio segment
+            await update.message.reply_audio(
+                audio=open(output_path, "rb"),
+                caption=f"Segmento extraído ({start_time}s - {end_time}s)"
+            )
+
+            await processing_message.delete()
+            logger.info(f"[{correlation_id}] Audio segment sent successfully")
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Error splitting audio: {e}")
+            await processing_message.delete()
+            await update.message.reply_text(
+                "Error al extraer el segmento. Intenta de nuevo."
+            )
+        finally:
+            context.user_data.pop("split_audio_session", None)
+
+
+async def handle_split_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle text messages during active split sessions.
+
+    Routes to appropriate handler based on active session type.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    # Check for video split session
+    if context.user_data.get("split_video_session"):
+        session = context.user_data["split_video_session"]
+        if session.get("state") == SPLIT_WAITING_START_TIME:
+            await handle_video_split_start_time(update, context)
+        elif session.get("state") == SPLIT_WAITING_END_TIME:
+            await handle_video_split_end_time(update, context)
+        return
+
+    # Check for audio split session
+    if context.user_data.get("split_audio_session"):
+        session = context.user_data["split_audio_session"]
+        if session.get("state") == SPLIT_WAITING_START_TIME:
+            await handle_audio_split_start_time(update, context)
+        elif session.get("state") == SPLIT_WAITING_END_TIME:
+            await handle_audio_split_end_time(update, context)
+        return
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2586,6 +3224,9 @@ def _get_video_menu_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("Convertir Formato", callback_data="video_action:convert"),
             InlineKeyboardButton("Dividir Video", callback_data="video_action:split"),
+        ],
+        [
+            InlineKeyboardButton("Merge con Audio", callback_data="video_action:merge_audio"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -3557,6 +4198,10 @@ def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Normalizar", callback_data="audio_action:normalize"),
         ],
         [
+            InlineKeyboardButton("Dividir Audio", callback_data="audio_action:split"),
+            InlineKeyboardButton("Unir Audios", callback_data="audio_action:join"),
+        ],
+        [
             InlineKeyboardButton("Pipeline de Efectos", callback_data="audio_action:effects"),
         ],
     ]
@@ -3790,6 +4435,22 @@ async def handle_audio_menu_callback(update: Update, context: ContextTypes.DEFAU
             _format_pipeline_message([]),
             reply_markup=reply_markup
         )
+
+    elif action == "split":
+        # Start interactive audio split process
+        await handle_audio_split_start(update, context)
+
+    elif action == "join":
+        # Start audio join session
+        context.user_data["join_audio_session"] = True
+        context.user_data["join_audio_files"] = []
+        context.user_data["join_audio_correlation_id"] = correlation_id
+        await query.edit_message_text(
+            "¡Perfecto! Ahora envíame los archivos de audio que quieres unir (uno por uno).\n\n"
+            "Cuando termines, envía /done para procesar.\n"
+            "Envía /cancel para cancelar."
+        )
+        logger.info(f"[{correlation_id}] Started audio join session for user {user_id}")
 
     else:
         logger.warning(f"[{correlation_id}] Unknown audio action: {action}")
@@ -4740,18 +5401,33 @@ async def handle_video_menu_callback(update: Update, context: ContextTypes.DEFAU
         logger.info(f"[{correlation_id}] Showing video format selection to user {user_id}")
 
     elif action == "split":
-        # For split, direct user to use the /split command with the video
+        # Start interactive video split process
+        # Send callback data with file_id to the split handler
         await query.edit_message_text(
-            "Para dividir el video, usa el comando /split respondiendo al video.\n\n"
-            "Ejemplos:\n"
-            "/split duration 30 - Divide en segmentos de 30 segundos\n"
-            "/split parts 5 - Divide en 5 partes iguales"
+            "✂️ Iniciando proceso para dividir video..."
         )
-        logger.info(f"[{correlation_id}] Directed user {user_id} to /split command")
+        
+        # Create callback data with file_id
+        split_callback_data = f"video_split:{file_id}"
+        
+        # Store original context for later
+        context.user_data["video_menu_file_id"] = file_id
+        context.user_data["video_menu_correlation_id"] = correlation_id
+        
+        # Call the split start handler
+        # Create a fake update with the callback data
+        await handle_video_split_start(update, context)
 
-        # Clean up context
-        context.user_data.pop("video_menu_file_id", None)
-        context.user_data.pop("video_menu_correlation_id", None)
+    elif action == "merge_audio":
+        # Store video info and prompt user to send audio
+        context.user_data["merge_video_file_id"] = file_id
+        context.user_data["merge_video_correlation_id"] = correlation_id
+        await query.edit_message_text(
+            "¡Perfecto! Ahora envíame el archivo de audio que quieres agregar al video.\n\n"
+            "Puede ser MP3, WAV, OGG, AAC, etc.\n\n"
+            "Envía /cancel para cancelar."
+        )
+        logger.info(f"[{correlation_id}] Waiting for audio file from user {user_id} for merge")
 
     else:
         logger.warning(f"[{correlation_id}] Unknown video menu action: {action}")
@@ -4986,6 +5662,10 @@ async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("pipeline_correlation_id", None)
     context.user_data.pop("pipeline_effects", None)
     context.user_data.pop("pipeline_selecting_effect", None)
+
+    # Clear merge keys
+    context.user_data.pop("merge_video_file_id", None)
+    context.user_data.pop("merge_video_correlation_id", None)
 
     await query.edit_message_text("Operación cancelada.")
     logger.info(f"[{correlation_id}] Operation cancelled by user {user_id}")
