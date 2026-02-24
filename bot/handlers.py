@@ -5735,15 +5735,526 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # URL Download Handlers
 # =============================================================================
 
+# Import PlatformRouter for metadata extraction
+from bot.downloaders.platform_router import PlatformRouter
+
+# Constants
+TELEGRAM_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def _get_download_format_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for download format selection.
+
+    Args:
+        correlation_id: Unique ID for this download request
+
+    Returns:
+        InlineKeyboardMarkup with video/audio options
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("Descargar Video", callback_data=f"download:video:{correlation_id}"),
+            InlineKeyboardButton("Descargar Audio", callback_data=f"download:audio:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_large_download_confirmation_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for large download confirmation.
+
+    Args:
+        correlation_id: Unique ID for this download request
+
+    Returns:
+        InlineKeyboardMarkup with confirm/cancel options
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("Confirmar Descarga", callback_data=f"download:confirm:{correlation_id}"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_download_cancel_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard with cancel button for active download.
+
+    Args:
+        correlation_id: Unique ID for this download request
+
+    Returns:
+        InlineKeyboardMarkup with cancel button
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("❌ Cancelar Descarga", callback_data=f"download:cancel:{correlation_id}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_download_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /download command to download a URL.
+
+    Usage: /download <url>
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+
+    # Parse URL from command arguments
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Por favor proporciona una URL para descargar.\n"
+            "Ejemplo: /download https://youtube.com/watch?v=..."
+        )
+        return
+
+    url = args[0]
+
+    # Validate URL
+    if not url_detector.validate_url(url):
+        await update.message.reply_text(
+            "La URL proporcionada no parece válida.\n"
+            "Asegúrate de incluir http:// o https://"
+        )
+        return
+
+    # Check if URL is supported
+    if not url_detector.is_supported(url):
+        await update.message.reply_text(
+            "Esta URL no parece ser un video soportado.\n"
+            "Soporto YouTube, Instagram, TikTok, Twitter/X, Facebook y URLs directas de video."
+        )
+        return
+
+    logger.info(f"[{correlation_id}] Download command from user {user_id}: {url}")
+
+    # Store URL and correlation_id in context
+    context.user_data[f"download_url_{correlation_id}"] = url
+    context.user_data[f"download_correlation_id_{user_id}"] = correlation_id
+
+    # Show format selection menu
+    reply_markup = _get_download_format_keyboard(correlation_id)
+    await update.message.reply_text(
+        "Selecciona el formato de descarga:",
+        reply_markup=reply_markup
+    )
+
+
+async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle URL detection in regular text messages.
+
+    Detects URLs and shows inline menu for format selection.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    message_text = update.message.text
+    user_id = update.effective_user.id
+
+    # Detect URLs in message
+    urls = url_detector.extract_urls(message_text, update.message.entities)
+    if not urls:
+        return  # No URLs, let other handlers process
+
+    # Process first URL
+    url = urls[0]
+
+    # Validate URL
+    if not url_detector.validate_url(url):
+        return  # Not a valid URL, ignore
+
+    # Check if URL is supported
+    if not url_detector.is_supported(url):
+        return  # Not a supported video URL, ignore silently
+
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] URL detected in message from user {user_id}: {url}")
+
+    # Store URL and correlation_id in context
+    context.user_data[f"download_url_{correlation_id}"] = url
+    context.user_data[f"download_correlation_id_{user_id}"] = correlation_id
+
+    # Show format selection menu
+    reply_markup = _get_download_format_keyboard(correlation_id)
+    await update.message.reply_text(
+        "Enlace de video detectado. Selecciona el formato:",
+        reply_markup=reply_markup
+    )
+
+
+async def handle_download_format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle format selection callback for downloads.
+
+    Parses callback data, retrieves URL, checks file size,
+    and either shows confirmation or starts download.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse callback data: download:format:correlation_id
+    if not callback_data.startswith("download:video:") and not callback_data.startswith("download:audio:"):
+        logger.warning(f"Unexpected callback data: {callback_data}")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 3:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
+
+    format_type = parts[1]  # video or audio
+    correlation_id = parts[2]
+
+    # Retrieve URL from context
+    url = context.user_data.get(f"download_url_{correlation_id}")
+    if not url:
+        await query.edit_message_text(
+            "Error: No se encontró la URL. Intenta de nuevo."
+        )
+        return
+
+    logger.info(f"[{correlation_id}] Format selected: {format_type} by user {user_id}")
+
+    # Store format preference
+    context.user_data[f"download_format_{correlation_id}"] = format_type
+
+    # Check file size before downloading
+    await query.edit_message_text("Analizando tamaño del archivo...")
+
+    try:
+        # Extract metadata using PlatformRouter
+        router = PlatformRouter()
+        route_result = await router.route(url)
+        metadata = await route_result.downloader.get_metadata(url)
+
+        # Get file size
+        size = metadata.get('filesize') or metadata.get('filesize_approx', 0)
+
+        # Store metadata for later use
+        context.user_data[f"download_meta_{correlation_id}"] = metadata
+
+        if size and size > TELEGRAM_MAX_FILE_SIZE:
+            # Large file - show confirmation
+            size_mb = size / (1024 * 1024)
+            logger.info(f"[{correlation_id}] Large file detected: {size_mb:.1f} MB")
+
+            reply_markup = _get_large_download_confirmation_keyboard(correlation_id)
+            await query.edit_message_text(
+                f"El archivo es grande (~{size_mb:.1f} MB).\n\n"
+                f"Esto puede tomar tiempo y consumir datos.\n"
+                f"¿Deseas continuar?",
+                reply_markup=reply_markup
+            )
+        else:
+            # Small file or unknown size - proceed directly
+            if size:
+                size_mb = size / (1024 * 1024)
+                logger.info(f"[{correlation_id}] File size: {size_mb:.1f} MB - proceeding")
+            else:
+                logger.info(f"[{correlation_id}] Unknown file size - proceeding")
+
+            # Start download directly
+            await _start_download(update, context, correlation_id, url, format_type)
+
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not get metadata: {e}")
+        # If we can't get metadata, proceed anyway (will fail during download if too large)
+        await _start_download(update, context, correlation_id, url, format_type)
+
+
+async def handle_download_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle confirmation callback for large downloads.
+
+    Starts the download after user confirms.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse callback data: download:confirm:correlation_id
+    if not callback_data.startswith("download:confirm:"):
+        return
+
+    correlation_id = callback_data.split(":")[2]
+
+    # Retrieve URL and format from context
+    url = context.user_data.get(f"download_url_{correlation_id}")
+    format_type = context.user_data.get(f"download_format_{correlation_id}", "video")
+
+    if not url:
+        await query.edit_message_text(
+            "Error: No se encontró la información de descarga. Intenta de nuevo."
+        )
+        return
+
+    logger.info(f"[{correlation_id}] Large download confirmed by user {user_id}")
+
+    # Start download
+    await _start_download(update, context, correlation_id, url, format_type)
+
+
+async def _start_download(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    correlation_id: str,
+    url: str,
+    format_type: str
+) -> None:
+    """Start the download process with progress updates.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        correlation_id: Unique download ID
+        url: URL to download
+        format_type: 'video' or 'audio'
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Create facade
+    facade = DownloadFacade()
+
+    try:
+        await facade.start()
+
+        # Store facade instance for cancellation support
+        context.user_data[f"download_facade_{correlation_id}"] = facade
+
+        # Initial message with cancel button
+        reply_markup = _get_download_cancel_keyboard(correlation_id)
+        await query.edit_message_text(
+            "Iniciando descarga...",
+            reply_markup=reply_markup
+        )
+
+        # Progress tracking
+        last_message_text = ["Iniciando descarga..."]
+
+        async def progress_callback(progress: dict) -> None:
+            from bot.downloaders.progress_tracker import format_progress_message
+            message = format_progress_message(progress)
+
+            if message != last_message_text[0]:
+                try:
+                    await query.edit_message_text(
+                        message,
+                        reply_markup=reply_markup
+                    )
+                    last_message_text[0] = message
+                except Exception as e:
+                    logger.debug(f"Failed to update progress message: {e}")
+
+        # Create progress tracker
+        from bot.downloaders.progress_tracker import ProgressTracker
+        tracker = ProgressTracker(
+            min_update_interval=3.0,
+            min_percent_change=5.0,
+            on_update=lambda p: asyncio.create_task(progress_callback(p))
+        )
+
+        # Download with progress
+        config_overrides = {
+            'extract_audio': (format_type == 'audio'),
+        }
+
+        result = await facade.download(
+            url=url,
+            chat_id=chat_id,
+            config_overrides=config_overrides
+        )
+
+        if result.success:
+            # Send downloaded file
+            await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+
+            # Clean up status message
+            try:
+                await query.delete_message()
+            except Exception:
+                pass
+        else:
+            await query.edit_message_text(
+                f"Error en la descarga: {getattr(result, 'error_message', 'Error desconocido')}"
+            )
+
+    except FileTooLargeError as e:
+        logger.warning(f"[{correlation_id}] File too large: {e}")
+        await query.edit_text(e.to_user_message())
+    except URLValidationError as e:
+        logger.warning(f"[{correlation_id}] URL validation error: {e}")
+        await query.edit_text(e.to_user_message())
+    except UnsupportedURLError as e:
+        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
+        await query.edit_text(e.to_user_message())
+    except DownloadError as e:
+        logger.error(f"[{correlation_id}] Download error: {e}")
+        await query.edit_text(e.to_user_message())
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Unexpected error: {e}")
+        await query.edit_text(
+            "Ocurrió un error inesperado. Por favor intenta de nuevo."
+        )
+    finally:
+        # Clean up user_data
+        context.user_data.pop(f"download_facade_{correlation_id}", None)
+        try:
+            await facade.stop()
+        except Exception:
+            pass
+
+
+async def _send_downloaded_file_with_menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    format_type: str,
+    correlation_id: str
+) -> None:
+    """Send downloaded file and show post-download menu.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result
+        format_type: 'video' or 'audio'
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+
+    title = metadata.get('title', 'Video')
+
+    try:
+        if format_type == 'audio' or file_ext in audio_extensions:
+            # Send as audio
+            with open(file_path, 'rb') as audio_file:
+                await update.callback_query.message.reply_audio(
+                    audio=audio_file,
+                    caption=f"Descarga completada: {title}",
+                    title=title,
+                    performer=metadata.get('artist') or metadata.get('uploader')
+                )
+        else:
+            # Send as video with post-download menu
+            with open(file_path, 'rb') as video_file:
+                sent_message = await update.callback_query.message.reply_video(
+                    video=video_file,
+                    caption=f"Descarga completada: {title}",
+                    supports_streaming=True
+                )
+
+            # Show post-download menu for video
+            # Store file info for post-download actions
+            context.user_data["video_menu_file_id"] = sent_message.video.file_id
+            context.user_data["video_menu_correlation_id"] = correlation_id
+
+            reply_markup = _get_video_menu_keyboard()
+            await update.callback_query.message.reply_text(
+                "¿Qué quieres hacer con este video?",
+                reply_markup=reply_markup
+            )
+
+        logger.info(f"Downloaded file sent to user {update.effective_user.id}")
+
+    except Exception as e:
+        logger.error(f"Failed to send downloaded file: {e}")
+        await update.callback_query.message.reply_text(
+            "Error al enviar el archivo descargado."
+        )
+
+
+async def handle_download_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle download cancellation callback.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse callback data: download:cancel:correlation_id
+    if not callback_data.startswith("download:cancel:"):
+        return
+
+    correlation_id = callback_data.split(":")[2]
+
+    logger.info(f"[{correlation_id}] Download cancel requested by user {user_id}")
+
+    # Get facade instance
+    facade = context.user_data.get(f"download_facade_{correlation_id}")
+
+    if facade:
+        # Cancel the download
+        cancelled = await facade.cancel_download(correlation_id)
+        if cancelled:
+            await query.edit_message_text("Descarga cancelada.")
+        else:
+            await query.edit_message_text("No se pudo cancelar la descarga (ya completada o no encontrada).")
+    else:
+        await query.edit_message_text("Descarga cancelada.")
+
+    # Clean up user_data
+    context.user_data.pop(f"download_url_{correlation_id}", None)
+    context.user_data.pop(f"download_format_{correlation_id}", None)
+    context.user_data.pop(f"download_meta_{correlation_id}", None)
+    context.user_data.pop(f"download_facade_{correlation_id}", None)
+
+
 async def send_downloaded_file(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     result: Any
 ) -> None:
-    """Send downloaded file to user.
-
-    Determines file type from metadata and sends appropriately
-    (video for video files, audio for audio files).
+    """Send downloaded file to user (legacy helper).
 
     Args:
         update: Telegram update object
@@ -5777,7 +6288,6 @@ async def send_downloaded_file(
 
     try:
         if file_ext in audio_extensions:
-            # Send as audio
             with open(file_path, 'rb') as audio_file:
                 await update.message.reply_audio(
                     audio=audio_file,
@@ -5786,7 +6296,6 @@ async def send_downloaded_file(
                     performer=metadata.get('artist') or metadata.get('uploader')
                 )
         else:
-            # Send as video
             with open(file_path, 'rb') as video_file:
                 await update.message.reply_video(
                     video=video_file,
@@ -5802,79 +6311,14 @@ async def send_downloaded_file(
 
 
 async def handle_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle messages containing URLs for download.
+    """Handle messages containing URLs for download (legacy direct download).
 
-    Detects URLs in text messages, validates them, and initiates
-    download with progress updates.
+    This handler is kept for backward compatibility.
+    New behavior uses handle_url_detection with inline menu.
 
     Args:
         update: Telegram update object
         context: Telegram context object
     """
-    message_text = update.message.text
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
-    # Detect URLs in message
-    urls = url_detector.detect_urls(message_text)
-    if not urls:
-        return  # No URLs, ignore
-
-    # Process first URL (or all if implementing multi-download)
-    url = urls[0]
-    correlation_id = str(uuid.uuid4())[:8]
-
-    logger.info(f"[{correlation_id}] URL detected from user {user_id}: {url}")
-
-    # Send initial message
-    status_message = await update.message.reply_text(
-        "Analizando enlace...",
-        quote=True
-    )
-
-    # Create facade
-    facade = DownloadFacade()
-
-    try:
-        await facade.start()
-
-        # Download with progress
-        result = await facade.download_with_progress(
-            url=url,
-            chat_id=chat_id,
-            message_func=lambda text: context.bot.send_message(chat_id, text),
-            edit_message_func=lambda text: status_message.edit_text(text)
-        )
-
-        if result.success:
-            # Send downloaded file
-            await send_downloaded_file(update, context, result)
-            # Clean up status message
-            try:
-                await status_message.delete()
-            except Exception:
-                pass
-        else:
-            await status_message.edit_text(
-                f"Error en la descarga: {result.error_message or 'Error desconocido'}"
-            )
-
-    except FileTooLargeError as e:
-        logger.warning(f"[{correlation_id}] File too large: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except URLValidationError as e:
-        logger.warning(f"[{correlation_id}] URL validation error: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except UnsupportedURLError as e:
-        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except DownloadError as e:
-        logger.error(f"[{correlation_id}] Download error: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except Exception as e:
-        logger.error(f"[{correlation_id}] Unexpected error: {e}")
-        await status_message.edit_text(
-            "Ocurrió un error inesperado. Por favor intenta de nuevo."
-        )
-    finally:
-        await facade.stop()
+    # Delegate to the new URL detection handler with menu
+    await handle_url_detection(update, context)
