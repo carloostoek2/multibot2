@@ -51,6 +51,12 @@
 - [x] Phase 7: Audio Effects (4/4 plans) — completed 2026-02-20
 - [x] Phase 8: Interfaz de usuario con menú inline (4/4 plans) — completed 2026-02-20
 
+**Quick Task (2026-02-23): Video-Audio Merge & Interactive Split**
+- Added video-audio merge capability (merge video with separate audio track)
+- Implemented interactive FSM for split by time range (no command needed)
+- New inline menu options: "Merge con Audio", "Dividir Audio"
+- Users can now split video/audio by selecting start/end times interactively
+
 **Archive:** [v2.0 Roadmap](milestones/v2.0-ROADMAP.md) | [v2.0 Requirements](milestones/v2.0-REQUIREMENTS.md)
 
 </details>
@@ -93,6 +99,15 @@
 
 **Requirements:** YT-01, YT-02, YT-03, YT-04, IG-01, IG-02, IG-03, TT-01, TT-02, TW-01, TW-02, FB-01, FB-02, GV-01, GV-02, GV-03, GV-04
 
+**Plans:** 5 plans
+
+**Plan list:**
+- [x] 10-01-PLAN.md — YouTube Handler (YouTube-specific downloader with Shorts detection and enhanced metadata) — completed 2026-02-21
+- [x] 10-02-PLAN.md — Instagram Handler (Instagram posts, Reels, and Stories with content type detection) — completed 2026-02-21
+- [x] 10-03-PLAN.md — TikTok and Twitter/X Handlers (watermark-free preference, slideshow detection, quality selection) — completed 2026-02-21
+- [x] 10-04-PLAN.md — Facebook and HTML Extractor (Facebook videos/Reels, generic HTML video extraction) — completed 2026-02-21
+- [x] 10-05-PLAN.md — Platform Router (automatic URL-to-downloader routing with priority-based selection) — completed 2026-02-21
+
 **Success Criteria:**
 1. YouTube videos and Shorts download successfully (video and audio modes)
 2. Instagram posts, Reels, and Stories download successfully
@@ -112,6 +127,15 @@
 **Dependencies:** Phase 10 complete
 
 **Requirements:** DM-01, DM-02, DM-03, DM-04, DM-05, PT-01, PT-02, PT-03, PT-04, PT-05, EH-03, EH-04, EH-05
+
+**Plans:** 5 plans
+
+**Plan list:**
+- [x] 11-01-PLAN.md — Download Manager (concurrent downloads, tracking, queue management) — completed 2026-02-21
+- [x] 11-02-PLAN.md — Progress Tracking (real-time updates, progress bar visualization) — completed 2026-02-21
+- [x] 11-03-PLAN.md — Enhanced Error Handling (retry logic, rate limiting, timeouts) — completed 2026-02-21
+- [x] 11-04-PLAN.md — Download Lifecycle (temp isolation, automatic cleanup) — completed 2026-02-21
+- [x] 11-05-PLAN.md — Unified API Facade (integration with bot handlers) — completed 2026-02-21
 
 **Success Criteria:**
 1. Multiple downloads can run concurrently without interference
@@ -134,6 +158,14 @@
 
 **Requirements:** UI-01, UI-02, UI-03, UI-04, UI-05, UI-06, INT-01, INT-02, INT-03, INT-04
 
+**Plans:** 4 plans
+
+**Plan list:**
+- [ ] 12-01-PLAN.md — Download Command and URL Detection (/download command, auto-detect URLs, format selection, large download confirmation)
+- [ ] 12-02-PLAN.md — Post-Download Integration (video note conversion, audio processing, recent downloads list)
+- [ ] 12-03-PLAN.md — Cancel and Progress Enhancement (cancel button during download, enhanced progress tracking, /downloads command)
+- [ ] 12-04-PLAN.md — Combined Flow and Integration Tests (Download + Convert flow, end-to-end tests, error handling polish)
+
 **Success Criteria:**
 1. /download command works with explicit URL argument
 2. Inline menu appears automatically when URL is detected in message
@@ -153,12 +185,12 @@
 
 ```
 v3.0 Downloader
-[████░░░░░░░░░░░░░░░░] 25% (1/4 phases)
+[████████████░░░░░░░░] 75% (3/4 phases)
 
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — completed 2026-02-21
-Phase 10: Platform Handlers                 [░░░░░░░░░░] 0% (0/N plans)
-Phase 11: Download Management & Progress    [░░░░░░░░░░] 0% (0/N plans)
-Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
+Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — completed 2026-02-21
+Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — completed 2026-02-21
+Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/4 plans)
 ```
 
 ---
@@ -223,7 +255,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 ---
 
-*Last updated: 2026-02-21 — Phase 9 complete (4/4 plans executed)*
+*Last updated: 2026-02-23 — Quick Task: Video-Audio Merge & Interactive Split*
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 *For v2.0 archive, see .planning/milestones/v2.0-ROADMAP.md*

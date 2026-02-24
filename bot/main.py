@@ -39,7 +39,8 @@ from bot.handlers import (
     handle_effects_command, handle_pipeline_builder,
     handle_audio_menu_callback, handle_audio_menu_format_selection,
     handle_video_menu_callback, handle_video_format_selection,
-    handle_cancel_callback, handle_back_callback
+    handle_cancel_callback, handle_back_callback,
+    handle_split_text_input
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -155,6 +156,10 @@ def main() -> None:
 
     # Add handler for audio files (MP3, OGG, etc.)
     application.add_handler(MessageHandler(filters.AUDIO, handle_audio_file))
+
+    # Add handler for text messages during split sessions
+    # Must be after VIDEO and AUDIO handlers to not interfere
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_split_text_input))
 
     # Add global error handler
     application.add_error_handler(error_handler)

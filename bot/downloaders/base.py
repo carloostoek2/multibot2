@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from .exceptions import (
     DownloadError,
     FileTooLargeError,
+    NetworkError,
     URLValidationError,
 )
 
@@ -327,6 +328,52 @@ class BaseDownloader(abc.ABC):
             NetworkError: For transient network failures
         """
         pass
+
+    async def download_with_retry(
+        self,
+        url: str,
+        options: DownloadOptions
+    ) -> Any:
+        """Descarga con reintentos automáticos ante fallos transitorios.
+
+        Este método envuelve download() con lógica de reintento usando
+        RetryHandler. Maneja errores de red, timeouts y rate limits
+        automáticamente según EH-03.
+
+        Args:
+            url: La URL a descargar
+            options: Opciones de configuración de descarga
+
+        Returns:
+            DownloadResult de la descarga exitosa
+
+        Raises:
+            URLValidationError: Si la URL es inválida (no reintentable)
+            FileTooLargeError: Si el archivo excede límites (no reintentable)
+            DownloadFailedError: Si falla después de todos los reintentos
+            NetworkError: Para fallos de red persistentes
+        """
+        # Importar aquí para evitar circular imports
+        from .retry_handler import RetryHandler
+
+        # Crear RetryHandler con configuración de options
+        retry_handler = RetryHandler(
+            max_retries=options.max_retries,
+            base_delay=options.retry_delay,
+            max_delay=60.0,
+            exponential_base=2.0,
+            jitter=True
+        )
+
+        # Definir operación de descarga
+        async def download_operation():
+            return await self.download(url, options)
+
+        # Ejecutar con reintentos
+        return await retry_handler.execute(
+            download_operation,
+            operation_name=f"download({url[:50]}...)",
+        )
 
     # Utility methods (concrete implementations)
 

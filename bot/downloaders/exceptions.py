@@ -254,6 +254,60 @@ class NetworkError(DownloadError):
         return "Error de conexión. Por favor verifica tu conexión e intenta de nuevo."
 
 
+class RateLimitError(DownloadError):
+    """Raised when rate limit is exceeded by a platform.
+
+    This error is raised when platforms (YouTube, Instagram, TikTok, Twitter/X)
+    or generic HTTP services return rate limit responses (HTTP 429) or indicate
+    that too many requests have been made.
+
+    The error includes retry_after information when available from platform
+    headers or error messages, allowing for intelligent backoff strategies.
+
+    Attributes:
+        message: Technical description of the rate limit
+        url: The URL being accessed when rate limited
+        correlation_id: Request tracing ID
+        retry_after: Seconds to wait before retry (from platform headers if available)
+        platform: Platform that issued the rate limit (e.g., "youtube", "instagram")
+
+    Examples:
+        YouTube rate limiting:
+            - HTTP 429 responses from youtube.com
+            - "Too many requests" error messages
+
+        Instagram rate limiting:
+            - GraphQL rate limit exceeded
+            - "Please wait a few minutes" messages
+
+        TikTok rate limiting:
+            - Captcha challenges after rapid requests
+            - "Rate limit exceeded" responses
+
+        Generic HTTP 429 responses:
+            - Any service returning HTTP 429 Too Many Requests
+            - Retry-After header values
+    """
+
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded",
+        url: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        retry_after: Optional[int] = None,
+        platform: Optional[str] = None
+    ):
+        self.retry_after = retry_after
+        self.platform = platform
+        super().__init__(message, url, correlation_id)
+
+    def to_user_message(self) -> str:
+        """Return user-friendly message in Spanish with retry information."""
+        if self.retry_after:
+            return f"Límite de descargas alcanzado. Por favor espera {self.retry_after} segundos."
+        return "Límite de descargas alcanzado. Por favor intenta más tarde."
+
+
 # For backwards compatibility with existing code
 # These aliases maintain compatibility with code using the old names
 URLDetectionError = URLValidationError
@@ -269,6 +323,7 @@ __all__ = [
     "UnsupportedURLError",
     "DownloadFailedError",
     "NetworkError",
+    "RateLimitError",
     # Backwards compatibility
     "URLDetectionError",
 ]

@@ -6,3 +6,6 @@ yt-dlp>=2026.2.4
 aiohttp>=3.9.0
 aiofiles>=23.0.0
 ffmpeg-python>=0.2.0
+
+# Optional for HTML video extraction
+beautifulsoup4>=4.12.0
