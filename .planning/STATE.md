@@ -8,13 +8,13 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 ## Current Position
 
-**Phase:** 11-download-management-progress — COMPLETE
+**Phase:** 12-integration-polish — IN PROGRESS
 
-**Plan:** 11-05 COMPLETE
+**Plan:** 12-01 COMPLETE
 
-**Status:** All 5 plans in Phase 11 complete. Ready for Phase 12: Integration & Polish.
+**Status:** Download command and URL detection handlers implemented. Ready for 12-02.
 
-**Last activity:** 2026-02-21 — Planned Phase 11: Download Management & Progress with 5 plans across 3 waves.
+**Last activity:** 2026-02-24 — Completed 12-01: Download Command and URL Detection with inline menus and large file confirmation.
 
 ## Progress
 
@@ -25,7 +25,7 @@ v3.0 Downloader
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
 Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — COMPLETE
-Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
+Phase 12: Integration & Polish              [██░░░░░░░░] 20% (1/5 plans) — IN PROGRESS
 ```
 
 ## Accumulated Context
@@ -184,6 +184,16 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - send_downloaded_file() helper for sending downloaded content
 - 10 comprehensive integration tests
 
+**12-01: Download Command and URL Detection** — COMPLETE
+- `/download <url>` command handler with format selection menu
+- Automatic URL detection in messages with inline menu
+- Format selection (video/audio) with callback handlers
+- Large download confirmation (>50MB) with warning prompt
+- Cancel button during active download
+- Progress tracking integration with throttled updates
+- Post-download menu for video processing options
+- Integration with DownloadFacade and PlatformRouter
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -290,6 +300,13 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 73. **Specific exception handling** — FileTooLargeError, URLValidationError, UnsupportedURLError caught and converted to Spanish messages
 74. **Handler integration with URL detection** — Automatic URL detection and download initiation in message handlers
 
+**12-01 Implementation Decisions:**
+75. **Handler registration order matters** — Commands before callbacks before messages to avoid routing conflicts
+76. **Callback pattern: action:type:id** — Consistent with existing video/audio menu patterns (e.g., `download:video:{correlation_id}`)
+77. **Size check before download** — Use PlatformRouter to extract metadata and check filesize before downloading
+78. **Conservative approach for unknown sizes** — Show confirmation when size unknown (be safe)
+79. **Post-download integration** — Video downloads show existing video menu for further processing
+
 ## Blockers
 
 (None)
@@ -305,7 +322,8 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 7. ~~11-01: Download Manager~~ DONE
 8. ~~11-02: Progress Tracker~~ DONE
 9. ~~Phase 11: Download Management & Progress~~ DONE (5/5 plans)
-10. **Phase 12: Integration & Polish** — NEXT
+10. ~~12-01: Download Command and URL Detection~~ DONE
+11. **12-02: Download Progress UI** — NEXT
 
 ## Quick Tasks Completed
 
@@ -333,4 +351,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-23 after quick task: Video-Audio Merge & Interactive Split*
+*Last updated: 2026-02-24 after completing 12-01: Download Command and URL Detection*
