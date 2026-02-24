@@ -51,6 +51,12 @@
 - [x] Phase 7: Audio Effects (4/4 plans) — completed 2026-02-20
 - [x] Phase 8: Interfaz de usuario con menú inline (4/4 plans) — completed 2026-02-20
 
+**Quick Task (2026-02-23): Video-Audio Merge & Interactive Split**
+- Added video-audio merge capability (merge video with separate audio track)
+- Implemented interactive FSM for split by time range (no command needed)
+- New inline menu options: "Merge con Audio", "Dividir Audio"
+- Users can now split video/audio by selecting start/end times interactively
+
 **Archive:** [v2.0 Roadmap](milestones/v2.0-ROADMAP.md) | [v2.0 Requirements](milestones/v2.0-REQUIREMENTS.md)
 
 </details>
@@ -249,7 +255,7 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 
 ---
 
-*Last updated: 2026-02-21 — Phase 12 planned (4/4 plans created)*
+*Last updated: 2026-02-23 — Quick Task: Video-Audio Merge & Interactive Split*
 
 *For v1.0 archive, see .planning/milestones/v1.0-ROADMAP.md*
 *For v2.0 archive, see .planning/milestones/v2.0-ROADMAP.md*

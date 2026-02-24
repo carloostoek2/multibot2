@@ -307,6 +307,20 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 9. ~~Phase 11: Download Management & Progress~~ DONE (5/5 plans)
 10. **Phase 12: Integration & Polish** — NEXT
 
+## Quick Tasks Completed
+
+**2026-02-23: Video-Audio Merge & Interactive Split**
+- Added `VideoAudioMerger` class for merging video with audio tracks
+- Implemented interactive FSM for video splitting (start/end time selection)
+- Implemented interactive FSM for audio splitting (start/end time selection)
+- Integrated split functionality into inline menus (no command needed)
+- Added `split_by_time_range()` method to VideoSplitter and AudioSplitter
+- New menu options: "Merge con Audio", "Dividir Audio"
+- Text input handler for split session time inputs
+- Automatic session cleanup after processing
+- **Commit:** 53ad0ac
+- **Files:** +1,153 lines, -14 lines across 6 files
+
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-02-21)
@@ -319,4 +333,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-22 after completing 11-05 DownloadFacade*
+*Last updated: 2026-02-23 after quick task: Video-Audio Merge & Interactive Split*
