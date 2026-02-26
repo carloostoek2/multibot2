@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 12-integration-polish — IN PROGRESS
 
-**Plan:** 12-01 COMPLETE
+**Plan:** 12-03 COMPLETE
 
-**Status:** Download command and URL detection handlers implemented. Ready for 12-02.
+**Status:** Cancel functionality, enhanced progress tracking, and /downloads command verified complete.
 
-**Last activity:** 2026-02-24 — Completed 12-01: Download Command and URL Detection with inline menus and large file confirmation.
+**Last activity:** 2026-02-26 — Verified 12-03: Cancel functionality, enhanced progress tracking, and /downloads command (implemented in 12-01).
 
 ## Progress
 
@@ -26,6 +26,8 @@ Phase 9:  Downloader Core Infrastructure    [██████████] 100
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
 Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — COMPLETE
 Phase 12: Integration & Polish              [██░░░░░░░░] 20% (1/5 plans) — IN PROGRESS
+
+**Note:** Plan 12-03 functionality (cancel, progress, /downloads) was implemented in 12-01. Plan 12-03 served as verification.
 ```
 
 ## Accumulated Context
@@ -194,6 +196,15 @@ Phase 12: Integration & Polish              [██░░░░░░░░] 20%
 - Post-download menu for video processing options
 - Integration with DownloadFacade and PlatformRouter
 
+**12-03: Cancel and Progress Enhancement** — COMPLETE (verified)
+- Cancel button with `download:cancel:{correlation_id}` callback pattern
+- `handle_download_cancel_callback()` with race condition handling
+- Enhanced progress display with platform name, percentage bar, speed, ETA
+- Rate-limited progress updates (1 second minimum between edits)
+- `/downloads` command showing active and recent downloads
+- Status tracking: downloading, completed, error, cancelled
+- Cancel buttons in /downloads list for active downloads
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -307,6 +318,12 @@ Phase 12: Integration & Polish              [██░░░░░░░░] 20%
 78. **Conservative approach for unknown sizes** — Show confirmation when size unknown (be safe)
 79. **Post-download integration** — Video downloads show existing video menu for further processing
 
+**12-03 Implementation Decisions:**
+80. **Cancel via facade reference in user_data** — Store `download_facade_{correlation_id}` for cancellation access
+81. **Rate limiting for progress updates** — 1 second minimum between message edits to avoid Telegram rate limits
+82. **Status tracking in user_data** — `download_status_{correlation_id}` tracks lifecycle: downloading → completed/error/cancelled
+83. **Race condition handling** — Check current status before/after cancel to handle "already completed" scenarios
+
 ## Blockers
 
 (None)
@@ -323,7 +340,8 @@ Phase 12: Integration & Polish              [██░░░░░░░░] 20%
 8. ~~11-02: Progress Tracker~~ DONE
 9. ~~Phase 11: Download Management & Progress~~ DONE (5/5 plans)
 10. ~~12-01: Download Command and URL Detection~~ DONE
-11. **12-02: Download Progress UI** — NEXT
+11. ~~12-03: Cancel and Progress Enhancement~~ DONE (verified)
+12. **12-02: Download Progress UI** — NEXT
 
 ## Quick Tasks Completed
 
@@ -351,4 +369,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-24 after completing 12-01: Download Command and URL Detection*
+*Last updated: 2026-02-26 after verifying 12-03: Cancel and Progress Enhancement*
