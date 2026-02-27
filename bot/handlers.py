@@ -5767,6 +5767,117 @@ def _detect_platform_for_display(url: str) -> str:
         return ''
 
 
+def _get_error_message_for_exception(e: Exception, url: str, correlation_id: str) -> str:
+    """Get user-friendly error message for download exceptions.
+
+    Handles network errors, platform-specific errors, file system errors,
+    and Telegram errors with appropriate Spanish messages.
+
+    Args:
+        e: The exception that occurred
+        url: The URL being downloaded
+        correlation_id: Unique download ID for logging
+
+    Returns:
+        User-friendly error message in Spanish
+    """
+    import errno
+    from telegram.error import NetworkError as TelegramNetworkError, RetryAfter, TimedOut as TelegramTimedOut
+
+    error_msg = str(e).lower()
+    platform = _detect_platform_for_display(url)
+
+    # Network errors
+    if isinstance(e, (ConnectionResetError, BrokenPipeError)):
+        logger.warning(f"[{correlation_id}] Connection reset during download: {e}")
+        return "La conexión se interrumpió. Intenta de nuevo."
+
+    if isinstance(e, TimeoutError) or "timeout" in error_msg:
+        logger.warning(f"[{correlation_id}] Download timeout: {e}")
+        return "La descarga tardó demasiado, intenta de nuevo."
+
+    if "dns" in error_msg or "name resolution" in error_msg or "getaddrinfo" in error_msg:
+        logger.warning(f"[{correlation_id}] DNS failure: {e}")
+        return "No se pudo conectar al servidor. Verifica la URL."
+
+    # Platform-specific errors
+    if platform == "YouTube":
+        if "age" in error_msg or "restricted" in error_msg:
+            return "Este video tiene restricción de edad."
+        if "unavailable" in error_msg or "not available" in error_msg:
+            return "Este video no está disponible."
+        if "private" in error_msg:
+            return "Este video es privado."
+
+    if platform == "Instagram":
+        if "private" in error_msg:
+            return "Este contenido de Instagram es privado."
+        if "story" in error_msg and ("expired" in error_msg or "unavailable" in error_msg):
+            return "Esta historia de Instagram ha expirado."
+        if "login" in error_msg or "authent" in error_msg:
+            return "Este contenido requiere inicio de sesión en Instagram."
+
+    if platform == "TikTok":
+        if "slideshow" in error_msg or "carousel" in error_msg:
+            return "Los slideshows de TikTok no son soportados."
+        if "watermark" in error_msg:
+            return "No se pudo descargar el video sin marca de agua."
+
+    if platform == "Twitter/X":
+        if "restricted" in error_msg or "sensitive" in error_msg:
+            return "Este contenido está restringido."
+        if "deleted" in error_msg or "not found" in error_msg:
+            return "Este tweet no existe o fue eliminado."
+
+    if platform == "Facebook":
+        if "login" in error_msg or "authent" in error_msg:
+            return "Este video requiere inicio de sesión en Facebook."
+        if "private" in error_msg:
+            return "Este video de Facebook es privado."
+
+    # File system errors
+    if isinstance(e, OSError):
+        if e.errno == errno.ENOSPC:
+            logger.error(f"[{correlation_id}] Disk full: {e}")
+            return "No hay espacio suficiente en el servidor."
+        if e.errno == errno.EACCES or e.errno == errno.EPERM:
+            logger.error(f"[{correlation_id}] Permission denied: {e}")
+            return "Error de permisos al guardar archivo."
+        if e.errno == errno.ENOSPC or "no space" in error_msg:
+            logger.error(f"[{correlation_id}] Disk full: {e}")
+            return "No hay espacio suficiente en el servidor."
+
+    # Telegram errors
+    if isinstance(e, TelegramNetworkError):
+        logger.warning(f"[{correlation_id}] Telegram network error: {e}")
+        return "Error de red al enviar el archivo, intenta de nuevo."
+
+    if isinstance(e, TelegramTimedOut):
+        logger.warning(f"[{correlation_id}] Telegram timeout: {e}")
+        return "El envío tardó demasiado, intenta de nuevo."
+
+    if isinstance(e, RetryAfter):
+        retry_after = getattr(e, 'retry_after', 30)
+        logger.warning(f"[{correlation_id}] Rate limited: retry after {retry_after}s")
+        return f"Demasiadas solicitudes, espera {retry_after} segundos."
+
+    # File too large for Telegram
+    if "file is too big" in error_msg or "too large" in error_msg or "entity too large" in error_msg:
+        logger.warning(f"[{correlation_id}] File too large for Telegram: {e}")
+        return "El archivo excede el límite de Telegram (50MB)."
+
+    # Generic download errors
+    if "404" in error_msg or "not found" in error_msg:
+        return "No se encontró el contenido en la URL proporcionada."
+
+    if "403" in error_msg or "forbidden" in error_msg:
+        return "Acceso denegado al contenido."
+
+    # Default error
+    logger.error(f"[{correlation_id}] Unhandled error: {type(e).__name__}: {e}")
+    return "Ocurrió un error inesperado. Por favor intenta de nuevo."
+
+
 def _get_download_format_keyboard(correlation_id: str, url_metadata: dict = None) -> InlineKeyboardMarkup:
     """Generate inline keyboard for download format selection.
 
@@ -6250,13 +6361,13 @@ async def _start_download(
     except DownloadError as e:
         logger.error(f"[{correlation_id}] Download error: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
     except Exception as e:
-        logger.error(f"[{correlation_id}] Unexpected error: {e}")
+        logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(
-            "Ocurrió un error inesperado. Por favor intenta de nuevo."
-        )
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
     finally:
         # Clean up facade reference but keep status for /downloads command
         context.user_data.pop(f"download_facade_{correlation_id}", None)
@@ -6513,13 +6624,13 @@ async def _start_combined_download(
     except DownloadError as e:
         logger.error(f"[{correlation_id}] Download error: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
     except Exception as e:
-        logger.error(f"[{correlation_id}] Unexpected error: {e}")
+        logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(
-            "Ocurrió un error inesperado. Por favor intenta de nuevo."
-        )
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
     finally:
         # Clean up facade reference but keep status for /downloads command
         context.user_data.pop(f"download_facade_{correlation_id}", None)
