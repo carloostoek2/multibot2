@@ -10,11 +10,11 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 12-integration-polish — IN PROGRESS
 
-**Plan:** 12-03 COMPLETE
+**Plan:** 12-02 COMPLETE
 
-**Status:** Cancel functionality, enhanced progress tracking, and /downloads command verified complete.
+**Status:** Post-download integration with video/audio processing tools and ephemeral recent downloads list complete.
 
-**Last activity:** 2026-02-26 — Verified 12-03: Cancel functionality, enhanced progress tracking, and /downloads command (implemented in 12-01).
+**Last activity:** 2026-02-26 — Completed 12-02: Post-download integration with video/audio processing and ephemeral recent downloads.
 
 ## Progress
 
@@ -25,9 +25,16 @@ v3.0 Downloader
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
 Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — COMPLETE
-Phase 12: Integration & Polish              [██░░░░░░░░] 20% (1/5 plans) — IN PROGRESS
+Phase 12: Integration & Polish              [████░░░░░░] 40% (2/5 plans) — IN PROGRESS
 
 **Note:** Plan 12-03 functionality (cancel, progress, /downloads) was implemented in 12-01. Plan 12-03 served as verification.
+
+**12-02: Post-Download Integration** — COMPLETE
+- DownloadSession class for ephemeral download tracking (MAX_RECENT=5)
+- Post-download video menu: video note conversion, audio extraction, format conversion
+- Post-download audio menu: voice note, format conversion, bass/treble boost, denoise, compress, normalize, equalize
+- Recent downloads list with reprocess functionality
+- All handlers registered in main.py with correct callback patterns
 ```
 
 ## Accumulated Context
@@ -318,6 +325,12 @@ Phase 12: Integration & Polish              [██░░░░░░░░] 20%
 78. **Conservative approach for unknown sizes** — Show confirmation when size unknown (be safe)
 79. **Post-download integration** — Video downloads show existing video menu for further processing
 
+**12-02 Implementation Decisions:**
+84. **Specific callback patterns for post-download actions** — Different patterns for format selection, intensity selection, and main actions to ensure correct routing
+85. **Reused existing processing infrastructure** — VideoProcessor, AudioEnhancer, AudioEffects, etc. rather than duplicating logic
+86. **Ephemeral session storage** — No persistence for privacy (INT-04), max 5 recent downloads (UI-06)
+87. **Handler registration order matters** — Most specific patterns (format/intensity) before general action handlers
+
 **12-03 Implementation Decisions:**
 80. **Cancel via facade reference in user_data** — Store `download_facade_{correlation_id}` for cancellation access
 81. **Rate limiting for progress updates** — 1 second minimum between message edits to avoid Telegram rate limits
@@ -341,7 +354,8 @@ Phase 12: Integration & Polish              [██░░░░░░░░] 20%
 9. ~~Phase 11: Download Management & Progress~~ DONE (5/5 plans)
 10. ~~12-01: Download Command and URL Detection~~ DONE
 11. ~~12-03: Cancel and Progress Enhancement~~ DONE (verified)
-12. **12-02: Download Progress UI** — NEXT
+12. ~~12-02: Post-Download Integration~~ DONE
+13. **12-04: Error Handling Integration** — NEXT
 
 ## Quick Tasks Completed
 
@@ -369,4 +383,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-26 after verifying 12-03: Cancel and Progress Enhancement*
+*Last updated: 2026-02-26 after completing 12-02: Post-Download Integration*
