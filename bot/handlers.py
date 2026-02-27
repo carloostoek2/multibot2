@@ -5767,24 +5767,52 @@ def _detect_platform_for_display(url: str) -> str:
         return ''
 
 
-def _get_download_format_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+def _get_download_format_keyboard(correlation_id: str, url_metadata: dict = None) -> InlineKeyboardMarkup:
     """Generate inline keyboard for download format selection.
 
     Args:
         correlation_id: Unique ID for this download request
+        url_metadata: Optional metadata about the URL (platform, content type, etc.)
 
     Returns:
-        InlineKeyboardMarkup with video/audio options
+        InlineKeyboardMarkup with video/audio options and combined actions
     """
-    keyboard = [
-        [
-            InlineKeyboardButton("Descargar Video", callback_data=f"download:video:{correlation_id}"),
-            InlineKeyboardButton("Descargar Audio", callback_data=f"download:audio:{correlation_id}"),
-        ],
-        [
-            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
-        ],
-    ]
+    # Determine available options based on content type
+    is_video_content = True  # Default to showing video options
+    is_audio_content = False
+
+    if url_metadata:
+        # Check if content is audio-only (e.g., YouTube audio, SoundCloud)
+        content_type = url_metadata.get('content_type', 'video')
+        is_audio_content = content_type == 'audio' or url_metadata.get('is_audio_only', False)
+        is_video_content = not is_audio_content or url_metadata.get('has_video', True)
+
+    keyboard = []
+
+    # Basic download options
+    basic_row = []
+    if is_video_content:
+        basic_row.append(InlineKeyboardButton("Video", callback_data=f"download:video:{correlation_id}"))
+    if is_audio_content or is_video_content:
+        basic_row.append(InlineKeyboardButton("Audio", callback_data=f"download:audio:{correlation_id}"))
+    if basic_row:
+        keyboard.append(basic_row)
+
+    # Combined action options (video content only)
+    if is_video_content:
+        keyboard.append([
+            InlineKeyboardButton("Video + Nota de Video", callback_data=f"download:video:videonote:{correlation_id}"),
+            InlineKeyboardButton("Video + Extraer Audio", callback_data=f"download:video:extract:{correlation_id}"),
+        ])
+
+    # Combined action options for audio
+    if is_audio_content or is_video_content:
+        keyboard.append([
+            InlineKeyboardButton("Audio + Nota de Voz", callback_data=f"download:audio:voicenote:{correlation_id}"),
+        ])
+
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel")])
+
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -5871,7 +5899,12 @@ async def handle_download_command(update: Update, context: ContextTypes.DEFAULT_
     # Show format selection menu
     reply_markup = _get_download_format_keyboard(correlation_id)
     await update.message.reply_text(
-        "Selecciona el formato de descarga:",
+        "Selecciona formato:\n"
+        "- Video: Solo descargar video\n"
+        "- Audio: Solo extraer audio\n"
+        "- Video + Nota de Video: Descargar y convertir a nota circular\n"
+        "- Video + Extraer Audio: Descargar y extraer audio\n"
+        "- Audio + Nota de Voz: Descargar y convertir a nota de voz",
         reply_markup=reply_markup
     )
 
@@ -5914,7 +5947,12 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
     # Show format selection menu
     reply_markup = _get_download_format_keyboard(correlation_id)
     await update.message.reply_text(
-        "Enlace de video detectado. Selecciona el formato:",
+        "Enlace de video detectado. Selecciona el formato:\n"
+        "- Video: Solo descargar video\n"
+        "- Audio: Solo extraer audio\n"
+        "- Video + Nota de Video: Descargar y convertir a nota circular\n"
+        "- Video + Extraer Audio: Descargar y extraer audio\n"
+        "- Audio + Nota de Voz: Descargar y convertir a nota de voz",
         reply_markup=reply_markup
     )
 
@@ -5924,6 +5962,7 @@ async def handle_download_format_callback(update: Update, context: ContextTypes.
 
     Parses callback data, retrieves URL, checks file size,
     and either shows confirmation or starts download.
+    Supports both simple format selection and combined download+process actions.
 
     Args:
         update: Telegram update object
@@ -5935,18 +5974,21 @@ async def handle_download_format_callback(update: Update, context: ContextTypes.
     user_id = update.effective_user.id
     callback_data = query.data
 
-    # Parse callback data: download:format:correlation_id
+    # Parse callback data:
+    # - download:format:correlation_id (simple)
+    # - download:format:action:correlation_id (combined)
     if not callback_data.startswith("download:video:") and not callback_data.startswith("download:audio:"):
         logger.warning(f"Unexpected callback data: {callback_data}")
         return
 
     parts = callback_data.split(":")
-    if len(parts) != 3:
+    if len(parts) not in (3, 4):
         logger.warning(f"Invalid callback data format: {callback_data}")
         return
 
     format_type = parts[1]  # video or audio
-    correlation_id = parts[2]
+    correlation_id = parts[-1]  # Last part is always correlation_id
+    post_action = parts[2] if len(parts) == 4 else None  # videonote, extract, voicenote
 
     # Retrieve URL from context
     url = context.user_data.get(f"download_url_{correlation_id}")
@@ -5956,10 +5998,15 @@ async def handle_download_format_callback(update: Update, context: ContextTypes.
         )
         return
 
-    logger.info(f"[{correlation_id}] Format selected: {format_type} by user {user_id}")
+    if post_action:
+        logger.info(f"[{correlation_id}] Combined action selected: {format_type} + {post_action} by user {user_id}")
+    else:
+        logger.info(f"[{correlation_id}] Format selected: {format_type} by user {user_id}")
 
-    # Store format preference
+    # Store format preference and post-action
     context.user_data[f"download_format_{correlation_id}"] = format_type
+    if post_action:
+        context.user_data[f"download_post_action_{correlation_id}"] = post_action
 
     # Check file size before downloading
     await query.edit_message_text("Analizando tamaño del archivo...")
@@ -5981,9 +6028,14 @@ async def handle_download_format_callback(update: Update, context: ContextTypes.
             size_mb = size / (1024 * 1024)
             logger.info(f"[{correlation_id}] Large file detected: {size_mb:.1f} MB")
 
+            # For combined actions, note that processing may change size
+            action_note = ""
+            if post_action:
+                action_note = "\nNota: El procesamiento posterior puede cambiar el tamaño."
+
             reply_markup = _get_large_download_confirmation_keyboard(correlation_id)
             await query.edit_message_text(
-                f"El archivo es grande (~{size_mb:.1f} MB).\n\n"
+                f"El archivo es grande (~{size_mb:.1f} MB).{action_note}\n\n"
                 f"Esto puede tomar tiempo y consumir datos.\n"
                 f"¿Deseas continuar?",
                 reply_markup=reply_markup
@@ -5996,13 +6048,19 @@ async def handle_download_format_callback(update: Update, context: ContextTypes.
             else:
                 logger.info(f"[{correlation_id}] Unknown file size - proceeding")
 
-            # Start download directly
-            await _start_download(update, context, correlation_id, url, format_type)
+            # Start download (combined flow if post_action specified)
+            if post_action:
+                await _start_combined_download(update, context, correlation_id, url, format_type, post_action)
+            else:
+                await _start_download(update, context, correlation_id, url, format_type)
 
     except Exception as e:
         logger.warning(f"[{correlation_id}] Could not get metadata: {e}")
         # If we can't get metadata, proceed anyway (will fail during download if too large)
-        await _start_download(update, context, correlation_id, url, format_type)
+        if post_action:
+            await _start_combined_download(update, context, correlation_id, url, format_type, post_action)
+        else:
+            await _start_download(update, context, correlation_id, url, format_type)
 
 
 async def handle_download_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6038,8 +6096,14 @@ async def handle_download_confirm_callback(update: Update, context: ContextTypes
 
     logger.info(f"[{correlation_id}] Large download confirmed by user {user_id}")
 
-    # Start download
-    await _start_download(update, context, correlation_id, url, format_type)
+    # Check for combined action
+    post_action = context.user_data.get(f"download_post_action_{correlation_id}")
+
+    # Start download (combined flow if post_action specified)
+    if post_action:
+        await _start_combined_download(update, context, correlation_id, url, format_type, post_action)
+    else:
+        await _start_download(update, context, correlation_id, url, format_type)
 
 
 async def _start_download(
@@ -6279,6 +6343,384 @@ async def _send_downloaded_file_with_menu(
         await update.callback_query.message.reply_text(
             "Error al enviar el archivo descargado."
         )
+
+
+async def _start_combined_download(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    correlation_id: str,
+    url: str,
+    format_type: str,
+    post_action: str
+) -> None:
+    """Start combined download and process flow.
+
+    Downloads the file and immediately processes it based on post_action.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        correlation_id: Unique download ID
+        url: URL to download
+        format_type: 'video' or 'audio'
+        post_action: 'videonote', 'extract', or 'voicenote'
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Detect platform for display
+    platform = _detect_platform_for_display(url)
+
+    # Create facade
+    facade = DownloadFacade()
+
+    try:
+        await facade.start()
+
+        # Store facade instance for cancellation support
+        context.user_data[f"download_facade_{correlation_id}"] = facade
+        context.user_data[f"download_url_{correlation_id}"] = url
+        context.user_data[f"download_format_{correlation_id}"] = format_type
+        context.user_data[f"download_post_action_{correlation_id}"] = post_action
+        context.user_data[f"download_status_{correlation_id}"] = "downloading"
+
+        # Initial message with cancel button
+        reply_markup = _get_download_cancel_keyboard(correlation_id)
+
+        # Map action to display name
+        action_names = {
+            "videonote": "Nota de Video",
+            "extract": "Extraer Audio",
+            "voicenote": "Nota de Voz"
+        }
+        action_name = action_names.get(post_action, post_action)
+
+        await query.edit_message_text(
+            f"Descargando de {platform} para convertir a {action_name}...",
+            reply_markup=reply_markup
+        )
+
+        # Progress tracking with enhanced state management
+        last_message_text = [f"Descargando de {platform}..."]
+        last_update_time = [0.0]
+
+        async def progress_callback(progress: dict) -> None:
+            """Update download progress message."""
+            import time
+            from bot.downloaders.progress_tracker import format_progress_message
+
+            status = progress.get('status', 'downloading')
+            percent = progress.get('percent', 0)
+
+            # Rate limiting: only update every 1 second minimum
+            current_time = time.time()
+            if current_time - last_update_time[0] < 1.0 and status == 'downloading':
+                return
+
+            # Format message based on status
+            if status == 'downloading':
+                message = format_progress_message(progress)
+                message = f"Descargando de {platform}...\n{message}\nLuego: convertir a {action_name}"
+
+                if message != last_message_text[0]:
+                    try:
+                        await query.edit_message_text(
+                            message,
+                            reply_markup=reply_markup
+                        )
+                        last_message_text[0] = message
+                        last_update_time[0] = current_time
+                    except Exception as e:
+                        logger.debug(f"Failed to update progress message: {e}")
+
+            elif status == 'completed':
+                try:
+                    await query.edit_message_text(f"Descarga completada. Convirtiendo a {action_name}...")
+                    context.user_data[f"download_status_{correlation_id}"] = "completed"
+                except Exception:
+                    pass
+
+            elif status == 'error':
+                error_msg = progress.get('error', 'Error desconocido')
+                try:
+                    await query.edit_message_text(f"Error en la descarga: {error_msg}")
+                    context.user_data[f"download_status_{correlation_id}"] = "error"
+                except Exception:
+                    pass
+
+        # Create progress tracker with callback
+        from bot.downloaders.progress_tracker import ProgressTracker
+        tracker = ProgressTracker(
+            min_update_interval=3.0,
+            min_percent_change=5.0,
+            on_update=lambda p: asyncio.create_task(progress_callback(p))
+        )
+
+        # Download with progress callback integration
+        config_overrides = {
+            'extract_audio': (format_type == 'audio'),
+        }
+
+        result = await facade.download(
+            url=url,
+            chat_id=chat_id,
+            config_overrides=config_overrides
+        )
+
+        if result.success:
+            context.user_data[f"download_status_{correlation_id}"] = "completed"
+
+            # Immediately process based on post_action
+            await query.edit_message_text(f"Descarga completada. Convirtiendo a {action_name}...")
+
+            try:
+                if post_action == "videonote":
+                    await _process_to_videonote(update, context, result, correlation_id)
+                elif post_action == "extract":
+                    await _process_extract_audio(update, context, result, correlation_id)
+                elif post_action == "voicenote":
+                    await _process_to_voicenote(update, context, result, correlation_id)
+                else:
+                    logger.warning(f"Unknown post_action: {post_action}")
+                    await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Post-download processing failed: {e}")
+                await query.edit_message_text(
+                    f"Descarga completada pero el procesamiento falló: {e}\n"
+                    f"El archivo descargado se enviará sin procesar."
+                )
+                # Send original file as fallback
+                await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+        else:
+            context.user_data[f"download_status_{correlation_id}"] = "error"
+            await query.edit_message_text(
+                f"Error en la descarga: {getattr(result, 'error_message', 'Error desconocido')}"
+            )
+
+    except FileTooLargeError as e:
+        logger.warning(f"[{correlation_id}] File too large: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except URLValidationError as e:
+        logger.warning(f"[{correlation_id}] URL validation error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except UnsupportedURLError as e:
+        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except DownloadError as e:
+        logger.error(f"[{correlation_id}] Download error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Unexpected error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(
+            "Ocurrió un error inesperado. Por favor intenta de nuevo."
+        )
+    finally:
+        # Clean up facade reference but keep status for /downloads command
+        context.user_data.pop(f"download_facade_{correlation_id}", None)
+        context.user_data.pop(f"download_post_action_{correlation_id}", None)
+        try:
+            await facade.stop()
+        except Exception:
+            pass
+
+
+async def _process_to_videonote(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    correlation_id: str
+) -> None:
+    """Process downloaded video to video note.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result with file_path
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    temp_mgr = TempManager()
+    output_filename = f"videonote_{correlation_id}.mp4"
+    output_path = temp_mgr.get_temp_path(output_filename)
+
+    try:
+        # Process video to video note format
+        success = await asyncio.get_event_loop().run_in_executor(
+            None,
+            VideoProcessor.process_video,
+            str(file_path),
+            str(output_path)
+        )
+
+        if success and os.path.exists(output_path):
+            with open(output_path, 'rb') as video_file:
+                await update.callback_query.message.reply_video_note(video_note=video_file)
+            logger.info(f"[{correlation_id}] Video note sent successfully")
+        else:
+            raise FFmpegError("El procesamiento de video falló")
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to convert to video note: {e}")
+        await update.callback_query.message.reply_text(
+            f"Error al convertir a nota de video: {e}"
+        )
+        # Send original as fallback
+        await _send_downloaded_file_with_menu(update, context, result, "video", correlation_id)
+    finally:
+        temp_mgr.cleanup()
+
+
+async def _process_extract_audio(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    correlation_id: str
+) -> None:
+    """Extract audio from downloaded video.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result with file_path
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    temp_mgr = TempManager()
+    output_filename = f"audio_{correlation_id}.mp3"
+    output_path = temp_mgr.get_temp_path(output_filename)
+
+    try:
+        # Extract audio using AudioExtractor
+        extractor = AudioExtractor(str(file_path), str(output_path))
+        success = await asyncio.get_event_loop().run_in_executor(
+            None,
+            extractor.extract
+        )
+
+        if success and os.path.exists(output_path):
+            title = metadata.get('title', 'Video')
+            with open(output_path, 'rb') as audio_file:
+                await update.callback_query.message.reply_audio(
+                    audio=audio_file,
+                    caption=f"Audio extraído: {title}",
+                    title=title,
+                    performer=metadata.get('artist') or metadata.get('uploader')
+                )
+            logger.info(f"[{correlation_id}] Audio extracted and sent successfully")
+        else:
+            raise AudioExtractionError("La extracción de audio falló")
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to extract audio: {e}")
+        await update.callback_query.message.reply_text(
+            f"Error al extraer audio: {e}"
+        )
+        # Send original as fallback
+        await _send_downloaded_file_with_menu(update, context, result, "video", correlation_id)
+    finally:
+        temp_mgr.cleanup()
+
+
+async def _process_to_voicenote(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    correlation_id: str
+) -> None:
+    """Process downloaded audio to voice note.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result with file_path
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    temp_mgr = TempManager()
+    output_filename = f"voicenote_{correlation_id}.ogg"
+    output_path = temp_mgr.get_temp_path(output_filename)
+
+    try:
+        # Convert to voice note format (OGG Opus)
+        converter = VoiceNoteConverter(str(file_path), str(output_path))
+        success = await asyncio.get_event_loop().run_in_executor(
+            None,
+            converter.convert
+        )
+
+        if success and os.path.exists(output_path):
+            with open(output_path, 'rb') as voice_file:
+                await update.callback_query.message.reply_voice(voice=voice_file)
+            logger.info(f"[{correlation_id}] Voice note sent successfully")
+        else:
+            raise VoiceConversionError("La conversión a nota de voz falló")
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to convert to voice note: {e}")
+        await update.callback_query.message.reply_text(
+            f"Error al convertir a nota de voz: {e}"
+        )
+        # Send original as fallback
+        await _send_downloaded_file_with_menu(update, context, result, "audio", correlation_id)
+    finally:
+        temp_mgr.cleanup()
 
 
 async def handle_download_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
