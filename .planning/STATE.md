@@ -10,9 +10,9 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 **Phase:** 12-integration-polish — IN PROGRESS
 
-**Plan:** 12-02 COMPLETE
+**Plan:** 12-03 COMPLETE
 
-**Status:** Post-download integration with video/audio processing tools and ephemeral recent downloads list complete.
+**Status:** Cancel functionality, enhanced progress tracking, and /downloads command verified and complete.
 
 **Last activity:** 2026-02-26 — Completed 12-02: Post-download integration with video/audio processing and ephemeral recent downloads.
 
@@ -25,9 +25,18 @@ v3.0 Downloader
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
 Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — COMPLETE
-Phase 12: Integration & Polish              [████░░░░░░] 40% (2/5 plans) — IN PROGRESS
+Phase 12: Integration & Polish              [██████░░░░] 60% (3/5 plans) — IN PROGRESS
 
 **Note:** Plan 12-03 functionality (cancel, progress, /downloads) was implemented in 12-01. Plan 12-03 served as verification.
+
+**12-03: Cancel and Progress Enhancement** — COMPLETE (verified)
+- Cancel button with `download:cancel:{correlation_id}` callback pattern
+- `handle_download_cancel_callback()` with race condition handling
+- Enhanced progress display with platform name, percentage bar, speed, ETA
+- Rate-limited progress updates (1 second minimum between edits)
+- `/downloads` command showing active and recent downloads
+- Status tracking: downloading, completed, error, cancelled
+- Cancel buttons in /downloads list for active downloads
 
 **12-02: Post-Download Integration** — COMPLETE
 - DownloadSession class for ephemeral download tracking (MAX_RECENT=5)
@@ -353,8 +362,8 @@ Phase 12: Integration & Polish              [████░░░░░░] 40%
 8. ~~11-02: Progress Tracker~~ DONE
 9. ~~Phase 11: Download Management & Progress~~ DONE (5/5 plans)
 10. ~~12-01: Download Command and URL Detection~~ DONE
-11. ~~12-03: Cancel and Progress Enhancement~~ DONE (verified)
-12. ~~12-02: Post-Download Integration~~ DONE
+11. ~~12-02: Post-Download Integration~~ DONE
+12. ~~12-03: Cancel and Progress Enhancement~~ DONE (verified)
 13. **12-04: Error Handling Integration** — NEXT
 
 ## Quick Tasks Completed
@@ -383,4 +392,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-26 after completing 12-02: Post-Download Integration*
+*Last updated: 2026-02-27 after completing 12-03: Cancel and Progress Enhancement*
