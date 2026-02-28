@@ -199,6 +199,15 @@ def main() -> None:
     application.add_error_handler(error_handler)
     logger.info("Error handler registered")
 
+    # Log handler registration summary
+    logger.info("Download handlers registered:")
+    logger.info("  - /download command with format selection")
+    logger.info("  - URL auto-detection in messages")
+    logger.info("  - Combined download+process flow (videonote, extract, voicenote)")
+    logger.info("  - Post-download integration with video/audio processing")
+    logger.info("  - /downloads command for active/recent downloads")
+    logger.info("  - Cancel functionality with race condition handling")
+
     # Run the bot until the user presses Ctrl-C
     logger.info("Starting bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

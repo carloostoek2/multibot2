@@ -238,12 +238,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context: Telegram context object
     """
     await update.message.reply_text(
-        "¡Hola! Envíame un video o audio y te mostraré opciones de procesamiento.\n\n"
-        "También puedes usar comandos:\n"
+        "¡Hola! Envíame un video, audio, o enlace de video y te mostraré opciones de procesamiento.\n\n"
+        "📥 Descargas desde plataformas:\n"
+        "/download <url> - Descargar video/audio de YouTube, Instagram, TikTok, Twitter/X, Facebook\n"
+        "/downloads - Ver descargas activas y recientes\n"
+        "También puedes enviarme directamente un enlace de video\n\n"
+        "🎬 Procesamiento de video:\n"
         "/convert <formato> - Convierte un video a otro formato (mp4, avi, mov, mkv, webm)\n"
         "/extract_audio <formato> - Extrae el audio de un video (mp3, aac, wav, ogg)\n"
         "/split [duration|parts] <valor> - Divide un video en segmentos\n"
-        "/join - Une múltiples videos en uno solo\n"
+        "/join - Une múltiples videos en uno solo\n\n"
+        "🎵 Procesamiento de audio:\n"
         "/split_audio [duration|parts] <valor> - Divide un audio en segmentos\n"
         "/join_audio - Une múltiples archivos de audio\n"
         "/convert_audio - Convierte un audio a otro formato (MP3, WAV, OGG, AAC, FLAC)\n"
@@ -256,7 +261,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/effects - Aplica múltiples efectos en cadena (pipeline)\n\n"
         "💡 También puedes usar los menús inline:\n"
         "- Envía un video → Menú con opciones (Nota de Video, Extraer Audio, Merge con Audio, etc.)\n"
-        "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)"
+        "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)\n"
+        "- Envía un enlace de video → Menú de descarga con opciones combinadas"
     )
 
 
