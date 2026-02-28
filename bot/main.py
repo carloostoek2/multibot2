@@ -40,7 +40,14 @@ from bot.handlers import (
     handle_audio_menu_callback, handle_audio_menu_format_selection,
     handle_video_menu_callback, handle_video_format_selection,
     handle_cancel_callback, handle_back_callback,
-    handle_split_text_input
+    handle_split_text_input,
+    handle_download_command, handle_url_detection,
+    handle_download_format_callback, handle_download_confirm_callback,
+    handle_download_cancel_callback, handle_downloads_command,
+    handle_postdownload_callback, handle_postdownload_audio_callback,
+    handle_postdownload_format_callback, handle_postdownload_intensity_callback,
+    handle_postdownload_effect_strength_callback,
+    handle_recent_downloads, handle_reprocess_download
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -83,6 +90,13 @@ def main() -> None:
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
+
+    # Download command handler (must be before message handlers)
+    application.add_handler(CommandHandler("download", handle_download_command))
+
+    # Download status command - shows active and recent downloads
+    application.add_handler(CommandHandler("downloads", handle_downloads_command))
+
     application.add_handler(CommandHandler("convert", handle_convert_command))
     application.add_handler(CommandHandler("extract_audio", handle_extract_audio_command))
     application.add_handler(CommandHandler("split", handle_split_command))
@@ -103,6 +117,22 @@ def main() -> None:
     # Navigation handlers - must be first to catch cancel/back before other patterns
     application.add_handler(CallbackQueryHandler(handle_cancel_callback, pattern="^cancel$"))
     application.add_handler(CallbackQueryHandler(handle_back_callback, pattern="^back:"))
+
+    # Download callback handlers (specific patterns before general)
+    application.add_handler(CallbackQueryHandler(handle_download_format_callback, pattern="^download:(video|audio):"))
+    application.add_handler(CallbackQueryHandler(handle_download_confirm_callback, pattern="^download:confirm:"))
+    application.add_handler(CallbackQueryHandler(handle_download_cancel_callback, pattern="^download:cancel:"))
+
+    # Post-download callback handlers (specific patterns first)
+    # Format and effect selection handlers (most specific)
+    application.add_handler(CallbackQueryHandler(handle_postdownload_format_callback, pattern="^postdownload:(audio_format|video_format|extract_format):"))
+    application.add_handler(CallbackQueryHandler(handle_postdownload_intensity_callback, pattern="^postdownload:(bass_intensity|treble_intensity):"))
+    application.add_handler(CallbackQueryHandler(handle_postdownload_effect_strength_callback, pattern="^postdownload:(denoise_strength|compress_strength):"))
+    # Main post-download handlers
+    application.add_handler(CallbackQueryHandler(handle_postdownload_callback, pattern="^postdownload:(videonote|extract_audio|convert_video|recent|back_video):"))
+    application.add_handler(CallbackQueryHandler(handle_postdownload_audio_callback, pattern="^postdownload:(voicenote|convert_audio|bass|denoise|more|treble|compress|normalize|equalize|back_audio|clear_recent):"))
+    # Reprocess handler for recent downloads
+    application.add_handler(CallbackQueryHandler(handle_reprocess_download, pattern="^reprocess:"))
 
     # Callback handler for format selection
     application.add_handler(CallbackQueryHandler(handle_format_selection, pattern="^format:"))
@@ -161,9 +191,22 @@ def main() -> None:
     # Must be after VIDEO and AUDIO handlers to not interfere
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_split_text_input))
 
+    # URL detection handler - detects URLs in regular text messages
+    # Must be after command handlers and specific text handlers
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_detection))
+
     # Add global error handler
     application.add_error_handler(error_handler)
     logger.info("Error handler registered")
+
+    # Log handler registration summary
+    logger.info("Download handlers registered:")
+    logger.info("  - /download command with format selection")
+    logger.info("  - URL auto-detection in messages")
+    logger.info("  - Combined download+process flow (videonote, extract, voicenote)")
+    logger.info("  - Post-download integration with video/audio processing")
+    logger.info("  - /downloads command for active/recent downloads")
+    logger.info("  - Cancel functionality with race condition handling")
 
     # Run the bot until the user presses Ctrl-C
     logger.info("Starting bot...")

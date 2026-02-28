@@ -238,12 +238,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context: Telegram context object
     """
     await update.message.reply_text(
-        "¡Hola! Envíame un video o audio y te mostraré opciones de procesamiento.\n\n"
-        "También puedes usar comandos:\n"
+        "¡Hola! Envíame un video, audio, o enlace de video y te mostraré opciones de procesamiento.\n\n"
+        "📥 Descargas desde plataformas:\n"
+        "/download <url> - Descargar video/audio de YouTube, Instagram, TikTok, Twitter/X, Facebook\n"
+        "/downloads - Ver descargas activas y recientes\n"
+        "También puedes enviarme directamente un enlace de video\n\n"
+        "🎬 Procesamiento de video:\n"
         "/convert <formato> - Convierte un video a otro formato (mp4, avi, mov, mkv, webm)\n"
         "/extract_audio <formato> - Extrae el audio de un video (mp3, aac, wav, ogg)\n"
         "/split [duration|parts] <valor> - Divide un video en segmentos\n"
-        "/join - Une múltiples videos en uno solo\n"
+        "/join - Une múltiples videos en uno solo\n\n"
+        "🎵 Procesamiento de audio:\n"
         "/split_audio [duration|parts] <valor> - Divide un audio en segmentos\n"
         "/join_audio - Une múltiples archivos de audio\n"
         "/convert_audio - Convierte un audio a otro formato (MP3, WAV, OGG, AAC, FLAC)\n"
@@ -256,7 +261,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/effects - Aplica múltiples efectos en cadena (pipeline)\n\n"
         "💡 También puedes usar los menús inline:\n"
         "- Envía un video → Menú con opciones (Nota de Video, Extraer Audio, Merge con Audio, etc.)\n"
-        "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)"
+        "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)\n"
+        "- Envía un enlace de video → Menú de descarga con opciones combinadas"
     )
 
 
@@ -5735,15 +5741,1271 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # URL Download Handlers
 # =============================================================================
 
+# Import PlatformRouter for metadata extraction
+from bot.downloaders.platform_router import PlatformRouter
+
+# Constants
+TELEGRAM_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def _detect_platform_for_display(url: str) -> str:
+    """Detect platform name from URL for display purposes.
+
+    Args:
+        url: The URL to analyze
+
+    Returns:
+        Platform name for display, or empty string if unknown
+    """
+    url_lower = url.lower()
+
+    if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
+        return 'YouTube'
+    elif 'instagram.com' in url_lower:
+        return 'Instagram'
+    elif 'tiktok.com' in url_lower:
+        return 'TikTok'
+    elif 'twitter.com' in url_lower or 'x.com' in url_lower:
+        return 'Twitter/X'
+    elif 'facebook.com' in url_lower or 'fb.watch' in url_lower:
+        return 'Facebook'
+    else:
+        return ''
+
+
+def _get_error_message_for_exception(e: Exception, url: str, correlation_id: str) -> str:
+    """Get user-friendly error message for download exceptions.
+
+    Handles network errors, platform-specific errors, file system errors,
+    and Telegram errors with appropriate Spanish messages.
+
+    Args:
+        e: The exception that occurred
+        url: The URL being downloaded
+        correlation_id: Unique download ID for logging
+
+    Returns:
+        User-friendly error message in Spanish
+    """
+    import errno
+    from telegram.error import NetworkError as TelegramNetworkError, RetryAfter, TimedOut as TelegramTimedOut
+
+    error_msg = str(e).lower()
+    platform = _detect_platform_for_display(url)
+
+    # Network errors
+    if isinstance(e, (ConnectionResetError, BrokenPipeError)):
+        logger.warning(f"[{correlation_id}] Connection reset during download: {e}")
+        return "La conexión se interrumpió. Intenta de nuevo."
+
+    if isinstance(e, TimeoutError) or "timeout" in error_msg:
+        logger.warning(f"[{correlation_id}] Download timeout: {e}")
+        return "La descarga tardó demasiado, intenta de nuevo."
+
+    if "dns" in error_msg or "name resolution" in error_msg or "getaddrinfo" in error_msg:
+        logger.warning(f"[{correlation_id}] DNS failure: {e}")
+        return "No se pudo conectar al servidor. Verifica la URL."
+
+    # Platform-specific errors
+    if platform == "YouTube":
+        if "age" in error_msg or "restricted" in error_msg:
+            return "Este video tiene restricción de edad."
+        if "unavailable" in error_msg or "not available" in error_msg:
+            return "Este video no está disponible."
+        if "private" in error_msg:
+            return "Este video es privado."
+
+    if platform == "Instagram":
+        if "private" in error_msg:
+            return "Este contenido de Instagram es privado."
+        if "story" in error_msg and ("expired" in error_msg or "unavailable" in error_msg):
+            return "Esta historia de Instagram ha expirado."
+        if "login" in error_msg or "authent" in error_msg:
+            return "Este contenido requiere inicio de sesión en Instagram."
+
+    if platform == "TikTok":
+        if "slideshow" in error_msg or "carousel" in error_msg:
+            return "Los slideshows de TikTok no son soportados."
+        if "watermark" in error_msg:
+            return "No se pudo descargar el video sin marca de agua."
+
+    if platform == "Twitter/X":
+        if "restricted" in error_msg or "sensitive" in error_msg:
+            return "Este contenido está restringido."
+        if "deleted" in error_msg or "not found" in error_msg:
+            return "Este tweet no existe o fue eliminado."
+
+    if platform == "Facebook":
+        if "login" in error_msg or "authent" in error_msg:
+            return "Este video requiere inicio de sesión en Facebook."
+        if "private" in error_msg:
+            return "Este video de Facebook es privado."
+
+    # File system errors
+    if isinstance(e, OSError):
+        if e.errno == errno.ENOSPC:
+            logger.error(f"[{correlation_id}] Disk full: {e}")
+            return "No hay espacio suficiente en el servidor."
+        if e.errno == errno.EACCES or e.errno == errno.EPERM:
+            logger.error(f"[{correlation_id}] Permission denied: {e}")
+            return "Error de permisos al guardar archivo."
+        if e.errno == errno.ENOSPC or "no space" in error_msg:
+            logger.error(f"[{correlation_id}] Disk full: {e}")
+            return "No hay espacio suficiente en el servidor."
+
+    # Telegram errors
+    if isinstance(e, TelegramNetworkError):
+        logger.warning(f"[{correlation_id}] Telegram network error: {e}")
+        return "Error de red al enviar el archivo, intenta de nuevo."
+
+    if isinstance(e, TelegramTimedOut):
+        logger.warning(f"[{correlation_id}] Telegram timeout: {e}")
+        return "El envío tardó demasiado, intenta de nuevo."
+
+    if isinstance(e, RetryAfter):
+        retry_after = getattr(e, 'retry_after', 30)
+        logger.warning(f"[{correlation_id}] Rate limited: retry after {retry_after}s")
+        return f"Demasiadas solicitudes, espera {retry_after} segundos."
+
+    # File too large for Telegram
+    if "file is too big" in error_msg or "too large" in error_msg or "entity too large" in error_msg:
+        logger.warning(f"[{correlation_id}] File too large for Telegram: {e}")
+        return "El archivo excede el límite de Telegram (50MB)."
+
+    # Generic download errors
+    if "404" in error_msg or "not found" in error_msg:
+        return "No se encontró el contenido en la URL proporcionada."
+
+    if "403" in error_msg or "forbidden" in error_msg:
+        return "Acceso denegado al contenido."
+
+    # Default error
+    logger.error(f"[{correlation_id}] Unhandled error: {type(e).__name__}: {e}")
+    return "Ocurrió un error inesperado. Por favor intenta de nuevo."
+
+
+def _get_download_format_keyboard(correlation_id: str, url_metadata: dict = None) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for download format selection.
+
+    Args:
+        correlation_id: Unique ID for this download request
+        url_metadata: Optional metadata about the URL (platform, content type, etc.)
+
+    Returns:
+        InlineKeyboardMarkup with video/audio options and combined actions
+    """
+    # Determine available options based on content type
+    is_video_content = True  # Default to showing video options
+    is_audio_content = False
+
+    if url_metadata:
+        # Check if content is audio-only (e.g., YouTube audio, SoundCloud)
+        content_type = url_metadata.get('content_type', 'video')
+        is_audio_content = content_type == 'audio' or url_metadata.get('is_audio_only', False)
+        is_video_content = not is_audio_content or url_metadata.get('has_video', True)
+
+    keyboard = []
+
+    # Basic download options
+    basic_row = []
+    if is_video_content:
+        basic_row.append(InlineKeyboardButton("Video", callback_data=f"download:video:{correlation_id}"))
+    if is_audio_content or is_video_content:
+        basic_row.append(InlineKeyboardButton("Audio", callback_data=f"download:audio:{correlation_id}"))
+    if basic_row:
+        keyboard.append(basic_row)
+
+    # Combined action options (video content only)
+    if is_video_content:
+        keyboard.append([
+            InlineKeyboardButton("Video + Nota de Video", callback_data=f"download:video:videonote:{correlation_id}"),
+            InlineKeyboardButton("Video + Extraer Audio", callback_data=f"download:video:extract:{correlation_id}"),
+        ])
+
+    # Combined action options for audio
+    if is_audio_content or is_video_content:
+        keyboard.append([
+            InlineKeyboardButton("Audio + Nota de Voz", callback_data=f"download:audio:voicenote:{correlation_id}"),
+        ])
+
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel")])
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_large_download_confirmation_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for large download confirmation.
+
+    Args:
+        correlation_id: Unique ID for this download request
+
+    Returns:
+        InlineKeyboardMarkup with confirm/cancel options
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("Confirmar Descarga", callback_data=f"download:confirm:{correlation_id}"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_download_cancel_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard with cancel button for active download.
+
+    Args:
+        correlation_id: Unique ID for this download request
+
+    Returns:
+        InlineKeyboardMarkup with cancel button
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("❌ Cancelar Descarga", callback_data=f"download:cancel:{correlation_id}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_download_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /download command to download a URL.
+
+    Usage: /download <url>
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+
+    # Parse URL from command arguments
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Por favor proporciona una URL para descargar.\n"
+            "Ejemplo: /download https://youtube.com/watch?v=..."
+        )
+        return
+
+    url = args[0]
+
+    # Validate URL
+    if not url_detector.validate_url(url):
+        await update.message.reply_text(
+            "La URL proporcionada no parece válida.\n"
+            "Asegúrate de incluir http:// o https://"
+        )
+        return
+
+    # Check if URL is supported
+    if not url_detector.is_supported(url):
+        await update.message.reply_text(
+            "Esta URL no parece ser un video soportado.\n"
+            "Soporto YouTube, Instagram, TikTok, Twitter/X, Facebook y URLs directas de video."
+        )
+        return
+
+    logger.info(f"[{correlation_id}] Download command from user {user_id}: {url}")
+
+    # Store URL and correlation_id in context
+    context.user_data[f"download_url_{correlation_id}"] = url
+    context.user_data[f"download_correlation_id_{user_id}"] = correlation_id
+
+    # Show format selection menu
+    reply_markup = _get_download_format_keyboard(correlation_id)
+    await update.message.reply_text(
+        "Selecciona formato:\n"
+        "- Video: Solo descargar video\n"
+        "- Audio: Solo extraer audio\n"
+        "- Video + Nota de Video: Descargar y convertir a nota circular\n"
+        "- Video + Extraer Audio: Descargar y extraer audio\n"
+        "- Audio + Nota de Voz: Descargar y convertir a nota de voz",
+        reply_markup=reply_markup
+    )
+
+
+async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle URL detection in regular text messages.
+
+    Detects URLs and shows inline menu for format selection.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    message_text = update.message.text
+    user_id = update.effective_user.id
+
+    # Detect URLs in message
+    urls = url_detector.extract_urls(message_text, update.message.entities)
+    if not urls:
+        return  # No URLs, let other handlers process
+
+    # Process first URL
+    url = urls[0]
+
+    # Validate URL
+    if not url_detector.validate_url(url):
+        return  # Not a valid URL, ignore
+
+    # Check if URL is supported
+    if not url_detector.is_supported(url):
+        return  # Not a supported video URL, ignore silently
+
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] URL detected in message from user {user_id}: {url}")
+
+    # Store URL and correlation_id in context
+    context.user_data[f"download_url_{correlation_id}"] = url
+    context.user_data[f"download_correlation_id_{user_id}"] = correlation_id
+
+    # Show format selection menu
+    reply_markup = _get_download_format_keyboard(correlation_id)
+    await update.message.reply_text(
+        "Enlace de video detectado. Selecciona el formato:\n"
+        "- Video: Solo descargar video\n"
+        "- Audio: Solo extraer audio\n"
+        "- Video + Nota de Video: Descargar y convertir a nota circular\n"
+        "- Video + Extraer Audio: Descargar y extraer audio\n"
+        "- Audio + Nota de Voz: Descargar y convertir a nota de voz",
+        reply_markup=reply_markup
+    )
+
+
+async def handle_download_format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle format selection callback for downloads.
+
+    Parses callback data, retrieves URL, checks file size,
+    and either shows confirmation or starts download.
+    Supports both simple format selection and combined download+process actions.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse callback data:
+    # - download:format:correlation_id (simple)
+    # - download:format:action:correlation_id (combined)
+    if not callback_data.startswith("download:video:") and not callback_data.startswith("download:audio:"):
+        logger.warning(f"Unexpected callback data: {callback_data}")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) not in (3, 4):
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
+
+    format_type = parts[1]  # video or audio
+    correlation_id = parts[-1]  # Last part is always correlation_id
+    post_action = parts[2] if len(parts) == 4 else None  # videonote, extract, voicenote
+
+    # Retrieve URL from context
+    url = context.user_data.get(f"download_url_{correlation_id}")
+    if not url:
+        await query.edit_message_text(
+            "Error: No se encontró la URL. Intenta de nuevo."
+        )
+        return
+
+    if post_action:
+        logger.info(f"[{correlation_id}] Combined action selected: {format_type} + {post_action} by user {user_id}")
+    else:
+        logger.info(f"[{correlation_id}] Format selected: {format_type} by user {user_id}")
+
+    # Store format preference and post-action
+    context.user_data[f"download_format_{correlation_id}"] = format_type
+    if post_action:
+        context.user_data[f"download_post_action_{correlation_id}"] = post_action
+
+    # Check file size before downloading
+    await query.edit_message_text("Analizando tamaño del archivo...")
+
+    try:
+        # Extract metadata using PlatformRouter
+        router = PlatformRouter()
+        route_result = await router.route(url)
+        metadata = await route_result.downloader.get_metadata(url)
+
+        # Get file size
+        size = metadata.get('filesize') or metadata.get('filesize_approx', 0)
+
+        # Store metadata for later use
+        context.user_data[f"download_meta_{correlation_id}"] = metadata
+
+        if size and size > TELEGRAM_MAX_FILE_SIZE:
+            # Large file - show confirmation
+            size_mb = size / (1024 * 1024)
+            logger.info(f"[{correlation_id}] Large file detected: {size_mb:.1f} MB")
+
+            # For combined actions, note that processing may change size
+            action_note = ""
+            if post_action:
+                action_note = "\nNota: El procesamiento posterior puede cambiar el tamaño."
+
+            reply_markup = _get_large_download_confirmation_keyboard(correlation_id)
+            await query.edit_message_text(
+                f"El archivo es grande (~{size_mb:.1f} MB).{action_note}\n\n"
+                f"Esto puede tomar tiempo y consumir datos.\n"
+                f"¿Deseas continuar?",
+                reply_markup=reply_markup
+            )
+        else:
+            # Small file or unknown size - proceed directly
+            if size:
+                size_mb = size / (1024 * 1024)
+                logger.info(f"[{correlation_id}] File size: {size_mb:.1f} MB - proceeding")
+            else:
+                logger.info(f"[{correlation_id}] Unknown file size - proceeding")
+
+            # Start download (combined flow if post_action specified)
+            if post_action:
+                await _start_combined_download(update, context, correlation_id, url, format_type, post_action)
+            else:
+                await _start_download(update, context, correlation_id, url, format_type)
+
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not get metadata: {e}")
+        # If we can't get metadata, proceed anyway (will fail during download if too large)
+        if post_action:
+            await _start_combined_download(update, context, correlation_id, url, format_type, post_action)
+        else:
+            await _start_download(update, context, correlation_id, url, format_type)
+
+
+async def handle_download_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle confirmation callback for large downloads.
+
+    Starts the download after user confirms.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse callback data: download:confirm:correlation_id
+    if not callback_data.startswith("download:confirm:"):
+        return
+
+    correlation_id = callback_data.split(":")[2]
+
+    # Retrieve URL and format from context
+    url = context.user_data.get(f"download_url_{correlation_id}")
+    format_type = context.user_data.get(f"download_format_{correlation_id}", "video")
+
+    if not url:
+        await query.edit_message_text(
+            "Error: No se encontró la información de descarga. Intenta de nuevo."
+        )
+        return
+
+    logger.info(f"[{correlation_id}] Large download confirmed by user {user_id}")
+
+    # Check for combined action
+    post_action = context.user_data.get(f"download_post_action_{correlation_id}")
+
+    # Start download (combined flow if post_action specified)
+    if post_action:
+        await _start_combined_download(update, context, correlation_id, url, format_type, post_action)
+    else:
+        await _start_download(update, context, correlation_id, url, format_type)
+
+
+async def _start_download(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    correlation_id: str,
+    url: str,
+    format_type: str
+) -> None:
+    """Start the download process with progress updates.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        correlation_id: Unique download ID
+        url: URL to download
+        format_type: 'video' or 'audio'
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Detect platform for display
+    platform = _detect_platform_for_display(url)
+
+    # Create facade
+    facade = DownloadFacade()
+
+    try:
+        await facade.start()
+
+        # Store facade instance for cancellation support
+        context.user_data[f"download_facade_{correlation_id}"] = facade
+        context.user_data[f"download_url_{correlation_id}"] = url
+        context.user_data[f"download_format_{correlation_id}"] = format_type
+        context.user_data[f"download_status_{correlation_id}"] = "downloading"
+
+        # Initial message with cancel button
+        reply_markup = _get_download_cancel_keyboard(correlation_id)
+        await query.edit_message_text(
+            f"Analizando enlace de {platform}...",
+            reply_markup=reply_markup
+        )
+
+        # Progress tracking with enhanced state management
+        last_message_text = [f"Analizando enlace de {platform}..."]
+        last_update_time = [0.0]  # Track last update time for rate limiting
+
+        async def progress_callback(progress: dict) -> None:
+            """Update download progress message with cancel button."""
+            import time
+            from bot.downloaders.progress_tracker import format_progress_message
+
+            status = progress.get('status', 'downloading')
+            percent = progress.get('percent', 0)
+
+            # Rate limiting: only update every 1 second minimum
+            current_time = time.time()
+            if current_time - last_update_time[0] < 1.0 and status == 'downloading':
+                return
+
+            # Format message based on status
+            if status == 'downloading':
+                message = format_progress_message(progress)
+                # Add platform info to message
+                if platform:
+                    message = f"Descargando de {platform}...\n{message}"
+
+                if message != last_message_text[0]:
+                    try:
+                        await query.edit_message_text(
+                            message,
+                            reply_markup=reply_markup
+                        )
+                        last_message_text[0] = message
+                        last_update_time[0] = current_time
+                    except Exception as e:
+                        logger.debug(f"Failed to update progress message: {e}")
+
+            elif status == 'completed':
+                # Remove cancel button, show completed
+                try:
+                    await query.edit_message_text("Descarga completada")
+                    context.user_data[f"download_status_{correlation_id}"] = "completed"
+                except Exception:
+                    pass
+
+            elif status == 'error':
+                error_msg = progress.get('error', 'Error desconocido')
+                try:
+                    await query.edit_message_text(f"Error: {error_msg}")
+                    context.user_data[f"download_status_{correlation_id}"] = "error"
+                except Exception:
+                    pass
+
+        # Create progress tracker with callback
+        from bot.downloaders.progress_tracker import ProgressTracker
+        tracker = ProgressTracker(
+            min_update_interval=3.0,
+            min_percent_change=5.0,
+            on_update=lambda p: asyncio.create_task(progress_callback(p))
+        )
+
+        # Download with progress callback integration
+        config_overrides = {
+            'extract_audio': (format_type == 'audio'),
+        }
+
+        result = await facade.download(
+            url=url,
+            chat_id=chat_id,
+            config_overrides=config_overrides
+        )
+
+        if result.success:
+            context.user_data[f"download_status_{correlation_id}"] = "completed"
+
+            # Send downloaded file
+            await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+
+            # Clean up status message
+            try:
+                await query.delete_message()
+            except Exception:
+                pass
+        else:
+            context.user_data[f"download_status_{correlation_id}"] = "error"
+            await query.edit_message_text(
+                f"Error en la descarga: {getattr(result, 'error_message', 'Error desconocido')}"
+            )
+
+    except FileTooLargeError as e:
+        logger.warning(f"[{correlation_id}] File too large: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except URLValidationError as e:
+        logger.warning(f"[{correlation_id}] URL validation error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except UnsupportedURLError as e:
+        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except DownloadError as e:
+        logger.error(f"[{correlation_id}] Download error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
+    finally:
+        # Clean up facade reference but keep status for /downloads command
+        context.user_data.pop(f"download_facade_{correlation_id}", None)
+        try:
+            await facade.stop()
+        except Exception:
+            pass
+
+
+async def _send_downloaded_file_with_menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    format_type: str,
+    correlation_id: str
+) -> None:
+    """Send downloaded file and show post-download menu.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result
+        format_type: 'video' or 'audio'
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+
+    title = metadata.get('title', 'Video')
+
+    try:
+        if format_type == 'audio' or file_ext in audio_extensions:
+            # Send as audio
+            with open(file_path, 'rb') as audio_file:
+                await update.callback_query.message.reply_audio(
+                    audio=audio_file,
+                    caption=f"Descarga completada: {title}",
+                    title=title,
+                    performer=metadata.get('artist') or metadata.get('uploader')
+                )
+        else:
+            # Send as video with post-download menu
+            with open(file_path, 'rb') as video_file:
+                sent_message = await update.callback_query.message.reply_video(
+                    video=video_file,
+                    caption=f"Descarga completada: {title}",
+                    supports_streaming=True
+                )
+
+            # Show post-download menu for video
+            # Store file info for post-download actions
+            context.user_data["video_menu_file_id"] = sent_message.video.file_id
+            context.user_data["video_menu_correlation_id"] = correlation_id
+
+            reply_markup = _get_video_menu_keyboard()
+            await update.callback_query.message.reply_text(
+                "¿Qué quieres hacer con este video?",
+                reply_markup=reply_markup
+            )
+
+        logger.info(f"Downloaded file sent to user {update.effective_user.id}")
+
+    except Exception as e:
+        logger.error(f"Failed to send downloaded file: {e}")
+        await update.callback_query.message.reply_text(
+            "Error al enviar el archivo descargado."
+        )
+
+
+async def _start_combined_download(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    correlation_id: str,
+    url: str,
+    format_type: str,
+    post_action: str
+) -> None:
+    """Start combined download and process flow.
+
+    Downloads the file and immediately processes it based on post_action.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        correlation_id: Unique download ID
+        url: URL to download
+        format_type: 'video' or 'audio'
+        post_action: 'videonote', 'extract', or 'voicenote'
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Detect platform for display
+    platform = _detect_platform_for_display(url)
+
+    # Create facade
+    facade = DownloadFacade()
+
+    try:
+        await facade.start()
+
+        # Store facade instance for cancellation support
+        context.user_data[f"download_facade_{correlation_id}"] = facade
+        context.user_data[f"download_url_{correlation_id}"] = url
+        context.user_data[f"download_format_{correlation_id}"] = format_type
+        context.user_data[f"download_post_action_{correlation_id}"] = post_action
+        context.user_data[f"download_status_{correlation_id}"] = "downloading"
+
+        # Initial message with cancel button
+        reply_markup = _get_download_cancel_keyboard(correlation_id)
+
+        # Map action to display name
+        action_names = {
+            "videonote": "Nota de Video",
+            "extract": "Extraer Audio",
+            "voicenote": "Nota de Voz"
+        }
+        action_name = action_names.get(post_action, post_action)
+
+        await query.edit_message_text(
+            f"Descargando de {platform} para convertir a {action_name}...",
+            reply_markup=reply_markup
+        )
+
+        # Progress tracking with enhanced state management
+        last_message_text = [f"Descargando de {platform}..."]
+        last_update_time = [0.0]
+
+        async def progress_callback(progress: dict) -> None:
+            """Update download progress message."""
+            import time
+            from bot.downloaders.progress_tracker import format_progress_message
+
+            status = progress.get('status', 'downloading')
+            percent = progress.get('percent', 0)
+
+            # Rate limiting: only update every 1 second minimum
+            current_time = time.time()
+            if current_time - last_update_time[0] < 1.0 and status == 'downloading':
+                return
+
+            # Format message based on status
+            if status == 'downloading':
+                message = format_progress_message(progress)
+                message = f"Descargando de {platform}...\n{message}\nLuego: convertir a {action_name}"
+
+                if message != last_message_text[0]:
+                    try:
+                        await query.edit_message_text(
+                            message,
+                            reply_markup=reply_markup
+                        )
+                        last_message_text[0] = message
+                        last_update_time[0] = current_time
+                    except Exception as e:
+                        logger.debug(f"Failed to update progress message: {e}")
+
+            elif status == 'completed':
+                try:
+                    await query.edit_message_text(f"Descarga completada. Convirtiendo a {action_name}...")
+                    context.user_data[f"download_status_{correlation_id}"] = "completed"
+                except Exception:
+                    pass
+
+            elif status == 'error':
+                error_msg = progress.get('error', 'Error desconocido')
+                try:
+                    await query.edit_message_text(f"Error en la descarga: {error_msg}")
+                    context.user_data[f"download_status_{correlation_id}"] = "error"
+                except Exception:
+                    pass
+
+        # Create progress tracker with callback
+        from bot.downloaders.progress_tracker import ProgressTracker
+        tracker = ProgressTracker(
+            min_update_interval=3.0,
+            min_percent_change=5.0,
+            on_update=lambda p: asyncio.create_task(progress_callback(p))
+        )
+
+        # Download with progress callback integration
+        config_overrides = {
+            'extract_audio': (format_type == 'audio'),
+        }
+
+        result = await facade.download(
+            url=url,
+            chat_id=chat_id,
+            config_overrides=config_overrides
+        )
+
+        if result.success:
+            context.user_data[f"download_status_{correlation_id}"] = "completed"
+
+            # Immediately process based on post_action
+            await query.edit_message_text(f"Descarga completada. Convirtiendo a {action_name}...")
+
+            try:
+                if post_action == "videonote":
+                    await _process_to_videonote(update, context, result, correlation_id)
+                elif post_action == "extract":
+                    await _process_extract_audio(update, context, result, correlation_id)
+                elif post_action == "voicenote":
+                    await _process_to_voicenote(update, context, result, correlation_id)
+                else:
+                    logger.warning(f"Unknown post_action: {post_action}")
+                    await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Post-download processing failed: {e}")
+                await query.edit_message_text(
+                    f"Descarga completada pero el procesamiento falló: {e}\n"
+                    f"El archivo descargado se enviará sin procesar."
+                )
+                # Send original file as fallback
+                await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+        else:
+            context.user_data[f"download_status_{correlation_id}"] = "error"
+            await query.edit_message_text(
+                f"Error en la descarga: {getattr(result, 'error_message', 'Error desconocido')}"
+            )
+
+    except FileTooLargeError as e:
+        logger.warning(f"[{correlation_id}] File too large: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except URLValidationError as e:
+        logger.warning(f"[{correlation_id}] URL validation error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except UnsupportedURLError as e:
+        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await query.edit_text(e.to_user_message())
+    except DownloadError as e:
+        logger.error(f"[{correlation_id}] Download error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await query.edit_text(error_msg)
+    finally:
+        # Clean up facade reference but keep status for /downloads command
+        context.user_data.pop(f"download_facade_{correlation_id}", None)
+        context.user_data.pop(f"download_post_action_{correlation_id}", None)
+        try:
+            await facade.stop()
+        except Exception:
+            pass
+
+
+async def _process_to_videonote(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    correlation_id: str
+) -> None:
+    """Process downloaded video to video note.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result with file_path
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    temp_mgr = TempManager()
+    output_filename = f"videonote_{correlation_id}.mp4"
+    output_path = temp_mgr.get_temp_path(output_filename)
+
+    try:
+        # Process video to video note format
+        success = await asyncio.get_event_loop().run_in_executor(
+            None,
+            VideoProcessor.process_video,
+            str(file_path),
+            str(output_path)
+        )
+
+        if success and os.path.exists(output_path):
+            with open(output_path, 'rb') as video_file:
+                await update.callback_query.message.reply_video_note(video_note=video_file)
+            logger.info(f"[{correlation_id}] Video note sent successfully")
+        else:
+            raise FFmpegError("El procesamiento de video falló")
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to convert to video note: {e}")
+        await update.callback_query.message.reply_text(
+            f"Error al convertir a nota de video: {e}"
+        )
+        # Send original as fallback
+        await _send_downloaded_file_with_menu(update, context, result, "video", correlation_id)
+    finally:
+        temp_mgr.cleanup()
+
+
+async def _process_extract_audio(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    correlation_id: str
+) -> None:
+    """Extract audio from downloaded video.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result with file_path
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    temp_mgr = TempManager()
+    output_filename = f"audio_{correlation_id}.mp3"
+    output_path = temp_mgr.get_temp_path(output_filename)
+
+    try:
+        # Extract audio using AudioExtractor
+        extractor = AudioExtractor(str(file_path), str(output_path))
+        success = await asyncio.get_event_loop().run_in_executor(
+            None,
+            extractor.extract
+        )
+
+        if success and os.path.exists(output_path):
+            title = metadata.get('title', 'Video')
+            with open(output_path, 'rb') as audio_file:
+                await update.callback_query.message.reply_audio(
+                    audio=audio_file,
+                    caption=f"Audio extraído: {title}",
+                    title=title,
+                    performer=metadata.get('artist') or metadata.get('uploader')
+                )
+            logger.info(f"[{correlation_id}] Audio extracted and sent successfully")
+        else:
+            raise AudioExtractionError("La extracción de audio falló")
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to extract audio: {e}")
+        await update.callback_query.message.reply_text(
+            f"Error al extraer audio: {e}"
+        )
+        # Send original as fallback
+        await _send_downloaded_file_with_menu(update, context, result, "video", correlation_id)
+    finally:
+        temp_mgr.cleanup()
+
+
+async def _process_to_voicenote(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    result: Any,
+    correlation_id: str
+) -> None:
+    """Process downloaded audio to voice note.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        result: Download result with file_path
+        correlation_id: Unique download ID
+    """
+    from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+
+    if isinstance(result, LifecycleResult):
+        file_path = result.file_path
+        metadata = result.metadata or {}
+    elif isinstance(result, dict):
+        file_path = result.get('file_path') or result.get('path')
+        metadata = result.get('metadata', {})
+    else:
+        file_path = str(result)
+        metadata = {}
+
+    if not file_path or not os.path.exists(file_path):
+        await update.callback_query.message.reply_text(
+            "Error: No se encontró el archivo descargado."
+        )
+        return
+
+    temp_mgr = TempManager()
+    output_filename = f"voicenote_{correlation_id}.ogg"
+    output_path = temp_mgr.get_temp_path(output_filename)
+
+    try:
+        # Convert to voice note format (OGG Opus)
+        converter = VoiceNoteConverter(str(file_path), str(output_path))
+        success = await asyncio.get_event_loop().run_in_executor(
+            None,
+            converter.convert
+        )
+
+        if success and os.path.exists(output_path):
+            with open(output_path, 'rb') as voice_file:
+                await update.callback_query.message.reply_voice(voice=voice_file)
+            logger.info(f"[{correlation_id}] Voice note sent successfully")
+        else:
+            raise VoiceConversionError("La conversión a nota de voz falló")
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to convert to voice note: {e}")
+        await update.callback_query.message.reply_text(
+            f"Error al convertir a nota de voz: {e}"
+        )
+        # Send original as fallback
+        await _send_downloaded_file_with_menu(update, context, result, "audio", correlation_id)
+    finally:
+        temp_mgr.cleanup()
+
+
+async def handle_download_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle download cancellation callback.
+
+    Handles race conditions gracefully:
+    - If download completes before cancel is processed, show "already completed"
+    - If cancel fails due to already-finished state, show appropriate message
+    - Always clean up user_data to prevent stale references
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse callback data: download:cancel:correlation_id
+    if not callback_data.startswith("download:cancel:"):
+        logger.warning(f"Invalid cancel callback data: {callback_data}")
+        await query.edit_message_text("Error: callback inválido")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 3:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        await query.edit_message_text("Error: formato de callback inválido")
+        return
+
+    correlation_id = parts[2]
+
+    logger.info(f"[{correlation_id}] Download cancel requested by user {user_id}")
+
+    # Get current status to check race conditions
+    current_status = context.user_data.get(f"download_status_{correlation_id}", "unknown")
+
+    # Get facade instance
+    facade = context.user_data.get(f"download_facade_{correlation_id}")
+
+    cancelled = False
+    if facade:
+        try:
+            # Cancel the download
+            cancelled = await facade.cancel_download(correlation_id)
+            if cancelled:
+                logger.info(f"[{correlation_id}] Download cancelled successfully")
+                await query.edit_message_text("Descarga cancelada")
+                context.user_data[f"download_status_{correlation_id}"] = "cancelled"
+            else:
+                # Check if already completed (race condition)
+                if current_status == "completed":
+                    logger.info(f"[{correlation_id}] Cancel failed - download already completed")
+                    await query.edit_message_text("La descarga ya se había completado")
+                else:
+                    logger.info(f"[{correlation_id}] Cancel failed - download not found or already finished")
+                    await query.edit_message_text("No se pudo cancelar (¿ya completada?)")
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Error during cancel: {e}")
+            await query.edit_message_text("Error al cancelar la descarga")
+    else:
+        # No facade found - download may have already finished
+        if current_status == "completed":
+            logger.info(f"[{correlation_id}] No facade found - download already completed")
+            await query.edit_message_text("La descarga ya se había completado")
+        elif current_status == "error":
+            logger.info(f"[{correlation_id}] No facade found - download already failed")
+            await query.edit_message_text("La descarga ya había fallado")
+        else:
+            logger.info(f"[{correlation_id}] No facade found - marking as cancelled")
+            await query.edit_message_text("Descarga cancelada")
+            context.user_data[f"download_status_{correlation_id}"] = "cancelled"
+
+    # Clean up user_data
+    context.user_data.pop(f"download_url_{correlation_id}", None)
+    context.user_data.pop(f"download_format_{correlation_id}", None)
+    context.user_data.pop(f"download_meta_{correlation_id}", None)
+    context.user_data.pop(f"download_facade_{correlation_id}", None)
+    # Keep download_status for /downloads command history
+
+
+async def handle_downloads_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /downloads command to show active and recent downloads.
+
+    Displays a list of active downloads with progress and recent downloads
+    with their completion status. Provides cancel buttons for active downloads.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+
+    # Collect active downloads from user_data
+    active_downloads = []
+    recent_downloads = []
+
+    # Scan user_data for download entries
+    for key in list(context.user_data.keys()):
+        if key.startswith("download_status_"):
+            correlation_id = key.replace("download_status_", "")
+            status = context.user_data.get(key, "unknown")
+            url = context.user_data.get(f"download_url_{correlation_id}", "")
+            format_type = context.user_data.get(f"download_format_{correlation_id}", "video")
+
+            # Get platform for display
+            platform = _detect_platform_for_display(url) or "Desconocido"
+
+            download_info = {
+                "correlation_id": correlation_id,
+                "status": status,
+                "platform": platform,
+                "format": format_type,
+                "url": url[:50] + "..." if len(url) > 50 else url
+            }
+
+            if status == "downloading":
+                active_downloads.append(download_info)
+            elif status in ["completed", "error", "cancelled"]:
+                recent_downloads.append(download_info)
+
+    # Sort recent downloads by correlation_id (which includes timestamp info)
+    recent_downloads = sorted(recent_downloads, key=lambda x: x["correlation_id"], reverse=True)[:5]
+
+    # Build message
+    lines = ["Descargas activas:"]
+
+    if active_downloads:
+        for d in active_downloads:
+            lines.append(f"  {d['correlation_id']}: {d['platform']} ({d['format']})")
+    else:
+        lines.append("  Ninguna")
+
+    lines.append("\nDescargas recientes:")
+
+    if recent_downloads:
+        for d in recent_downloads:
+            status_icon = "✅" if d['status'] == "completed" else "❌" if d['status'] == "error" else "🚫"
+            lines.append(f"  {status_icon} {d['correlation_id']}: {d['platform']}")
+    else:
+        lines.append("  Ninguna")
+
+    # Add cancel buttons for active downloads
+    keyboard = []
+    for d in active_downloads:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"Cancelar {d['correlation_id']}",
+                callback_data=f"download:cancel:{d['correlation_id']}"
+            )
+        ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        reply_markup=reply_markup
+    )
+
+
 async def send_downloaded_file(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     result: Any
 ) -> None:
-    """Send downloaded file to user.
-
-    Determines file type from metadata and sends appropriately
-    (video for video files, audio for audio files).
+    """Send downloaded file to user (legacy helper).
 
     Args:
         update: Telegram update object
@@ -5777,7 +7039,6 @@ async def send_downloaded_file(
 
     try:
         if file_ext in audio_extensions:
-            # Send as audio
             with open(file_path, 'rb') as audio_file:
                 await update.message.reply_audio(
                     audio=audio_file,
@@ -5786,7 +7047,6 @@ async def send_downloaded_file(
                     performer=metadata.get('artist') or metadata.get('uploader')
                 )
         else:
-            # Send as video
             with open(file_path, 'rb') as video_file:
                 await update.message.reply_video(
                     video=video_file,
@@ -5802,79 +7062,1028 @@ async def send_downloaded_file(
 
 
 async def handle_url_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle messages containing URLs for download.
+    """Handle messages containing URLs for download (legacy direct download).
 
-    Detects URLs in text messages, validates them, and initiates
-    download with progress updates.
+    This handler is kept for backward compatibility.
+    New behavior uses handle_url_detection with inline menu.
 
     Args:
         update: Telegram update object
         context: Telegram context object
     """
-    message_text = update.message.text
-    chat_id = update.effective_chat.id
+    # Delegate to the new URL detection handler with menu
+    await handle_url_detection(update, context)
+
+
+# =============================================================================
+# Post-Download Integration Handlers
+# =============================================================================
+
+
+def _get_postdownload_video_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for post-download video menu options."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Convertir a Nota de Video", callback_data=f"postdownload:videonote:{correlation_id}"),
+            InlineKeyboardButton("Extraer Audio", callback_data=f"postdownload:extract_audio:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Convertir Formato", callback_data=f"postdownload:convert_video:{correlation_id}"),
+            InlineKeyboardButton("Descargas Recientes", callback_data=f"postdownload:recent:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_audio_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for post-download audio menu options."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Convertir a Nota de Voz", callback_data=f"postdownload:voicenote:{correlation_id}"),
+            InlineKeyboardButton("Convertir Formato", callback_data=f"postdownload:convert_audio:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Bass Boost", callback_data=f"postdownload:bass:{correlation_id}"),
+            InlineKeyboardButton("Reducir Ruido", callback_data=f"postdownload:denoise:{correlation_id}"),
+            InlineKeyboardButton("Más Opciones...", callback_data=f"postdownload:more:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Descargas Recientes", callback_data=f"postdownload:recent:{correlation_id}"),
+            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_audio_more_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate extended inline keyboard for post-download audio options."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Treble Boost", callback_data=f"postdownload:treble:{correlation_id}"),
+            InlineKeyboardButton("Ecualizar", callback_data=f"postdownload:equalize:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Comprimir", callback_data=f"postdownload:compress:{correlation_id}"),
+            InlineKeyboardButton("Normalizar", callback_data=f"postdownload:normalize:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
+            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_intensity_keyboard(correlation_id: str, effect_type: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for intensity selection (bass/treble)."""
+    keyboard = []
+    row = []
+    for i in range(1, 11):
+        row.append(InlineKeyboardButton(str(i), callback_data=f"postdownload:{effect_type}_intensity:{correlation_id}:{i}"))
+        if len(row) == 5:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([
+        InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
+        InlineKeyboardButton("Cerrar", callback_data="cancel"),
+    ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_effect_strength_keyboard(correlation_id: str, effect_type: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for effect strength selection (denoise/compress)."""
+    strengths = [("Leve", "light"), ("Medio", "medium"), ("Fuerte", "strong")]
+    keyboard = [
+        [InlineKeyboardButton(label, callback_data=f"postdownload:{effect_type}_strength:{correlation_id}:{value}")
+         for label, value in strengths]
+    ]
+    keyboard.append([
+        InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
+        InlineKeyboardButton("Cerrar", callback_data="cancel"),
+    ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_audio_format_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for audio format conversion."""
+    keyboard = [
+        [
+            InlineKeyboardButton("MP3", callback_data=f"postdownload:audio_format:{correlation_id}:mp3"),
+            InlineKeyboardButton("AAC", callback_data=f"postdownload:audio_format:{correlation_id}:aac"),
+        ],
+        [
+            InlineKeyboardButton("WAV", callback_data=f"postdownload:audio_format:{correlation_id}:wav"),
+            InlineKeyboardButton("OGG", callback_data=f"postdownload:audio_format:{correlation_id}:ogg"),
+        ],
+        [
+            InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
+            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_video_format_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for video format conversion."""
+    keyboard = [
+        [
+            InlineKeyboardButton("MP4", callback_data=f"postdownload:video_format:{correlation_id}:mp4"),
+            InlineKeyboardButton("AVI", callback_data=f"postdownload:video_format:{correlation_id}:avi"),
+            InlineKeyboardButton("MOV", callback_data=f"postdownload:video_format:{correlation_id}:mov"),
+        ],
+        [
+            InlineKeyboardButton("MKV", callback_data=f"postdownload:video_format:{correlation_id}:mkv"),
+            InlineKeyboardButton("WEBM", callback_data=f"postdownload:video_format:{correlation_id}:webm"),
+        ],
+        [
+            InlineKeyboardButton("Volver", callback_data=f"postdownload:back_video:{correlation_id}"),
+            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_video_audio_format_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for audio extraction format selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("MP3", callback_data=f"postdownload:extract_format:{correlation_id}:mp3"),
+            InlineKeyboardButton("AAC", callback_data=f"postdownload:extract_format:{correlation_id}:aac"),
+        ],
+        [
+            InlineKeyboardButton("WAV", callback_data=f"postdownload:extract_format:{correlation_id}:wav"),
+            InlineKeyboardButton("OGG", callback_data=f"postdownload:extract_format:{correlation_id}:ogg"),
+        ],
+        [
+            InlineKeyboardButton("Volver", callback_data=f"postdownload:back_video:{correlation_id}"),
+            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_recent_downloads_keyboard(session, page: int = 0) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for recent downloads list."""
+    entries = session.get_recent(5)
+    keyboard = []
+    for i, entry in enumerate(entries, 1):
+        title = entry.get_title()[:20] + "..." if len(entry.get_title()) > 20 else entry.get_title()
+        platform = entry.get_platform()
+        time_ago = entry.time_ago()
+        label = f"{i}. {title} ({platform}) - {time_ago}"
+        keyboard.append([
+            InlineKeyboardButton(label, callback_data=f"reprocess:{entry.correlation_id}")
+        ])
+    if entries:
+        keyboard.append([
+            InlineKeyboardButton("Limpiar Lista", callback_data="postdownload:clear_recent:none"),
+        ])
+    keyboard.append([
+        InlineKeyboardButton("Cerrar", callback_data="cancel"),
+    ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_postdownload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle post-download video processing callbacks."""
+    query = update.callback_query
+    await query.answer()
+
     user_id = update.effective_user.id
+    callback_data = query.data
 
-    # Detect URLs in message
-    urls = url_detector.detect_urls(message_text)
-    if not urls:
-        return  # No URLs, ignore
+    if not callback_data.startswith("postdownload:"):
+        logger.warning(f"Unexpected callback data: {callback_data}")
+        return
 
-    # Process first URL (or all if implementing multi-download)
-    url = urls[0]
-    correlation_id = str(uuid.uuid4())[:8]
+    parts = callback_data.split(":")
+    if len(parts) < 3:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
 
-    logger.info(f"[{correlation_id}] URL detected from user {user_id}: {url}")
+    action = parts[1]
+    correlation_id = parts[2]
 
-    # Send initial message
-    status_message = await update.message.reply_text(
-        "Analizando enlace...",
-        quote=True
-    )
+    logger.info(f"[{correlation_id}] Post-download action '{action}' selected by user {user_id}")
 
-    # Create facade
-    facade = DownloadFacade()
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
 
-    try:
-        await facade.start()
-
-        # Download with progress
-        result = await facade.download_with_progress(
-            url=url,
-            chat_id=chat_id,
-            message_func=lambda text: context.bot.send_message(chat_id, text),
-            edit_message_func=lambda text: status_message.edit_text(text)
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
         )
+        return
 
-        if result.success:
-            # Send downloaded file
-            await send_downloaded_file(update, context, result)
-            # Clean up status message
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text(
+            "Error: El archivo ya no está disponible. Fue eliminado automáticamente."
+        )
+        return
+
+    if action == "videonote":
+        await _handle_postdownload_videonote(update, context, entry, correlation_id)
+    elif action == "extract_audio":
+        reply_markup = _get_postdownload_video_audio_format_keyboard(correlation_id)
+        await query.edit_message_text("Selecciona el formato de audio:", reply_markup=reply_markup)
+    elif action == "convert_video":
+        reply_markup = _get_postdownload_video_format_keyboard(correlation_id)
+        await query.edit_message_text("Selecciona el formato de video:", reply_markup=reply_markup)
+    elif action == "recent":
+        await handle_recent_downloads(update, context)
+    elif action == "back_video":
+        reply_markup = _get_postdownload_video_keyboard(correlation_id)
+        await query.edit_message_text("¿Qué quieres hacer con este video?", reply_markup=reply_markup)
+
+
+async def _handle_postdownload_videonote(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str
+) -> None:
+    """Convert downloaded video to video note."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text("Convirtiendo a nota de video...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"videonote_{user_id}_{correlation_id}.mp4"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Processing downloaded video to video note for user {user_id}")
             try:
-                await status_message.delete()
-            except Exception:
-                pass
-        else:
-            await status_message.edit_text(
-                f"Error en la descarga: {result.error_message or 'Error desconocido'}"
-            )
+                loop = asyncio.get_event_loop()
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, VideoProcessor.process_video, str(file_path), str(output_path)),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise FFmpegError("El procesamiento de video falló")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
 
-    except FileTooLargeError as e:
-        logger.warning(f"[{correlation_id}] File too large: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except URLValidationError as e:
-        logger.warning(f"[{correlation_id}] URL validation error: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except UnsupportedURLError as e:
-        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except DownloadError as e:
-        logger.error(f"[{correlation_id}] Download error: {e}")
-        await status_message.edit_text(e.to_user_message())
-    except Exception as e:
-        logger.error(f"[{correlation_id}] Unexpected error: {e}")
-        await status_message.edit_text(
-            "Ocurrió un error inesperado. Por favor intenta de nuevo."
+            logger.info(f"[{correlation_id}] Sending video note to user {user_id}")
+            with open(output_path, "rb") as video_file:
+                await query.message.reply_video_note(video_note=video_file)
+
+            reply_markup = _get_postdownload_video_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este video?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Video note sent successfully to user {user_id}")
+        except (FFmpegError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Video note conversion failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error converting to video note: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def handle_postdownload_audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle post-download audio processing callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    if not callback_data.startswith("postdownload:"):
+        logger.warning(f"Unexpected callback data: {callback_data}")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) < 3:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
+
+    action = parts[1]
+    correlation_id = parts[2]
+
+    logger.info(f"[{correlation_id}] Post-download audio action '{action}' selected by user {user_id}")
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
         )
-    finally:
-        await facade.stop()
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text("Error: El archivo ya no está disponible. Fue eliminado automáticamente.")
+        return
+
+    if action == "voicenote":
+        await _handle_postdownload_voicenote(update, context, entry, correlation_id)
+    elif action == "convert_audio":
+        reply_markup = _get_postdownload_audio_format_keyboard(correlation_id)
+        await query.edit_message_text("Selecciona el formato de audio:", reply_markup=reply_markup)
+    elif action == "bass":
+        reply_markup = _get_postdownload_intensity_keyboard(correlation_id, "bass")
+        await query.edit_message_text("Selecciona la intensidad del Bass Boost:", reply_markup=reply_markup)
+    elif action == "treble":
+        reply_markup = _get_postdownload_intensity_keyboard(correlation_id, "treble")
+        await query.edit_message_text("Selecciona la intensidad del Treble Boost:", reply_markup=reply_markup)
+    elif action == "denoise":
+        reply_markup = _get_postdownload_effect_strength_keyboard(correlation_id, "denoise")
+        await query.edit_message_text("Selecciona la intensidad de la reducción de ruido:", reply_markup=reply_markup)
+    elif action == "compress":
+        reply_markup = _get_postdownload_effect_strength_keyboard(correlation_id, "compress")
+        await query.edit_message_text("Selecciona la intensidad de la compresión:", reply_markup=reply_markup)
+    elif action == "normalize":
+        await _handle_postdownload_normalize(update, context, entry, correlation_id)
+    elif action == "equalize":
+        await _handle_postdownload_equalize(update, context, entry, correlation_id)
+    elif action == "more":
+        reply_markup = _get_postdownload_audio_more_keyboard(correlation_id)
+        await query.edit_message_text("Más opciones de procesamiento de audio:", reply_markup=reply_markup)
+    elif action == "back_audio":
+        reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+        await query.edit_message_text("¿Qué quieres hacer con este audio?", reply_markup=reply_markup)
+    elif action == "recent":
+        await handle_recent_downloads(update, context)
+    elif action == "clear_recent":
+        session.clear()
+        await query.edit_message_text("Lista de descargas recientes limpiada.")
+
+
+async def _handle_postdownload_voicenote(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str
+) -> None:
+    """Convert downloaded audio to voice note."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text("Convirtiendo a nota de voz...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"voicenote_{user_id}_{correlation_id}.ogg"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Converting audio to voice note for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                converter = VoiceNoteConverter(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, converter.process), timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise VoiceConversionError("No pude convertir a nota de voz")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending voice note to user {user_id}")
+            with open(output_path, "rb") as voice_file:
+                await query.message.reply_voice(voice=voice_file)
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Voice note sent successfully to user {user_id}")
+        except (VoiceConversionError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Voice note conversion failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error converting to voice note: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_normalize(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str
+) -> None:
+    """Normalize downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text("Normalizando audio...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"normalized_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Normalizing audio for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.normalize), timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise AudioEffectsError("No pude normalizar el audio")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending normalized audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file, filename=f"normalized_{correlation_id}.mp3", title="Audio Normalizado"
+                )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Normalized audio sent successfully to user {user_id}")
+        except (AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Audio normalization failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error normalizing audio: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_equalize(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str
+) -> None:
+    """Show equalizer for downloaded audio."""
+    query = update.callback_query
+    context.user_data["postdownload_eq"] = {"correlation_id": correlation_id, "bass": 0, "mid": 0, "treble": 0}
+    reply_markup = _get_equalizer_keyboard(0, 0, 0)
+    await query.edit_message_text("Ajusta el ecualizador (Bass/Mid/Treble):", reply_markup=reply_markup)
+
+
+async def handle_recent_downloads(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show recent downloads list."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entries = session.get_recent(5)
+
+    if not entries:
+        await query.edit_message_text(
+            "No hay descargas recientes en esta sesión.\n\n"
+            "Las descargas se mantienen solo durante la sesión actual "
+            "y no se guardan permanentemente por privacidad.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cerrar", callback_data="cancel")]])
+        )
+        return
+
+    lines = ["Descargas recientes:"]
+    for i, entry in enumerate(entries, 1):
+        title = entry.get_title()
+        platform = entry.get_platform()
+        time_ago = entry.time_ago()
+        status_icon = "✅" if entry.status == "completed" else "❌"
+        lines.append(f"{status_icon} {i}. {title} ({platform}) - hace {time_ago}")
+
+    reply_markup = _get_recent_downloads_keyboard(session)
+    await query.edit_message_text(
+        "\n".join(lines) + "\n\nSelecciona una para reprocesar:", reply_markup=reply_markup
+    )
+    logger.info(f"Displayed recent downloads for user {user_id}: {len(entries)} items")
+
+
+async def handle_reprocess_download(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle reprocessing of a recent download."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    if not callback_data.startswith("reprocess:"):
+        logger.warning(f"Unexpected callback data: {callback_data}")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 2:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
+
+    correlation_id = parts[1]
+    logger.info(f"[{correlation_id}] Reprocess requested by user {user_id}")
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la descarga. Puede haber sido eliminada de la sesión."
+        )
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text(
+            "Error: El archivo ya no está disponible. Fue eliminado automáticamente.\n\n"
+            "Los archivos temporales se eliminan después de un tiempo. Por favor descarga el contenido nuevamente."
+        )
+        return
+
+    file_ext = os.path.splitext(entry.file_path)[1].lower()
+    video_exts = {'.mp4', '.avi', '.mov', '.mkv', '.webm'}
+    audio_exts = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+
+    if file_ext in video_exts:
+        reply_markup = _get_postdownload_video_keyboard(correlation_id)
+        await query.edit_message_text(
+            f"Reprocesando: {entry.get_title()}\n\n¿Qué quieres hacer con este video?", reply_markup=reply_markup
+        )
+    elif file_ext in audio_exts:
+        reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+        await query.edit_message_text(
+            f"Reprocesando: {entry.get_title()}\n\n¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+        )
+    else:
+        await query.edit_message_text(
+            f"Tipo de archivo no reconocido: {file_ext}\n\nSolo se pueden reprocesar videos y archivos de audio."
+        )
+    logger.info(f"[{correlation_id}] Reprocess menu shown to user {user_id}")
+
+
+# =============================================================================
+# Post-Download Format and Effect Handlers
+# =============================================================================
+
+async def handle_postdownload_format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle post-download format selection callbacks.
+
+    Handles: audio_format, video_format, extract_format callbacks
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse: postdownload:ACTION:CORRELATION_ID:FORMAT
+    parts = callback_data.split(":")
+    if len(parts) != 4:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
+
+    action = parts[1]
+    correlation_id = parts[2]
+    format_type = parts[3]
+
+    logger.info(f"[{correlation_id}] Post-download format '{format_type}' selected for {action} by user {user_id}")
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
+        )
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text("Error: El archivo ya no está disponible. Fue eliminado automáticamente.")
+        return
+
+    if action == "audio_format":
+        await _handle_postdownload_audio_format_conversion(update, context, entry, correlation_id, format_type)
+    elif action == "video_format":
+        await _handle_postdownload_video_format_conversion(update, context, entry, correlation_id, format_type)
+    elif action == "extract_format":
+        await _handle_postdownload_extract_audio(update, context, entry, correlation_id, format_type)
+
+
+async def _handle_postdownload_audio_format_conversion(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, target_format: str
+) -> None:
+    """Convert downloaded audio to specified format."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Convirtiendo a formato {target_format.upper()}...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"converted_{user_id}_{correlation_id}.{target_format}"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Converting audio to {target_format} for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                converter = AudioFormatConverter(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, converter.convert), timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise AudioFormatConversionError(f"No pude convertir a {target_format}")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending converted audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=f"converted_{correlation_id}.{target_format}",
+                    title=f"Audio Convertido ({target_format.upper()})"
+                )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Converted audio sent successfully to user {user_id}")
+        except (AudioFormatConversionError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Audio format conversion failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error converting audio format: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_video_format_conversion(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, target_format: str
+) -> None:
+    """Convert downloaded video to specified format."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Convirtiendo video a formato {target_format.upper()}...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"converted_{user_id}_{correlation_id}.{target_format}"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Converting video to {target_format} for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                converter = FormatConverter(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, converter.convert), timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise FormatConversionError(f"No pude convertir a {target_format}")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending converted video to user {user_id}")
+            with open(output_path, "rb") as video_file:
+                await query.message.reply_video(
+                    video=video_file,
+                    caption=f"Video convertido a {target_format.upper()}",
+                    supports_streaming=True
+                )
+
+            reply_markup = _get_postdownload_video_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este video?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Converted video sent successfully to user {user_id}")
+        except (FormatConversionError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Video format conversion failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error converting video format: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_extract_audio(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, audio_format: str
+) -> None:
+    """Extract audio from downloaded video."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Extrayendo audio en formato {audio_format.upper()}...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"audio_{user_id}_{correlation_id}.{audio_format}"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Extracting audio as {audio_format} for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                extractor = AudioExtractor(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, extractor.extract), timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise AudioExtractionError(f"No pude extraer el audio")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending extracted audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=f"extracted_{correlation_id}.{audio_format}",
+                    title=f"Audio Extraído ({audio_format.upper()})"
+                )
+
+            reply_markup = _get_postdownload_video_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este video?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Extracted audio sent successfully to user {user_id}")
+        except (AudioExtractionError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Audio extraction failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error extracting audio: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def handle_postdownload_intensity_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle post-download intensity selection callbacks (bass/treble boost).
+
+    Handles: bass_intensity, treble_intensity callbacks
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse: postdownload:ACTION:CORRELATION_ID:INTENSITY
+    parts = callback_data.split(":")
+    if len(parts) != 4:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
+
+    action = parts[1]
+    correlation_id = parts[2]
+    intensity = int(parts[3])
+
+    logger.info(f"[{correlation_id}] Post-download {action} intensity {intensity} selected by user {user_id}")
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
+        )
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text("Error: El archivo ya no está disponible. Fue eliminado automáticamente.")
+        return
+
+    if action == "bass_intensity":
+        await _handle_postdownload_bass_boost(update, context, entry, correlation_id, intensity)
+    elif action == "treble_intensity":
+        await _handle_postdownload_treble_boost(update, context, entry, correlation_id, intensity)
+
+
+async def _handle_postdownload_bass_boost(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, intensity: int
+) -> None:
+    """Apply bass boost to downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Aplicando Bass Boost (intensidad {intensity})...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"bass_boosted_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Applying bass boost (intensity {intensity}) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                enhancer = AudioEnhancer(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: enhancer.bass_boost(intensity)),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise AudioEnhancementError("No pude aplicar el bass boost")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending bass boosted audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=f"bass_boosted_{correlation_id}.mp3",
+                    title=f"Bass Boost (Intensidad {intensity})"
+                )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Bass boosted audio sent successfully to user {user_id}")
+        except (AudioEnhancementError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Bass boost failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying bass boost: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_treble_boost(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, intensity: int
+) -> None:
+    """Apply treble boost to downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Aplicando Treble Boost (intensidad {intensity})...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"treble_boosted_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Applying treble boost (intensity {intensity}) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                enhancer = AudioEnhancer(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: enhancer.treble_boost(intensity)),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise AudioEnhancementError("No pude aplicar el treble boost")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending treble boosted audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=f"treble_boosted_{correlation_id}.mp3",
+                    title=f"Treble Boost (Intensidad {intensity})"
+                )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Treble boosted audio sent successfully to user {user_id}")
+        except (AudioEnhancementError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Treble boost failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying treble boost: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def handle_postdownload_effect_strength_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle post-download effect strength callbacks (denoise/compress).
+
+    Handles: denoise_strength, compress_strength callbacks
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse: postdownload:ACTION:CORRELATION_ID:STRENGTH
+    parts = callback_data.split(":")
+    if len(parts) != 4:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        return
+
+    action = parts[1]
+    correlation_id = parts[2]
+    strength = parts[3]
+
+    logger.info(f"[{correlation_id}] Post-download {action} strength {strength} selected by user {user_id}")
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
+        )
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text("Error: El archivo ya no está disponible. Fue eliminado automáticamente.")
+        return
+
+    if action == "denoise_strength":
+        await _handle_postdownload_denoise(update, context, entry, correlation_id, strength)
+    elif action == "compress_strength":
+        await _handle_postdownload_compress(update, context, entry, correlation_id, strength)
+
+
+async def _handle_postdownload_denoise(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, strength: str
+) -> None:
+    """Apply denoise effect to downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    strength_map = {"light": "leve", "medium": "media", "strong": "fuerte"}
+    strength_es = strength_map.get(strength, strength)
+
+    await query.edit_message_text(f"Reduciendo ruido (intensidad {strength_es})...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"denoised_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Applying denoise (strength {strength}) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: effects.denoise(strength)),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise AudioEffectsError("No pude reducir el ruido")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending denoised audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=f"denoised_{correlation_id}.mp3",
+                    title=f"Audio Sin Ruido ({strength_es.capitalize()})"
+                )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Denoised audio sent successfully to user {user_id}")
+        except (AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Denoise failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error denoising audio: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_compress(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, strength: str
+) -> None:
+    """Apply compression effect to downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    strength_map = {"light": "leve", "medium": "media", "strong": "fuerte"}
+    strength_es = strength_map.get(strength, strength)
+
+    await query.edit_message_text(f"Comprimiendo audio (intensidad {strength_es})...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"compressed_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Applying compression (strength {strength}) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(file_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: effects.compress(strength)),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+                if not success:
+                    raise AudioEffectsError("No pude comprimir el audio")
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            logger.info(f"[{correlation_id}] Sending compressed audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=f"compressed_{correlation_id}.mp3",
+                    title=f"Audio Comprimido ({strength_es.capitalize()})"
+                )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con este audio?", reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Compressed audio sent successfully to user {user_id}")
+        except (AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Compression failed: {e}")
+            await query.edit_message_text(f"Error: {str(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error compressing audio: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")

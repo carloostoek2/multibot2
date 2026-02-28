@@ -138,6 +138,13 @@ from .download_facade import (
     download_url,
 )
 
+# Import download session tracking
+from .download_session import (
+    DownloadEntry,
+    DownloadSession,
+    get_user_download_session,
+)
+
 # DownloadResult for backwards compatibility
 from dataclasses import dataclass
 from typing import Optional
@@ -238,4 +245,8 @@ __all__ = [
     "DownloadFacade",
     "DownloadConfig",
     "download_url",
+    # Download session tracking
+    "DownloadEntry",
+    "DownloadSession",
+    "get_user_download_session",
 ]

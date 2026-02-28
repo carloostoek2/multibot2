@@ -8,13 +8,13 @@ Bot con capacidad de descarga desde YouTube, Instagram, TikTok, Twitter/X, Faceb
 
 ## Current Position
 
-**Phase:** 11-download-management-progress — COMPLETE
+**Phase:** 12-integration-polish — COMPLETE
 
-**Plan:** 11-05 COMPLETE
+**Plan:** 12-04 COMPLETE
 
-**Status:** All 5 plans in Phase 11 complete. Ready for Phase 12: Integration & Polish.
+**Status:** Download + Convert combined flow implemented with comprehensive error handling and 31 integration tests.
 
-**Last activity:** 2026-02-21 — Planned Phase 11: Download Management & Progress with 5 plans across 3 waves.
+**Last activity:** 2026-02-28 — Completed 12-04: Combined download+process flow with error handling polish.
 
 ## Progress
 
@@ -25,7 +25,34 @@ v3.0 Downloader
 Phase 9:  Downloader Core Infrastructure    [██████████] 100% (4/4 plans) — COMPLETE
 Phase 10: Platform Handlers                 [██████████] 100% (5/5 plans) — COMPLETE
 Phase 11: Download Management & Progress    [██████████] 100% (5/5 plans) — COMPLETE
-Phase 12: Integration & Polish              [░░░░░░░░░░] 0% (0/N plans)
+Phase 12: Integration & Polish              [██████████] 100% (4/4 plans) — COMPLETE
+
+**Note:** Plan 12-03 functionality (cancel, progress, /downloads) was implemented in 12-01. Plan 12-03 served as verification.
+
+**12-04: Download + Convert Combined Flow** — COMPLETE
+- Combined download+process options: Video+Nota de Video, Video+Extraer Audio, Audio+Nota de Voz
+- `_start_combined_download()` for seamless download-to-process workflow
+- Process helpers: `_process_to_videonote()`, `_process_extract_audio()`, `_process_to_voicenote()`
+- Comprehensive error handling with `_get_error_message_for_exception()`
+- Platform-specific error messages: YouTube age-restricted, Instagram private, TikTok slideshows, etc.
+- 31 integration tests covering all download flows
+- Updated /start help text with download commands
+
+**12-03: Cancel and Progress Enhancement** — COMPLETE (verified)
+- Cancel button with `download:cancel:{correlation_id}` callback pattern
+- `handle_download_cancel_callback()` with race condition handling
+- Enhanced progress display with platform name, percentage bar, speed, ETA
+- Rate-limited progress updates (1 second minimum between edits)
+- `/downloads` command showing active and recent downloads
+- Status tracking: downloading, completed, error, cancelled
+- Cancel buttons in /downloads list for active downloads
+
+**12-02: Post-Download Integration** — COMPLETE
+- DownloadSession class for ephemeral download tracking (MAX_RECENT=5)
+- Post-download video menu: video note conversion, audio extraction, format conversion
+- Post-download audio menu: voice note, format conversion, bass/treble boost, denoise, compress, normalize, equalize
+- Recent downloads list with reprocess functionality
+- All handlers registered in main.py with correct callback patterns
 ```
 
 ## Accumulated Context
@@ -184,6 +211,25 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 - send_downloaded_file() helper for sending downloaded content
 - 10 comprehensive integration tests
 
+**12-01: Download Command and URL Detection** — COMPLETE
+- `/download <url>` command handler with format selection menu
+- Automatic URL detection in messages with inline menu
+- Format selection (video/audio) with callback handlers
+- Large download confirmation (>50MB) with warning prompt
+- Cancel button during active download
+- Progress tracking integration with throttled updates
+- Post-download menu for video processing options
+- Integration with DownloadFacade and PlatformRouter
+
+**12-03: Cancel and Progress Enhancement** — COMPLETE (verified)
+- Cancel button with `download:cancel:{correlation_id}` callback pattern
+- `handle_download_cancel_callback()` with race condition handling
+- Enhanced progress display with platform name, percentage bar, speed, ETA
+- Rate-limited progress updates (1 second minimum between edits)
+- `/downloads` command showing active and recent downloads
+- Status tracking: downloading, completed, error, cancelled
+- Cancel buttons in /downloads list for active downloads
+
 ## Decisions Made
 
 **v3.0 Decisions (Validated):**
@@ -290,6 +336,32 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 73. **Specific exception handling** — FileTooLargeError, URLValidationError, UnsupportedURLError caught and converted to Spanish messages
 74. **Handler integration with URL detection** — Automatic URL detection and download initiation in message handlers
 
+**12-01 Implementation Decisions:**
+75. **Handler registration order matters** — Commands before callbacks before messages to avoid routing conflicts
+76. **Callback pattern: action:type:id** — Consistent with existing video/audio menu patterns (e.g., `download:video:{correlation_id}`)
+77. **Size check before download** — Use PlatformRouter to extract metadata and check filesize before downloading
+78. **Conservative approach for unknown sizes** — Show confirmation when size unknown (be safe)
+79. **Post-download integration** — Video downloads show existing video menu for further processing
+
+**12-02 Implementation Decisions:**
+84. **Specific callback patterns for post-download actions** — Different patterns for format selection, intensity selection, and main actions to ensure correct routing
+85. **Reused existing processing infrastructure** — VideoProcessor, AudioEnhancer, AudioEffects, etc. rather than duplicating logic
+86. **Ephemeral session storage** — No persistence for privacy (INT-04), max 5 recent downloads (UI-06)
+87. **Handler registration order matters** — Most specific patterns (format/intensity) before general action handlers
+
+**12-03 Implementation Decisions:**
+80. **Cancel via facade reference in user_data** — Store `download_facade_{correlation_id}` for cancellation access
+81. **Rate limiting for progress updates** — 1 second minimum between message edits to avoid Telegram rate limits
+82. **Status tracking in user_data** — `download_status_{correlation_id}` tracks lifecycle: downloading → completed/error/cancelled
+83. **Race condition handling** — Check current status before/after cancel to handle "already completed" scenarios
+
+**12-04 Implementation Decisions:**
+88. **Extended callback pattern for combined flows** — `download:format:action:correlation_id` for download+process
+89. **Centralized error message helper** — `_get_error_message_for_exception()` for consistent Spanish error messages
+90. **Fallback on processing failure** — Send original file if post-download processing fails
+91. **Platform-specific error detection** — Parse error messages for platform-specific handling (YouTube age, Instagram private, etc.)
+92. **Combined flow UX** — Two-step messaging: "Downloading..." then "Converting..." for clarity
+
 ## Blockers
 
 (None)
@@ -305,7 +377,11 @@ Phase 12: Integration & Polish              [░░░░░░░░░░] 0% 
 7. ~~11-01: Download Manager~~ DONE
 8. ~~11-02: Progress Tracker~~ DONE
 9. ~~Phase 11: Download Management & Progress~~ DONE (5/5 plans)
-10. **Phase 12: Integration & Polish** — NEXT
+10. ~~12-01: Download Command and URL Detection~~ DONE
+11. ~~12-02: Post-Download Integration~~ DONE
+12. ~~12-03: Cancel and Progress Enhancement~~ DONE (verified)
+13. ~~12-04: Download + Convert Combined Flow~~ DONE
+14. **v3.0 Downloader COMPLETE** — Ready for release
 
 ## Quick Tasks Completed
 
@@ -333,4 +409,4 @@ See: .planning/ROADMAP.md (v3.0 phases 9-12)
 
 ---
 
-*Last updated: 2026-02-23 after quick task: Video-Audio Merge & Interactive Split*
+*Last updated: 2026-02-28 after completing 12-04: Download + Convert Combined Flow*
