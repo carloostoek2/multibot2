@@ -6041,18 +6041,24 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
     # Detect URLs in message
     urls = url_detector.extract_urls(message_text, update.message.entities)
     if not urls:
-        return  # No URLs, let other handlers process
+        # No URLs, delegate to split text input handler
+        await handle_split_text_input(update, context)
+        return
 
     # Process first URL
     url = urls[0]
 
     # Validate URL
     if not url_detector.validate_url(url):
-        return  # Not a valid URL, ignore
+        # Not a valid URL, delegate to split text input handler
+        await handle_split_text_input(update, context)
+        return
 
     # Check if URL is supported
     if not url_detector.is_supported(url):
-        return  # Not a supported video URL, ignore silently
+        # Not a supported video URL, delegate to split text input handler
+        await handle_split_text_input(update, context)
+        return
 
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] URL detected in message from user {user_id}: {url}")
@@ -6130,9 +6136,11 @@ async def handle_download_format_callback(update: Update, context: ContextTypes.
 
     try:
         # Extract metadata using PlatformRouter
+        from bot.downloaders import DownloadOptions
         router = PlatformRouter()
         route_result = await router.route(url)
-        metadata = await route_result.downloader.get_metadata(url)
+        options = DownloadOptions(output_path="/tmp")
+        metadata = await route_result.downloader.extract_metadata(url, options)
 
         # Get file size
         size = metadata.get('filesize') or metadata.get('filesize_approx', 0)
@@ -6355,25 +6363,25 @@ async def _start_download(
     except FileTooLargeError as e:
         logger.warning(f"[{correlation_id}] File too large: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        await query.edit_message_text(e.to_user_message())
     except URLValidationError as e:
         logger.warning(f"[{correlation_id}] URL validation error: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        await query.edit_message_text(e.to_user_message())
     except UnsupportedURLError as e:
         logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        await query.edit_message_text(e.to_user_message())
     except DownloadError as e:
         logger.error(f"[{correlation_id}] Download error: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
         error_msg = _get_error_message_for_exception(e, url, correlation_id)
-        await query.edit_text(error_msg)
+        await query.edit_message_text(error_msg)
     except Exception as e:
         logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
         error_msg = _get_error_message_for_exception(e, url, correlation_id)
-        await query.edit_text(error_msg)
+        await query.edit_message_text(error_msg)
     finally:
         # Clean up facade reference but keep status for /downloads command
         context.user_data.pop(f"download_facade_{correlation_id}", None)
@@ -6618,25 +6626,25 @@ async def _start_combined_download(
     except FileTooLargeError as e:
         logger.warning(f"[{correlation_id}] File too large: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        await query.edit_message_text(e.to_user_message())
     except URLValidationError as e:
         logger.warning(f"[{correlation_id}] URL validation error: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        await query.edit_message_text(e.to_user_message())
     except UnsupportedURLError as e:
         logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await query.edit_text(e.to_user_message())
+        await query.edit_message_text(e.to_user_message())
     except DownloadError as e:
         logger.error(f"[{correlation_id}] Download error: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
         error_msg = _get_error_message_for_exception(e, url, correlation_id)
-        await query.edit_text(error_msg)
+        await query.edit_message_text(error_msg)
     except Exception as e:
         logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
         error_msg = _get_error_message_for_exception(e, url, correlation_id)
-        await query.edit_text(error_msg)
+        await query.edit_message_text(error_msg)
     finally:
         # Clean up facade reference but keep status for /downloads command
         context.user_data.pop(f"download_facade_{correlation_id}", None)

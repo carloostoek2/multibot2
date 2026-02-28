@@ -187,13 +187,13 @@ def main() -> None:
     # Add handler for audio files (MP3, OGG, etc.)
     application.add_handler(MessageHandler(filters.AUDIO, handle_audio_file))
 
-    # Add handler for text messages during split sessions
-    # Must be after VIDEO and AUDIO handlers to not interfere
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_split_text_input))
-
     # URL detection handler - detects URLs in regular text messages
-    # Must be after command handlers and specific text handlers
+    # Must be registered BEFORE handle_split_text_input to check for URLs first
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url_detection))
+
+    # Add handler for text messages during split sessions
+    # Must be after VIDEO, AUDIO, and URL detection handlers
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_split_text_input))
 
     # Add global error handler
     application.add_error_handler(error_handler)
