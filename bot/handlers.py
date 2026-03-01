@@ -3236,6 +3236,7 @@ def _get_video_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Dividir Video", callback_data="video_action:split"),
         ],
         [
+            InlineKeyboardButton("Unir Videos", callback_data="video_action:join"),
             InlineKeyboardButton("Merge con Audio", callback_data="video_action:merge_audio"),
         ],
     ]
@@ -5442,6 +5443,66 @@ async def handle_video_menu_callback(update: Update, context: ContextTypes.DEFAU
             "Envía /cancel para cancelar."
         )
         logger.info(f"[{correlation_id}] Waiting for audio file from user {user_id} for merge")
+
+    elif action == "join":
+        # Start video join session with current video as first video
+        await query.edit_message_text("🎬 Iniciando sesión de unión de videos...")
+
+        # Check if there's already an active join session
+        if context.user_data.get("join_session"):
+            await query.edit_message_text(
+                "Ya tienes una sesión de unión de videos activa. "
+                "Usa /done para unir o /cancel para cancelarla primero."
+            )
+            return
+
+        # Download the current video to temp directory
+        with TempManager() as temp_mgr:
+            try:
+                input_filename = f"join_{user_id}_video01_{correlation_id}.mp4"
+                input_path = temp_mgr.get_temp_path(input_filename)
+
+                # Download video
+                logger.info(f"[{correlation_id}] Downloading video for join session from user {user_id}")
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+                # Validate video
+                is_valid, error_msg = validate_video_file(str(input_path))
+                if not is_valid:
+                    logger.warning(f"[{correlation_id}] Video validation failed: {error_msg}")
+                    await query.edit_message_text(f"Error: {error_msg}")
+                    return
+
+                # Initialize join session
+                context.user_data["join_session"] = {
+                    "videos": [str(input_path)],
+                    "temp_mgr": temp_mgr,
+                    "last_activity": asyncio.get_event_loop().time(),
+                    "correlation_id": correlation_id,
+                }
+
+                # Track the file
+                temp_mgr.track_file(str(input_path))
+
+                await query.edit_message_text(
+                    "🎬 *Modo unión de videos activado*\n\n"
+                    "El video actual es el **primer video** en la lista.\n"
+                    "Envíame más videos para unir (máximo 10 en total).\n"
+                    "Los videos se unirán en el orden en que los envíes.\n\n"
+                    "Comandos disponibles:\n"
+                    "• /done - Unir todos los videos\n"
+                    "• /cancel - Cancelar la sesión\n\n"
+                    f"Actualmente tienes: *1 video*",
+                    parse_mode="Markdown"
+                )
+                logger.info(f"[{correlation_id}] Join session started for user {user_id} with current video")
+
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to start join session: {e}")
+                await query.edit_message_text(
+                    "Error al iniciar la sesión de unión. Por favor intenta de nuevo."
+                )
 
     else:
         logger.warning(f"[{correlation_id}] Unknown video menu action: {action}")
