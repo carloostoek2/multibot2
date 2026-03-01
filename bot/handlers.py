@@ -4449,9 +4449,13 @@ async def handle_audio_menu_callback(update: Update, context: ContextTypes.DEFAU
 
     elif action == "join":
         # Start audio join session
-        context.user_data["join_audio_session"] = True
-        context.user_data["join_audio_files"] = []
-        context.user_data["join_audio_correlation_id"] = correlation_id
+        temp_mgr = TempManager()
+        context.user_data["join_audio_session"] = {
+            "audios": [],
+            "correlation_id": correlation_id,
+            "last_activity": time.time(),
+            "temp_mgr": temp_mgr,
+        }
         await query.edit_message_text(
             "¡Perfecto! Ahora envíame los archivos de audio que quieres unir (uno por uno).\n\n"
             "Cuando termines, envía /done para procesar.\n"
