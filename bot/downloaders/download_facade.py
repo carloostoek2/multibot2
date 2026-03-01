@@ -66,6 +66,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from .base import BaseDownloader, DownloadOptions, TELEGRAM_MAX_FILE_SIZE
 from .download_manager import DownloadManager, DownloadStatus, DownloadTask
 from .download_lifecycle import DownloadLifecycle, DownloadResult as LifecycleResult
+from . import DownloadResult as BaseDownloadResult
 from .exceptions import (
     DownloadError,
     FileTooLargeError,
@@ -312,6 +313,15 @@ class DownloadFacade:
                 # Convert result to LifecycleResult format
                 if isinstance(result, LifecycleResult):
                     return result
+                elif isinstance(result, BaseDownloadResult):
+                    # Handle DownloadResult from bot.downloaders module
+                    return LifecycleResult(
+                        success=result.success,
+                        file_path=result.file_path,
+                        metadata=result.metadata,
+                        correlation_id=correlation_id,
+                        temp_dir=temp_dir
+                    )
                 elif isinstance(result, dict):
                     return LifecycleResult(
                         success=result.get('success', True),
