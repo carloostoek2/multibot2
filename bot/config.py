@@ -70,6 +70,11 @@ class BotConfig:
     DOWNLOAD_MAX_RETRIES: int = 3
     DOWNLOAD_RETRY_DELAY: int = 2  # seconds between retries
 
+    # Cookie file for authenticated downloads (YouTube, etc.)
+    # Path to a cookies.txt file exported from browser
+    # See: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
+    COOKIES_FILE: Optional[str] = None
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -261,6 +266,7 @@ def load_config() -> BotConfig:
         DOWNLOAD_MAX_CONCURRENT=_int_env("DOWNLOAD_MAX_CONCURRENT", 5),
         DOWNLOAD_MAX_RETRIES=_int_env("DOWNLOAD_MAX_RETRIES", 3),
         DOWNLOAD_RETRY_DELAY=_int_env("DOWNLOAD_RETRY_DELAY", 2),
+        COOKIES_FILE=os.getenv("COOKIES_FILE") or None,
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
     )

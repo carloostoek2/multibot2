@@ -5814,6 +5814,10 @@ def _get_error_message_for_exception(e: Exception, url: str, correlation_id: str
             return "Este video no está disponible."
         if "private" in error_msg:
             return "Este video es privado."
+        if "sign in" in error_msg or "bot" in error_msg or "confirm" in error_msg:
+            return "YouTube requiere verificación. Contacta al administrador para configurar cookies."
+        if "cookie" in error_msg or "authentication" in error_msg:
+            return "YouTube requiere autenticación. Contacta al administrador."
 
     if platform == "Instagram":
         if "private" in error_msg:
@@ -5834,6 +5838,8 @@ def _get_error_message_for_exception(e: Exception, url: str, correlation_id: str
             return "Este contenido está restringido."
         if "deleted" in error_msg or "not found" in error_msg:
             return "Este tweet no existe o fue eliminado."
+        if "suspended" in error_msg:
+            return "Esta cuenta de X/Twitter está suspendida."
 
     if platform == "Facebook":
         if "login" in error_msg or "authent" in error_msg:
@@ -6054,11 +6060,14 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
         await handle_split_text_input(update, context)
         return
 
-    # Check if URL is supported
-    if not url_detector.is_supported(url):
-        # Not a supported video URL, delegate to split text input handler
-        await handle_split_text_input(update, context)
-        return
+    # Check if URL is a valid http/https URL
+    # Note: We accept any URL here because yt-dlp supports 1000+ sites
+    # The actual download will fail gracefully if the URL is not supported
+    url_type = url_detector.classify_url(url)
+    if url_type == url_detector.URLType.UNKNOWN:
+        # For unknown URLs, we'll still try to process them with yt-dlp
+        # yt-dlp has a generic extractor that works with many sites
+        logger.debug(f"URL type UNKNOWN, will attempt generic extraction: {url}")
 
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] URL detected in message from user {user_id}: {url}")

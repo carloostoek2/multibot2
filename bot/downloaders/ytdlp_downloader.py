@@ -152,10 +152,18 @@ class YtDlpDownloader(BaseDownloader):
 
         def _extract() -> dict[str, Any]:
             """Synchronous extraction function."""
+            from bot.config import config
+            import os
+
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
             }
+
+            # Add cookies file if configured (for YouTube authentication)
+            if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE):
+                ydl_opts["cookiefile"] = config.COOKIES_FILE
+                logger.debug(f"[{correlation_id}] Using cookies file for metadata: {config.COOKIES_FILE}")
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # process=True for full metadata extraction
@@ -411,6 +419,9 @@ class YtDlpDownloader(BaseDownloader):
         Returns:
             Dictionary of yt-dlp options
         """
+        # Import config here to avoid circular imports
+        from bot.config import config
+
         # Base options
         ydl_opts = {
             "format": options.video_format,
@@ -419,6 +430,15 @@ class YtDlpDownloader(BaseDownloader):
             "no_warnings": True,
             "noplaylist": True,  # Only download single video, not playlists
         }
+
+        # Add cookies file if configured (for YouTube authentication)
+        if config.COOKIES_FILE:
+            import os
+            if os.path.exists(config.COOKIES_FILE):
+                ydl_opts["cookiefile"] = config.COOKIES_FILE
+                logger.debug(f"[{correlation_id}] Using cookies file: {config.COOKIES_FILE}")
+            else:
+                logger.warning(f"Cookies file not found: {config.COOKIES_FILE}")
 
         # Add progress hook if callback provided
         if options.progress_callback:
