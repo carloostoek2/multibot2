@@ -2111,17 +2111,12 @@ async def handle_video_split_start(update: Update, context: ContextTypes.DEFAULT
     """
     user_id = update.effective_user.id
     query = update.callback_query
-    callback_data = query.data
     correlation_id = str(uuid.uuid4())[:8]
 
-    # Parse video file_id from callback (format: video_split:<file_id>)
-    if not callback_data.startswith("video_split:"):
-        logger.warning(f"[{correlation_id}] Invalid callback data for video split")
-        return
-
-    file_id = callback_data.split(":", 1)[1]
+    # Get file_id from context (set by handle_video_menu_callback)
+    file_id = context.user_data.get("video_menu_file_id")
     if not file_id:
-        logger.error(f"[{correlation_id}] No file_id in callback data")
+        logger.error(f"[{correlation_id}] No file_id found in context for video split")
         await query.edit_message_text("Error: no se encontró el video.")
         return
 
@@ -2324,17 +2319,12 @@ async def handle_audio_split_start(update: Update, context: ContextTypes.DEFAULT
     """
     user_id = update.effective_user.id
     query = update.callback_query
-    callback_data = query.data
     correlation_id = str(uuid.uuid4())[:8]
 
-    # Parse audio file_id from callback (format: audio_split:<file_id>)
-    if not callback_data.startswith("audio_split:"):
-        logger.warning(f"[{correlation_id}] Invalid callback data for audio split")
-        return
-
-    file_id = callback_data.split(":", 1)[1]
+    # Get file_id from context (set by handle_audio_menu_callback)
+    file_id = context.user_data.get("audio_menu_file_id")
     if not file_id:
-        logger.error(f"[{correlation_id}] No file_id in callback data")
+        logger.error(f"[{correlation_id}] No file_id found in context for audio split")
         await query.edit_message_text("Error: no se encontró el audio.")
         return
 
