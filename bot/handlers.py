@@ -2113,6 +2113,9 @@ async def handle_video_split_start(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     correlation_id = str(uuid.uuid4())[:8]
 
+    # Respond to callback immediately to avoid timeout
+    await query.answer()
+
     # Get file_id from context (set by handle_video_menu_callback)
     file_id = context.user_data.get("video_menu_file_id")
     if not file_id:
@@ -2131,45 +2134,48 @@ async def handle_video_split_start(update: Update, context: ContextTypes.DEFAULT
 
     await query.edit_message_text(
         "✂️ *Dividir Video*\n\n"
-        "Primero necesito saber la duración del video para ayudarte.\n\n"
-        "⏳ Procesando...",
+        "⏳ Descargando y analizando el video...\n"
+        "Este proceso puede tomar unos segundos.",
         parse_mode="Markdown"
     )
 
     # Download video and get duration
-    with TempManager() as temp_mgr:
-        try:
-            input_filename = f"split_video_{user_id}_{correlation_id}.mp4"
-            input_path = temp_mgr.get_temp_path(input_filename)
+    temp_mgr = TempManager()
+    try:
+        input_filename = f"split_video_{user_id}_{correlation_id}.mp4"
+        input_path = temp_mgr.get_temp_path(input_filename)
 
-            # Download video
-            file = await context.bot.get_file(file_id)
-            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+        # Download video
+        file = await context.bot.get_file(file_id)
+        await _download_with_retry(file, input_path, correlation_id=correlation_id)
 
-            # Get duration
-            splitter = VideoSplitter(str(input_path), str(temp_mgr.get_temp_path("output")))
-            duration = splitter.get_video_duration()
+        # Get duration
+        splitter = VideoSplitter(str(input_path), str(temp_mgr.get_temp_path("output")))
+        duration = splitter.get_video_duration()
 
-            context.user_data["split_video_session"]["duration"] = duration
-            context.user_data["split_video_session"]["input_path"] = input_path
+        # Store in session and keep temp_mgr reference
+        context.user_data["split_video_session"]["duration"] = duration
+        context.user_data["split_video_session"]["input_path"] = input_path
+        context.user_data["split_video_session"]["temp_mgr"] = temp_mgr
 
-            minutes = int(duration // 60)
-            seconds = int(duration % 60)
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
 
-            await query.edit_message_text(
-                f"✂️ *Dividir Video*\n\n"
-                f"📊 Duración del video: *{minutes}m {seconds}s*\n\n"
-                f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
-                f"Puede ser un número decimal (ej: 30.5)",
-                parse_mode="Markdown"
-            )
+        await query.edit_message_text(
+            f"✂️ *Dividir Video*\n\n"
+            f"📊 Duración del video: *{minutes}m {seconds}s*\n\n"
+            f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
+            f"Puede ser un número decimal (ej: 30.5)",
+            parse_mode="Markdown"
+        )
 
-        except Exception as e:
-            logger.error(f"[{correlation_id}] Error preparing video split: {e}")
-            await query.edit_message_text(
-                "Error al preparar el video. Intenta de nuevo."
-            )
-            context.user_data.pop("split_video_session", None)
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Error preparing video split: {e}")
+        await query.edit_message_text(
+            "Error al preparar el video. Intenta de nuevo."
+        )
+        context.user_data.pop("split_video_session", None)
+        temp_mgr.cleanup()
 
 
 async def handle_video_split_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2321,6 +2327,9 @@ async def handle_audio_split_start(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     correlation_id = str(uuid.uuid4())[:8]
 
+    # Respond to callback immediately to avoid timeout
+    await query.answer()
+
     # Get file_id from context (set by handle_audio_menu_callback)
     file_id = context.user_data.get("audio_menu_file_id")
     if not file_id:
@@ -2340,45 +2349,48 @@ async def handle_audio_split_start(update: Update, context: ContextTypes.DEFAULT
 
     await query.edit_message_text(
         "✂️ *Dividir Audio*\n\n"
-        "Primero necesito saber la duración del audio para ayudarte.\n\n"
-        "⏳ Procesando...",
+        "⏳ Descargando y analizando el audio...\n"
+        "Este proceso puede tomar unos segundos.",
         parse_mode="Markdown"
     )
 
     # Download audio and get duration
-    with TempManager() as temp_mgr:
-        try:
-            input_filename = f"split_audio_{user_id}_{correlation_id}.audio"
-            input_path = temp_mgr.get_temp_path(input_filename)
+    temp_mgr = TempManager()
+    try:
+        input_filename = f"split_audio_{user_id}_{correlation_id}.mp3"
+        input_path = temp_mgr.get_temp_path(input_filename)
 
-            # Download audio
-            file = await context.bot.get_file(file_id)
-            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+        # Download audio
+        file = await context.bot.get_file(file_id)
+        await _download_with_retry(file, input_path, correlation_id=correlation_id)
 
-            # Get duration
-            splitter = AudioSplitter(str(input_path), str(temp_mgr.get_temp_path("output")))
-            duration = splitter.get_audio_duration()
+        # Get duration
+        splitter = AudioSplitter(str(input_path), str(temp_mgr.get_temp_path("output")))
+        duration = splitter.get_audio_duration()
 
-            context.user_data["split_audio_session"]["duration"] = duration
-            context.user_data["split_audio_session"]["input_path"] = input_path
+        # Store in session and keep temp_mgr reference
+        context.user_data["split_audio_session"]["duration"] = duration
+        context.user_data["split_audio_session"]["input_path"] = input_path
+        context.user_data["split_audio_session"]["temp_mgr"] = temp_mgr
 
-            minutes = int(duration // 60)
-            seconds = int(duration % 60)
+        minutes = int(duration // 60)
+        seconds = int(duration % 60)
 
-            await query.edit_message_text(
-                f"✂️ *Dividir Audio*\n\n"
-                f"📊 Duración del audio: *{minutes}m {seconds}s*\n\n"
-                f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
-                f"Puede ser un número decimal (ej: 30.5)",
-                parse_mode="Markdown"
-            )
+        await query.edit_message_text(
+            f"✂️ *Dividir Audio*\n\n"
+            f"📊 Duración del audio: *{minutes}m {seconds}s*\n\n"
+            f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
+            f"Puede ser un número decimal (ej: 30.5)",
+            parse_mode="Markdown"
+        )
 
-        except Exception as e:
-            logger.error(f"[{correlation_id}] Error preparing audio split: {e}")
-            await query.edit_message_text(
-                "Error al preparar el audio. Intenta de nuevo."
-            )
-            context.user_data.pop("split_audio_session", None)
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Error preparing audio split: {e}")
+        await query.edit_message_text(
+            "Error al preparar el audio. Intenta de nuevo."
+        )
+        context.user_data.pop("split_audio_session", None)
+        temp_mgr.cleanup()
 
 
 async def handle_audio_split_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
