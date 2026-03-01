@@ -2130,6 +2130,7 @@ async def handle_video_split_start(update: Update, context: ContextTypes.DEFAULT
         "file_id": file_id,
         "correlation_id": correlation_id,
         "state": SPLIT_WAITING_START_TIME,
+        "type": "video",
     }
 
     await query.edit_message_text(
