@@ -293,6 +293,8 @@ class DownloadFacade:
         async def download_operation() -> LifecycleResult:
             correlation_id = BaseDownloader._generate_correlation_id()
 
+            logger.debug(f"[{correlation_id}] Creating lifecycle with cleanup_on_success={config.cleanup_on_success}")
+
             lifecycle = DownloadLifecycle(
                 correlation_id=correlation_id,
                 options=options,

@@ -84,20 +84,23 @@ class IsolatedDownload:
     def __init__(
         self,
         correlation_id: str,
-        base_temp_dir: Optional[str] = None
+        base_temp_dir: Optional[str] = None,
+        cleanup_on_exit: bool = True
     ) -> None:
         """Inicializa el contexto de descarga aislada.
 
         Args:
             correlation_id: Identificador único de 8 caracteres
             base_temp_dir: Directorio base opcional para el temporal
+            cleanup_on_exit: Si True, limpia al salir del contexto (default: True)
         """
         self.correlation_id = correlation_id
         self.base_temp_dir = base_temp_dir
+        self._cleanup_on_exit = cleanup_on_exit
         self._temp_dir: Optional[str] = None
         self._created = False
 
-        logger.debug(f"[{correlation_id}] IsolatedDownload creado")
+        logger.debug(f"[{correlation_id}] IsolatedDownload creado (cleanup_on_exit={cleanup_on_exit})")
 
     def __enter__(self) -> str:
         """Entra al contexto y crea el directorio temporal.
@@ -109,9 +112,7 @@ class IsolatedDownload:
         return self._temp_dir
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
-        """Sale del contexto y limpia el directorio temporal.
-
-        La limpieza ocurre independientemente de si hubo excepción.
+        """Sale del contexto y limpia el directorio temporal si está configurado.
 
         Args:
             exc_type: Tipo de excepción (si ocurrió)
@@ -121,7 +122,8 @@ class IsolatedDownload:
         Returns:
             False para no suprimir excepciones
         """
-        self.cleanup()
+        if self._cleanup_on_exit:
+            self.cleanup()
         return False  # No suprimir excepciones
 
     def _create_temp_dir(self) -> None:
@@ -251,7 +253,8 @@ class DownloadLifecycle:
         self.cleanup_on_success = cleanup_on_success
         self.cleanup_on_failure = cleanup_on_failure
 
-        self._isolated = IsolatedDownload(correlation_id)
+        # cleanup_on_exit=False - let execute() handle cleanup based on config
+        self._isolated = IsolatedDownload(correlation_id, cleanup_on_exit=False)
         self._state = DownloadLifecycleState.CREATED
         self._state_history: list[tuple[DownloadLifecycleState, Optional[str]]] = []
         self._cancelled = False
