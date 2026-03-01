@@ -7127,9 +7127,10 @@ def _get_postdownload_video_keyboard(correlation_id: str) -> InlineKeyboardMarku
         ],
         [
             InlineKeyboardButton("Convertir Formato", callback_data=f"postdownload:convert_video:{correlation_id}"),
-            InlineKeyboardButton("Descargas Recientes", callback_data=f"postdownload:recent:{correlation_id}"),
+            InlineKeyboardButton("Unir Videos", callback_data=f"postdownload:join_video:{correlation_id}"),
         ],
         [
+            InlineKeyboardButton("Descargas Recientes", callback_data=f"postdownload:recent:{correlation_id}"),
             InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
     ]
@@ -7333,6 +7334,8 @@ async def handle_postdownload_callback(update: Update, context: ContextTypes.DEF
     elif action == "convert_video":
         reply_markup = _get_postdownload_video_format_keyboard(correlation_id)
         await query.edit_message_text("Selecciona el formato de video:", reply_markup=reply_markup)
+    elif action == "join_video":
+        await _handle_postdownload_join_video(update, context, entry, correlation_id)
     elif action == "recent":
         await handle_recent_downloads(update, context)
     elif action == "back_video":
@@ -7384,6 +7387,50 @@ async def _handle_postdownload_videonote(
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error converting to video note: {e}")
             await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_join_video(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str
+) -> None:
+    """Start a video join session with the downloaded video as the first video."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    logger.info(f"[{correlation_id}] User {user_id} selected 'Join Videos' - starting join session")
+
+    # Check if there's already an active join session
+    if context.user_data.get("join_session"):
+        await query.edit_message_text(
+            "Ya tienes una sesión de unión de videos activa. "
+            "Usa /done para unir o /cancel para cancelarla primero."
+        )
+        return
+
+    # Initialize join session
+    temp_mgr = TempManager()
+    context.user_data["join_session"] = {
+        "videos": [str(file_path)],
+        "temp_mgr": temp_mgr,
+        "last_activity": asyncio.get_event_loop().time(),
+        "correlation_id": correlation_id,
+    }
+
+    # Track the file with temp manager
+    temp_mgr.track_file(str(file_path))
+
+    await query.edit_message_text(
+        "🎬 *Modo unión de videos activado*\n\n"
+        "El video descargado es el **primer video** en la lista.\n"
+        "Envíame más videos para unir (máximo 10 en total).\n"
+        "Los videos se unirán en el orden en que los envíes.\n\n"
+        "Comandos disponibles:\n"
+        "• /done - Unir todos los videos\n"
+        "• /cancel - Cancelar la sesión\n\n"
+        "Actualmente tienes: *1 video*",
+        parse_mode="Markdown"
+    )
+    logger.info(f"[{correlation_id}] Join session started for user {user_id} with downloaded video")
 
 
 async def _handle_postdownload_nothing(
