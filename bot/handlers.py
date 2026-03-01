@@ -1172,11 +1172,10 @@ async def handle_join_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "🎬 *Modo unión de videos activado*\n\n"
         "Envíame los videos que quieres unir (máximo 10).\n"
         "Los videos se unirán en el orden en que los envíes.\n\n"
-        "Comandos disponibles:\n"
-        "• /done - Unir todos los videos\n"
-        "• /cancel - Cancelar la sesión\n\n"
+        "Actualmente tienes: *0 videos*\n\n"
         "Envía el primer video:",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=_get_join_video_keyboard(0)
     )
 
 
@@ -1297,21 +1296,32 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             except Exception:
                 pass
 
-        # Send confirmation
+        # Send confirmation with keyboard
         if video_count == 1:
             await update.message.reply_text(
-                f"Video {video_count} agregado. Envía más videos o usa /done para unir."
+                f"✓ Video {video_count} agregado.\n\n"
+                f"Actualmente tienes: *{video_count} video*\n"
+                f"Envía más videos o presiona el botón para unir:",
+                parse_mode="Markdown",
+                reply_markup=_get_join_video_keyboard(video_count)
             )
         elif video_count < config.JOIN_MIN_VIDEOS:
             remaining = config.JOIN_MIN_VIDEOS - video_count
             await update.message.reply_text(
-                f"Video {video_count} agregado. Necesitas {remaining} video(s) más para unir."
+                f"✓ Video {video_count} agregado.\n\n"
+                f"Necesitas *{remaining}* video(s) más para poder unir.\n"
+                f"Actualmente tienes: *{video_count} videos*",
+                parse_mode="Markdown",
+                reply_markup=_get_join_video_keyboard(video_count)
             )
         else:
             await update.message.reply_text(
-                f"Video {video_count} agregado. "
-                f"Tienes {video_count} video(s). "
-                f"Envía más (máx. {config.JOIN_MAX_VIDEOS}) o usa /done para unir."
+                f"✓ Video {video_count} agregado.\n\n"
+                f"Actualmente tienes: *{video_count} videos*\n"
+                f"Máximo: {config.JOIN_MAX_VIDEOS}\n\n"
+                f"Envía más videos o presiona el botón para unir:",
+                parse_mode="Markdown",
+                reply_markup=_get_join_video_keyboard(video_count)
             )
 
     except Exception as e:
@@ -1506,6 +1516,38 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
+async def handle_join_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback queries from video join session buttons.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    logger.info(f"Join video callback received: {callback_data} from user {user_id}")
+
+    # Parse action from callback data (format: join_video_action:<action>)
+    if not callback_data.startswith("join_video_action:"):
+        logger.warning(f"Unexpected callback data: {callback_data}")
+        return
+
+    action = callback_data.split(":")[1]
+
+    if action == "done":
+        # Delegate to existing done handler
+        await handle_join_done(update, context)
+    elif action == "cancel":
+        # Delegate to existing cancel handler
+        await handle_join_cancel(update, context)
+    else:
+        logger.warning(f"Unknown join video action: {action}")
+
+
 # =============================================================================
 # Audio Join Handlers
 # =============================================================================
@@ -1550,11 +1592,10 @@ async def handle_join_audio_start(update: Update, context: ContextTypes.DEFAULT_
         "🎵 *Modo unión de audio activado*\n\n"
         "Envíame los archivos de audio que quieres unir (máximo 20).\n"
         "Los audios se unirán en el orden en que los envíes.\n\n"
-        "Comandos disponibles:\n"
-        "• /done - Unir todos los audios\n"
-        "• /cancel - Cancelar la sesión\n\n"
+        "Actualmente tienes: *0 audios*\n\n"
         "Envía el primer archivo de audio:",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=_get_join_audio_keyboard(0)
     )
 
 
@@ -1675,21 +1716,32 @@ async def handle_join_audio_file(update: Update, context: ContextTypes.DEFAULT_T
             except Exception:
                 pass
 
-        # Send confirmation
+        # Send confirmation with keyboard
         if audio_count == 1:
             await update.message.reply_text(
-                f"Audio {audio_count} agregado. Envía más audios o usa /done para unir."
+                f"✓ Audio {audio_count} agregado.\n\n"
+                f"Actualmente tienes: *{audio_count} audio*\n"
+                f"Envía más audios o presiona el botón para unir:",
+                parse_mode="Markdown",
+                reply_markup=_get_join_audio_keyboard(audio_count)
             )
         elif audio_count < config.JOIN_MIN_AUDIO_FILES:
             remaining = config.JOIN_MIN_AUDIO_FILES - audio_count
             await update.message.reply_text(
-                f"Audio {audio_count} agregado. Necesitas {remaining} audio(s) más para unir."
+                f"✓ Audio {audio_count} agregado.\n\n"
+                f"Necesitas *{remaining}* audio(s) más para poder unir.\n"
+                f"Actualmente tienes: *{audio_count} audios*",
+                parse_mode="Markdown",
+                reply_markup=_get_join_audio_keyboard(audio_count)
             )
         else:
             await update.message.reply_text(
-                f"Audio {audio_count} agregado. "
-                f"Tienes {audio_count} audio(s). "
-                f"Envía más (máx. {config.JOIN_MAX_AUDIO_FILES}) o usa /done para unir."
+                f"✓ Audio {audio_count} agregado.\n\n"
+                f"Actualmente tienes: *{audio_count} audios*\n"
+                f"Máximo: {config.JOIN_MAX_AUDIO_FILES}\n\n"
+                f"Envía más audios o presiona el botón para unir:",
+                parse_mode="Markdown",
+                reply_markup=_get_join_audio_keyboard(audio_count)
             )
 
     except Exception as e:
@@ -1873,6 +1925,38 @@ async def handle_join_audio_cancel(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text(
         f"Sesión cancelada. {audio_count} audio(s) descartados."
     )
+
+
+async def handle_join_audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback queries from audio join session buttons.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    logger.info(f"Join audio callback received: {callback_data} from user {user_id}")
+
+    # Parse action from callback data (format: join_audio_action:<action>)
+    if not callback_data.startswith("join_audio_action:"):
+        logger.warning(f"Unexpected callback data: {callback_data}")
+        return
+
+    action = callback_data.split(":")[1]
+
+    if action == "done":
+        # Delegate to existing done handler
+        await handle_join_audio_done(update, context)
+    elif action == "cancel":
+        # Delegate to existing cancel handler
+        await handle_join_audio_cancel(update, context)
+    else:
+        logger.warning(f"Unknown join audio action: {action}")
 
 
 async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7346,6 +7430,28 @@ def _get_recent_downloads_keyboard(session, page: int = 0) -> InlineKeyboardMark
     keyboard.append([
         InlineKeyboardButton("Cerrar", callback_data="cancel"),
     ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_join_video_keyboard(video_count: int) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for video join session."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Unir Videos", callback_data="join_video_action:done"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="join_video_action:cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_join_audio_keyboard(audio_count: int) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for audio join session."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Unir Audios", callback_data="join_audio_action:done"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="join_audio_action:cancel"),
+        ],
+    ]
     return InlineKeyboardMarkup(keyboard)
 
 

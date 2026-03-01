@@ -41,6 +41,7 @@ from bot.handlers import (
     handle_video_menu_callback, handle_video_format_selection,
     handle_cancel_callback, handle_back_callback,
     handle_split_text_input,
+    handle_join_video_callback, handle_join_audio_callback,
     handle_download_command, handle_url_detection,
     handle_download_format_callback, handle_download_confirm_callback,
     handle_download_cancel_callback, handle_downloads_command,
@@ -172,6 +173,10 @@ def main() -> None:
     # Video inline menu handlers
     application.add_handler(CallbackQueryHandler(handle_video_menu_callback, pattern="^video_action:"))
     application.add_handler(CallbackQueryHandler(handle_video_format_selection, pattern="^video_(format|audio_format):"))
+
+    # Join session button handlers (for done/cancel buttons)
+    application.add_handler(CallbackQueryHandler(handle_join_video_callback, pattern="^join_video_action:"))
+    application.add_handler(CallbackQueryHandler(handle_join_audio_callback, pattern="^join_audio_action:"))
 
     # /done and /cancel are shared between video join and audio join
     # The handlers check context.user_data to determine which session is active
