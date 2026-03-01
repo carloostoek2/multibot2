@@ -298,15 +298,21 @@ class VideoSplitter:
         output_path = self.output_dir / output_filename
 
         # Build ffmpeg command for extracting time range
+        # Using re-encoding instead of -c copy to avoid keyframe issues
+        # that cause frozen frames or black screens when cutting at non-keyframes
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output if exists
             "-i", str(self.input_path),  # Input file
             "-ss", str(start_time),  # Start time
             "-t", str(duration),  # Duration (end - start)
-            "-c", "copy",  # Copy streams without re-encoding
-            "-map", "0",  # Map all streams from input
-            "-copyts",  # Copy timestamps
+            "-c:v", "libx264",  # Re-encode video for accurate cutting
+            "-preset", "fast",  # Fast encoding preset
+            "-crf", "23",  # Quality setting (lower = better)
+            "-c:a", "aac",  # Re-encode audio
+            "-b:a", "128k",  # Audio bitrate
+            "-pix_fmt", "yuv420p",  # Pixel format for compatibility
+            "-movflags", "+faststart",  # Web optimization
             str(output_path),
         ]
 
