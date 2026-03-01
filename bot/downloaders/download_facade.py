@@ -66,7 +66,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from .base import BaseDownloader, DownloadOptions, TELEGRAM_MAX_FILE_SIZE
 from .download_manager import DownloadManager, DownloadStatus, DownloadTask
 from .download_lifecycle import DownloadLifecycle, DownloadResult as LifecycleResult
-from . import DownloadResult as BaseDownloadResult
+from .types import DownloadResult as BaseDownloadResult
 from .exceptions import (
     DownloadError,
     FileTooLargeError,
