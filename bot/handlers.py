@@ -6343,8 +6343,10 @@ async def _start_download(
         )
 
         # Download with progress callback integration
+        # IMPORTANT: cleanup_on_success=False so file remains for sending
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
+            'cleanup_on_success': False,
         }
 
         result = await facade.download(
@@ -6473,6 +6475,15 @@ async def _send_downloaded_file_with_menu(
 
         logger.info(f"Downloaded file sent to user {update.effective_user.id}")
 
+        # Clean up temp directory after sending
+        if isinstance(result, LifecycleResult) and result.temp_dir:
+            import shutil
+            try:
+                shutil.rmtree(result.temp_dir, ignore_errors=True)
+                logger.debug(f"Cleaned up temp directory: {result.temp_dir}")
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to cleanup temp dir: {cleanup_err}")
+
     except Exception as e:
         logger.error(f"Failed to send downloaded file: {e}")
         await update.callback_query.message.reply_text(
@@ -6593,8 +6604,10 @@ async def _start_combined_download(
         )
 
         # Download with progress callback integration
+        # IMPORTANT: cleanup_on_success=False so file remains for sending
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
+            'cleanup_on_success': False,
         }
 
         result = await facade.download(
