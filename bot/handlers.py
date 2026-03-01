@@ -54,6 +54,7 @@ from bot.downloaders import (
     DownloadFacade,
     download_url,
     URLDetector,
+    URLType,
 )
 from bot.downloaders.exceptions import (
     DownloadError,
@@ -6064,7 +6065,7 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
     # Note: We accept any URL here because yt-dlp supports 1000+ sites
     # The actual download will fail gracefully if the URL is not supported
     url_type = url_detector.classify_url(url)
-    if url_type == url_detector.URLType.UNKNOWN:
+    if url_type == URLType.UNKNOWN:
         # For unknown URLs, we'll still try to process them with yt-dlp
         # yt-dlp has a generic extractor that works with many sites
         logger.debug(f"URL type UNKNOWN, will attempt generic extraction: {url}")
