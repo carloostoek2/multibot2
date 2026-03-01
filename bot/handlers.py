@@ -7123,7 +7123,7 @@ def _get_postdownload_video_keyboard(correlation_id: str) -> InlineKeyboardMarku
             InlineKeyboardButton("Descargas Recientes", callback_data=f"postdownload:recent:{correlation_id}"),
         ],
         [
-            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -7143,7 +7143,7 @@ def _get_postdownload_audio_keyboard(correlation_id: str) -> InlineKeyboardMarku
         ],
         [
             InlineKeyboardButton("Descargas Recientes", callback_data=f"postdownload:recent:{correlation_id}"),
-            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -7162,7 +7162,7 @@ def _get_postdownload_audio_more_keyboard(correlation_id: str) -> InlineKeyboard
         ],
         [
             InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
-            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -7181,7 +7181,7 @@ def _get_postdownload_intensity_keyboard(correlation_id: str, effect_type: str) 
         keyboard.append(row)
     keyboard.append([
         InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
-        InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
     ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -7195,7 +7195,7 @@ def _get_postdownload_effect_strength_keyboard(correlation_id: str, effect_type:
     ]
     keyboard.append([
         InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
-        InlineKeyboardButton("Cerrar", callback_data="cancel"),
+        InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
     ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -7213,7 +7213,7 @@ def _get_postdownload_audio_format_keyboard(correlation_id: str) -> InlineKeyboa
         ],
         [
             InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
-            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -7233,7 +7233,7 @@ def _get_postdownload_video_format_keyboard(correlation_id: str) -> InlineKeyboa
         ],
         [
             InlineKeyboardButton("Volver", callback_data=f"postdownload:back_video:{correlation_id}"),
-            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -7252,7 +7252,7 @@ def _get_postdownload_video_audio_format_keyboard(correlation_id: str) -> Inline
         ],
         [
             InlineKeyboardButton("Volver", callback_data=f"postdownload:back_video:{correlation_id}"),
-            InlineKeyboardButton("Cerrar", callback_data="cancel"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -7331,6 +7331,8 @@ async def handle_postdownload_callback(update: Update, context: ContextTypes.DEF
     elif action == "back_video":
         reply_markup = _get_postdownload_video_keyboard(correlation_id)
         await query.edit_message_text("¿Qué quieres hacer con este video?", reply_markup=reply_markup)
+    elif action == "nothing":
+        await _handle_postdownload_nothing(update, context, entry, correlation_id)
 
 
 async def _handle_postdownload_videonote(
@@ -7375,6 +7377,59 @@ async def _handle_postdownload_videonote(
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error converting to video note: {e}")
             await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_nothing(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str
+) -> None:
+    """Clean up and finish - user selected 'Nothing' (Nada).
+
+    Deletes the downloaded file and cleans up user_data state.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        entry: Download entry with file information
+        correlation_id: Download correlation ID
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    logger.info(f"[{correlation_id}] User {user_id} selected 'Nothing' - cleaning up")
+
+    # Delete the downloaded file
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+            logger.info(f"[{correlation_id}] Deleted file: {file_path}")
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Failed to delete file: {e}")
+
+    # Clean up temp directory if it exists
+    temp_dir = getattr(entry, 'temp_dir', None)
+    if temp_dir and os.path.exists(temp_dir):
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info(f"[{correlation_id}] Cleaned up temp directory: {temp_dir}")
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Failed to cleanup temp dir: {e}")
+
+    # Clean up session
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    session.remove(correlation_id)
+
+    # Clean up user_data
+    for key in list(context.user_data.keys()):
+        if correlation_id in key:
+            context.user_data.pop(key, None)
+
+    await query.edit_message_text(
+        "✓ Archivo eliminado.\n\n"
+        "Envíame otra URL si quieres descargar algo más."
+    )
+    logger.info(f"[{correlation_id}] Cleanup completed for user {user_id}")
 
 
 async def handle_postdownload_audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7445,6 +7500,8 @@ async def handle_postdownload_audio_callback(update: Update, context: ContextTyp
     elif action == "clear_recent":
         session.clear()
         await query.edit_message_text("Lista de descargas recientes limpiada.")
+    elif action == "nothing":
+        await _handle_postdownload_nothing(update, context, entry, correlation_id)
 
 
 async def _handle_postdownload_voicenote(
