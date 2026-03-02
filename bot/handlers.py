@@ -200,6 +200,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     - Convertir Formato: Convert video to different format
     - Dividir Video: Split video into segments
 
+    If there's an active video join session, routes to handle_join_video instead.
+
     Args:
         update: Telegram update object
         context: Telegram context object
@@ -207,6 +209,12 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = update.effective_user.id
     correlation_id = str(uuid.uuid4())[:8]
     logger.info(f"[{correlation_id}] Video received from user {user_id}")
+
+    # Check if there's an active video join session
+    if context.user_data.get("join_session"):
+        logger.info(f"[{correlation_id}] Routing video to join session handler for user {user_id}")
+        await handle_join_video(update, context)
+        return
 
     # Validate file size before showing menu
     video = update.message.video
