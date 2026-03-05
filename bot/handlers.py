@@ -1410,6 +1410,13 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await effective_message.reply_text(space_error)
         return
 
+    # Delete the callback query message (the one with buttons) if it exists
+    if update.callback_query and update.callback_query.message:
+        try:
+            await update.callback_query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete callback message: {e}")
+
     # Send processing message
     processing_message = None
     try:
@@ -1530,6 +1537,13 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "No hay una sesión de unión activa."
             )
         return
+
+    # Delete the callback query message (the one with buttons) if it exists
+    if update.callback_query and update.callback_query.message:
+        try:
+            await update.callback_query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete callback message: {e}")
 
     # Clean up temp files
     video_count = len(session["videos"])
@@ -1844,6 +1858,13 @@ async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_T
             await effective_message.reply_text(space_error)
         return
 
+    # Delete the callback query message (the one with buttons) if it exists
+    if update.callback_query and update.callback_query.message:
+        try:
+            await update.callback_query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete callback message: {e}")
+
     # Send processing message
     processing_message = None
     try:
@@ -1959,6 +1980,13 @@ async def handle_join_audio_cancel(update: Update, context: ContextTypes.DEFAULT
                 "No hay una sesión de unión de audio activa."
             )
         return
+
+    # Delete the callback query message (the one with buttons) if it exists
+    if update.callback_query and update.callback_query.message:
+        try:
+            await update.callback_query.message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete callback message: {e}")
 
     # Clean up temp files
     audio_count = len(session["audios"])
