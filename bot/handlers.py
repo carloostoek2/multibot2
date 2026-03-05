@@ -1345,7 +1345,7 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /done command to complete video or audio joining.
+    """Handle /done command or button to complete video or audio joining.
 
     Joins all collected videos or audios and sends the result.
     Checks for video join session first, then audio join session.
@@ -1357,6 +1357,11 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     logger.info(f"Join done command received from user {user_id}")
 
+    # Determine effective message for replies (handles both command and callback)
+    effective_message = update.message
+    if not effective_message and update.callback_query:
+        effective_message = update.callback_query.message
+
     # Check if there's an active video join session
     session = context.user_data.get("join_session")
     if not session:
@@ -1365,9 +1370,10 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             # Delegate to audio join handler
             await handle_join_audio_done(update, context)
             return
-        await update.message.reply_text(
-            "No hay una sesión de unión activa. Usa /join o /join_audio para comenzar."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                "No hay una sesión de unión activa. Usa /join o /join_audio para comenzar."
+            )
         return
 
     # Check session timeout
@@ -1376,18 +1382,20 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.info(f"Join session expired for user {user_id}")
         session["temp_mgr"].cleanup()
         context.user_data.pop("join_session", None)
-        await update.message.reply_text(
-            "La sesión expiró. Usa /join para comenzar de nuevo."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                "La sesión expiró. Usa /join para comenzar de nuevo."
+            )
         return
 
     # Check minimum videos
     video_count = len(session["videos"])
     if video_count < config.JOIN_MIN_VIDEOS:
-        await update.message.reply_text(
-            f"Necesitas al menos {config.JOIN_MIN_VIDEOS} videos para unir. "
-            f"Actualmente tienes {video_count}."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                f"Necesitas al menos {config.JOIN_MIN_VIDEOS} videos para unir. "
+                f"Actualmente tienes {video_count}."
+            )
         return
 
     # Check disk space before joining
@@ -1398,15 +1406,17 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     has_space, space_error = check_disk_space(required_space)
     if not has_space:
         logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
-        await update.message.reply_text(space_error)
+        if effective_message:
+            await effective_message.reply_text(space_error)
         return
 
     # Send processing message
     processing_message = None
     try:
-        processing_message = await update.message.reply_text(
-            f"Uniendo {video_count} videos... Esto puede tomar un momento."
-        )
+        if effective_message:
+            processing_message = await effective_message.reply_text(
+                f"Uniendo {video_count} videos... Esto puede tomar un momento."
+            )
     except Exception as e:
         logger.warning(f"Could not send processing message to user {user_id}: {e}")
 
@@ -1443,12 +1453,13 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Send joined video
         logger.info(f"Sending joined video to user {user_id}")
         try:
-            with open(output_path, "rb") as video_file:
-                await update.message.reply_video(
-                    video=video_file,
-                    caption=f"Video unido ({video_count} partes)"
-                )
-            logger.info(f"Joined video sent successfully to user {user_id}")
+            if effective_message:
+                with open(output_path, "rb") as video_file:
+                    await effective_message.reply_video(
+                        video=video_file,
+                        caption=f"Video unido ({video_count} partes)"
+                    )
+                logger.info(f"Joined video sent successfully to user {user_id}")
         except Exception as e:
             logger.error(f"Failed to send joined video to user {user_id}: {e}")
             raise
@@ -1489,7 +1500,7 @@ async def handle_join_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /cancel command to cancel a join session.
+    """Handle /cancel command or button to cancel a join session.
 
     Clears session data and cleans up temporary files.
     Checks for video join session first, then audio join session.
@@ -1501,6 +1512,11 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     logger.info(f"Join cancel command received from user {user_id}")
 
+    # Determine effective message for replies (handles both command and callback)
+    effective_message = update.message
+    if not effective_message and update.callback_query:
+        effective_message = update.callback_query.message
+
     # Check if there's an active video join session
     session = context.user_data.get("join_session")
     if not session:
@@ -1509,9 +1525,10 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Delegate to audio join handler
             await handle_join_audio_cancel(update, context)
             return
-        await update.message.reply_text(
-            "No hay una sesión de unión activa."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                "No hay una sesión de unión activa."
+            )
         return
 
     # Clean up temp files
@@ -1519,9 +1536,10 @@ async def handle_join_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     session["temp_mgr"].cleanup()
     context.user_data.pop("join_session", None)
 
-    await update.message.reply_text(
-        f"Sesión cancelada. {video_count} video(s) descartados."
-    )
+    if effective_message:
+        await effective_message.reply_text(
+            f"Sesión cancelada. {video_count} video(s) descartados."
+        )
 
 
 async def handle_join_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1765,7 +1783,7 @@ async def handle_join_audio_file(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /done command to complete audio joining.
+    """Handle /done command or button to complete audio joining.
 
     Joins all collected audio files and sends the result.
 
@@ -1776,14 +1794,20 @@ async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_T
     user_id = update.effective_user.id
     logger.info(f"Join audio done command received from user {user_id}")
 
+    # Determine effective message for replies (handles both command and callback)
+    effective_message = update.message
+    if not effective_message and update.callback_query:
+        effective_message = update.callback_query.message
+
     # Check if there's an active audio join session
     session = context.user_data.get("join_audio_session")
     if not session:
         # No active audio join session - let video join handler check
         # This will be handled by the router in main.py or the video handler
-        await update.message.reply_text(
-            "No hay una sesión de unión de audio activa. Usa /join_audio para comenzar."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                "No hay una sesión de unión de audio activa. Usa /join_audio para comenzar."
+            )
         return
 
     # Check session timeout
@@ -1792,18 +1816,20 @@ async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_T
         logger.info(f"Join audio session expired for user {user_id}")
         session["temp_mgr"].cleanup()
         context.user_data.pop("join_audio_session", None)
-        await update.message.reply_text(
-            "La sesión expiró. Usa /join_audio para comenzar de nuevo."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                "La sesión expiró. Usa /join_audio para comenzar de nuevo."
+            )
         return
 
     # Check minimum audios
     audio_count = len(session["audios"])
     if audio_count < config.JOIN_MIN_AUDIO_FILES:
-        await update.message.reply_text(
-            f"Necesitas al menos {config.JOIN_MIN_AUDIO_FILES} audios para unir. "
-            f"Actualmente tienes {audio_count}."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                f"Necesitas al menos {config.JOIN_MIN_AUDIO_FILES} audios para unir. "
+                f"Actualmente tienes {audio_count}."
+            )
         return
 
     # Check disk space before joining
@@ -1814,15 +1840,17 @@ async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_T
     has_space, space_error = check_disk_space(required_space)
     if not has_space:
         logger.warning(f"Disk space check failed for user {user_id}: {space_error}")
-        await update.message.reply_text(space_error)
+        if effective_message:
+            await effective_message.reply_text(space_error)
         return
 
     # Send processing message
     processing_message = None
     try:
-        processing_message = await update.message.reply_text(
-            f"Uniendo {audio_count} audios... Esto puede tomar un momento."
-        )
+        if effective_message:
+            processing_message = await effective_message.reply_text(
+                f"Uniendo {audio_count} audios... Esto puede tomar un momento."
+            )
     except Exception as e:
         logger.warning(f"Could not send processing message to user {user_id}: {e}")
 
@@ -1859,12 +1887,13 @@ async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_T
         # Send joined audio
         logger.info(f"Sending joined audio to user {user_id}")
         try:
-            with open(output_path, "rb") as audio_file:
-                await update.message.reply_audio(
-                    audio=audio_file,
-                    caption=f"Audio unido ({audio_count} partes)"
-                )
-            logger.info(f"Joined audio sent successfully to user {user_id}")
+            if effective_message:
+                with open(output_path, "rb") as audio_file:
+                    await effective_message.reply_audio(
+                        audio=audio_file,
+                        caption=f"Audio unido ({audio_count} partes)"
+                    )
+                logger.info(f"Joined audio sent successfully to user {user_id}")
         except Exception as e:
             logger.error(f"Failed to send joined audio to user {user_id}: {e}")
             raise
@@ -1905,7 +1934,7 @@ async def handle_join_audio_done(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_join_audio_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /cancel command to cancel an audio join session.
+    """Handle /cancel command or button to cancel an audio join session.
 
     Clears session data and cleans up temporary files.
 
@@ -1916,13 +1945,19 @@ async def handle_join_audio_cancel(update: Update, context: ContextTypes.DEFAULT
     user_id = update.effective_user.id
     logger.info(f"Join audio cancel command received from user {user_id}")
 
+    # Determine effective message for replies (handles both command and callback)
+    effective_message = update.message
+    if not effective_message and update.callback_query:
+        effective_message = update.callback_query.message
+
     # Check if there's an active audio join session
     session = context.user_data.get("join_audio_session")
     if not session:
         # No active audio join session
-        await update.message.reply_text(
-            "No hay una sesión de unión de audio activa."
-        )
+        if effective_message:
+            await effective_message.reply_text(
+                "No hay una sesión de unión de audio activa."
+            )
         return
 
     # Clean up temp files
@@ -1930,9 +1965,10 @@ async def handle_join_audio_cancel(update: Update, context: ContextTypes.DEFAULT
     session["temp_mgr"].cleanup()
     context.user_data.pop("join_audio_session", None)
 
-    await update.message.reply_text(
-        f"Sesión cancelada. {audio_count} audio(s) descartados."
-    )
+    if effective_message:
+        await effective_message.reply_text(
+            f"Sesión cancelada. {audio_count} audio(s) descartados."
+        )
 
 
 async def handle_join_audio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
