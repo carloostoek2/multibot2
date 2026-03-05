@@ -58,8 +58,9 @@ class BotConfig:
     DOWNLOAD_METADATA_TIMEOUT: int = 30  # 30 seconds for metadata extraction
 
     # Quality settings (yt-dlp format strings)
-    DOWNLOAD_VIDEO_FORMAT: str = "best[filesize<50M]/best"
-    DOWNLOAD_AUDIO_FORMAT: str = "bestaudio[filesize<50M]/bestaudio"
+    # Using height and abr limits instead of filesize since filesize is often unknown
+    DOWNLOAD_VIDEO_FORMAT: str = "best[height<=1080]/best[height<=720]/best"
+    DOWNLOAD_AUDIO_FORMAT: str = "bestaudio[abr<=128]/bestaudio"
     DOWNLOAD_AUDIO_QUALITY: str = "320"  # MP3 bitrate
     DOWNLOAD_VIDEO_PREFERENCE: str = "mp4"  # Preferred container
 
