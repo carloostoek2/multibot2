@@ -163,10 +163,15 @@ class YtDlpDownloader(BaseDownloader):
             # Add cookies file if configured (for YouTube authentication)
             logger.info(f"[{correlation_id}] COOKIES_FILE config value: {config.COOKIES_FILE}")
             if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE):
-                ydl_opts["cookiefile"] = config.COOKIES_FILE
-                logger.info(f"[{correlation_id}] Using cookies file for metadata: {config.COOKIES_FILE}")
+                # Check file is not empty (yt-dlp fails on empty files)
+                file_size = os.path.getsize(config.COOKIES_FILE)
+                if file_size > 0:
+                    ydl_opts["cookiefile"] = config.COOKIES_FILE
+                    logger.info(f"[{correlation_id}] Using cookies file for metadata: {config.COOKIES_FILE} ({file_size} bytes)")
+                else:
+                    logger.warning(f"[{correlation_id}] Cookies file is empty, skipping: {config.COOKIES_FILE}")
             else:
-                logger.warning(f"[{correlation_id}] Cookies file not found or not configured: {config.COOKIES_FILE}")
+                logger.info(f"[{correlation_id}] No cookies file configured or not found, proceeding without cookies")
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # process=True for full metadata extraction
@@ -442,8 +447,13 @@ class YtDlpDownloader(BaseDownloader):
         if config.COOKIES_FILE:
             import os
             if os.path.exists(config.COOKIES_FILE):
-                ydl_opts["cookiefile"] = config.COOKIES_FILE
-                logger.info(f"[{correlation_id}] Using cookies file: {config.COOKIES_FILE}")
+                # Check file is not empty (yt-dlp fails on empty files)
+                file_size = os.path.getsize(config.COOKIES_FILE)
+                if file_size > 0:
+                    ydl_opts["cookiefile"] = config.COOKIES_FILE
+                    logger.info(f"[{correlation_id}] Using cookies file: {config.COOKIES_FILE} ({file_size} bytes)")
+                else:
+                    logger.warning(f"[{correlation_id}] Cookies file is empty, skipping: {config.COOKIES_FILE}")
             else:
                 logger.warning(f"[{correlation_id}] Cookies file not found: {config.COOKIES_FILE}")
 
