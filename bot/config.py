@@ -232,17 +232,26 @@ class BotConfig:
 
         logger = logging.getLogger(__name__)
 
+        logger.info(f"[COOKIES] COOKIES_FILE configured: {self.COOKIES_FILE}")
+        logger.info(f"[COOKIES] COOKIES_CONTENT_BASE64 has value: {bool(self.COOKIES_CONTENT_BASE64)}")
+        if self.COOKIES_CONTENT_BASE64:
+            logger.info(f"[COOKIES] COOKIES_CONTENT_BASE64 length: {len(self.COOKIES_CONTENT_BASE64)}")
+
         # Skip if COOKIES_FILE is already configured and exists
         if self.COOKIES_FILE and os.path.exists(self.COOKIES_FILE):
+            logger.info(f"[COOKIES] Using existing cookies file: {self.COOKIES_FILE}")
             return
 
         # Skip if no base64 content provided
         if not self.COOKIES_CONTENT_BASE64:
+            logger.info("[COOKIES] No COOKIES_CONTENT_BASE64 provided, skipping")
             return
 
         try:
+            logger.info("[COOKIES] Attempting to decode base64 cookies...")
             # Decode base64 content
             cookies_content = base64.b64decode(self.COOKIES_CONTENT_BASE64).decode('utf-8')
+            logger.info(f"[COOKIES] Decoded {len(cookies_content)} bytes of cookie content")
 
             # Write to temporary location
             cookies_path = "/tmp/cookies.txt"
@@ -253,10 +262,10 @@ class BotConfig:
             # Need to use object.__setattr__ since the dataclass is frozen
             object.__setattr__(self, "COOKIES_FILE", cookies_path)
 
-            logger.info(f"Cookies file created from base64 at {cookies_path}")
+            logger.info(f"[COOKIES] SUCCESS: Cookies file created from base64 at {cookies_path}")
 
         except Exception as e:
-            logger.warning(f"Failed to decode cookies from base64: {e}")
+            logger.error(f"[COOKIES] ERROR: Failed to decode cookies from base64: {e}")
 
 
 def load_config() -> BotConfig:

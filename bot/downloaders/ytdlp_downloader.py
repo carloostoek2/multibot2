@@ -161,9 +161,12 @@ class YtDlpDownloader(BaseDownloader):
             }
 
             # Add cookies file if configured (for YouTube authentication)
+            logger.info(f"[{correlation_id}] COOKIES_FILE config value: {config.COOKIES_FILE}")
             if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE):
                 ydl_opts["cookiefile"] = config.COOKIES_FILE
-                logger.debug(f"[{correlation_id}] Using cookies file for metadata: {config.COOKIES_FILE}")
+                logger.info(f"[{correlation_id}] Using cookies file for metadata: {config.COOKIES_FILE}")
+            else:
+                logger.warning(f"[{correlation_id}] Cookies file not found or not configured: {config.COOKIES_FILE}")
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # process=True for full metadata extraction
@@ -431,14 +434,18 @@ class YtDlpDownloader(BaseDownloader):
             "noplaylist": True,  # Only download single video, not playlists
         }
 
+        logger.info(f"[{correlation_id}] Building yt-dlp options with video_format: {options.video_format}")
+        logger.info(f"[{correlation_id}] Building yt-dlp options with audio_format: {options.audio_format}")
+
         # Add cookies file if configured (for YouTube authentication)
+        logger.info(f"[{correlation_id}] Checking cookies: COOKIES_FILE={config.COOKIES_FILE}")
         if config.COOKIES_FILE:
             import os
             if os.path.exists(config.COOKIES_FILE):
                 ydl_opts["cookiefile"] = config.COOKIES_FILE
-                logger.debug(f"[{correlation_id}] Using cookies file: {config.COOKIES_FILE}")
+                logger.info(f"[{correlation_id}] Using cookies file: {config.COOKIES_FILE}")
             else:
-                logger.warning(f"Cookies file not found: {config.COOKIES_FILE}")
+                logger.warning(f"[{correlation_id}] Cookies file not found: {config.COOKIES_FILE}")
 
         # Add progress hook if callback provided
         if options.progress_callback:
