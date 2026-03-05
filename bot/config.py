@@ -75,6 +75,10 @@ class BotConfig:
     # See: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
     COOKIES_FILE: Optional[str] = None
 
+    # Base64-encoded cookies content (for Railway deployment without volumes)
+    # Use: base64 cookies.txt | tr -d '\n' to generate
+    COOKIES_CONTENT_BASE64: Optional[str] = None
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -210,6 +214,49 @@ class BotConfig:
                 "Configuration validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
             )
 
+        # Setup cookies from base64 if provided (for Railway deployment)
+        self._setup_cookies_from_base64()
+
+    def _setup_cookies_from_base64(self) -> None:
+        """Create cookies file from base64-encoded content.
+
+        This allows deploying to Railway without volumes by encoding
+        the cookies.txt file as a base64 environment variable.
+
+        If COOKIES_CONTENT_BASE64 is set and COOKIES_FILE is not,
+        decodes the base64 content and saves it to a temporary file.
+        """
+        import base64
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Skip if COOKIES_FILE is already configured and exists
+        if self.COOKIES_FILE and os.path.exists(self.COOKIES_FILE):
+            return
+
+        # Skip if no base64 content provided
+        if not self.COOKIES_CONTENT_BASE64:
+            return
+
+        try:
+            # Decode base64 content
+            cookies_content = base64.b64decode(self.COOKIES_CONTENT_BASE64).decode('utf-8')
+
+            # Write to temporary location
+            cookies_path = "/tmp/cookies.txt"
+            with open(cookies_path, "w", encoding="utf-8") as f:
+                f.write(cookies_content)
+
+            # Update COOKIES_FILE to point to the decoded file
+            # Need to use object.__setattr__ since the dataclass is frozen
+            object.__setattr__(self, "COOKIES_FILE", cookies_path)
+
+            logger.info(f"Cookies file created from base64 at {cookies_path}")
+
+        except Exception as e:
+            logger.warning(f"Failed to decode cookies from base64: {e}")
+
 
 def load_config() -> BotConfig:
     """Load configuration from environment variables.
@@ -267,6 +314,7 @@ def load_config() -> BotConfig:
         DOWNLOAD_MAX_RETRIES=_int_env("DOWNLOAD_MAX_RETRIES", 3),
         DOWNLOAD_RETRY_DELAY=_int_env("DOWNLOAD_RETRY_DELAY", 2),
         COOKIES_FILE=os.getenv("COOKIES_FILE") or None,
+        COOKIES_CONTENT_BASE64=os.getenv("COOKIES_CONTENT_BASE64") or None,
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
     )
