@@ -59,7 +59,7 @@ class BotConfig:
 
     # Quality settings (yt-dlp format strings)
     # 'best' selects the best quality format available
-    DOWNLOAD_VIDEO_FORMAT: str = "best"
+    DOWNLOAD_VIDEO_FORMAT: str = "bestvideo+bestaudio/best"
     DOWNLOAD_AUDIO_FORMAT: str = "bestaudio"
     DOWNLOAD_AUDIO_QUALITY: str = "320"  # MP3 bitrate
     DOWNLOAD_VIDEO_PREFERENCE: str = "mp4"  # Preferred container
@@ -316,7 +316,7 @@ def load_config() -> BotConfig:
         DOWNLOAD_MAX_SIZE_GENERIC_MB=_int_env("DOWNLOAD_MAX_SIZE_GENERIC_MB", 50),
         DOWNLOAD_TIMEOUT=_int_env("DOWNLOAD_TIMEOUT", 300),
         DOWNLOAD_METADATA_TIMEOUT=_int_env("DOWNLOAD_METADATA_TIMEOUT", 30),
-        DOWNLOAD_VIDEO_FORMAT=os.getenv("DOWNLOAD_VIDEO_FORMAT", "best"),
+        DOWNLOAD_VIDEO_FORMAT=os.getenv("DOWNLOAD_VIDEO_FORMAT", "bestvideo+bestaudio/best"),
         DOWNLOAD_AUDIO_FORMAT=os.getenv("DOWNLOAD_AUDIO_FORMAT", "bestaudio"),
         DOWNLOAD_AUDIO_QUALITY=os.getenv("DOWNLOAD_AUDIO_QUALITY", "320"),
         DOWNLOAD_VIDEO_PREFERENCE=os.getenv("DOWNLOAD_VIDEO_PREFERENCE", "mp4"),
