@@ -81,7 +81,7 @@ class DownloadOptions:
     # Quality settings (per QF-01, QF-02, QF-03, QF-05)
     # Use simple 'best' format - filesize check is done after metadata extraction
     # Avoid [filesize<50M] filter as it excludes formats without size metadata
-    video_format: str = "best"
+    video_format: str = "bestvideo+bestaudio/best"
     audio_format: str = "bestaudio"
     preferred_quality: str = "best"
     max_filesize: int = TELEGRAM_MAX_FILE_SIZE  # 50MB default
