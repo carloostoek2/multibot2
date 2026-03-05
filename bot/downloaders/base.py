@@ -79,10 +79,10 @@ class DownloadOptions:
     filename: Optional[str] = None
 
     # Quality settings (per QF-01, QF-02, QF-03, QF-05)
-    # Format fallback chain: prefer smaller files, but fallback to any available format
-    # Size check is done after metadata extraction to fail early if file is too large
-    video_format: str = "best[filesize<50M]/bestvideo[filesize<50M]+bestaudio/bestvideo+bestaudio/best"
-    audio_format: str = "bestaudio[filesize<50M]/bestaudio/best"
+    # Use simple 'best' format - filesize check is done after metadata extraction
+    # Avoid [filesize<50M] filter as it excludes formats without size metadata
+    video_format: str = "best"
+    audio_format: str = "bestaudio"
     preferred_quality: str = "best"
     max_filesize: int = TELEGRAM_MAX_FILE_SIZE  # 50MB default
 
