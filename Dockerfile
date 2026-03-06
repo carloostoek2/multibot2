@@ -1,8 +1,10 @@
 FROM python:3.11-slim
 
-# Install ffmpeg and other system dependencies
+# Install ffmpeg, nodejs and other system dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
