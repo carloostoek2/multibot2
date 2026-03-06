@@ -370,8 +370,9 @@ class YouTubeDownloader(YtDlpDownloader):
             "youtube": {
                 # Skip unavailable videos in playlists (shouldn't happen with noplaylist)
                 "skip": ["unavailable"],
-                # Prefer player client that works best
-                "player_client": ["web"],
+                # Note: Not specifying player_client - let yt-dlp choose automatically
+                # The 'web' client doesn't provide formats compatible with
+                # 'bestvideo+bestaudio/best' format selection
             }
         }
 
