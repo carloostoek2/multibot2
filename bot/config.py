@@ -59,7 +59,9 @@ class BotConfig:
 
     # Quality settings (yt-dlp format strings)
     # 'best' selects the best quality format available
-    DOWNLOAD_VIDEO_FORMAT: str = "bestvideo+bestaudio/best"
+    # Using simple 'best' instead of 'bestvideo+bestaudio/best' for compatibility
+    # with authenticated sessions (cookies) which may have different format availability
+    DOWNLOAD_VIDEO_FORMAT: str = "best"
     DOWNLOAD_AUDIO_FORMAT: str = "bestaudio"
     DOWNLOAD_AUDIO_QUALITY: str = "320"  # MP3 bitrate
     DOWNLOAD_VIDEO_PREFERENCE: str = "mp4"  # Preferred container
