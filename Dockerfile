@@ -1,11 +1,17 @@
 FROM python:3.11-slim
 
-# Install ffmpeg, nodejs and other system dependencies
+# Install system dependencies (ffmpeg, curl for Deno, nodejs as fallback)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    curl \
     nodejs \
     npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno (preferred JavaScript runtime for yt-dlp)
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="/root/.deno/bin:${PATH}"
+ENV DENO_INSTALL="/root/.deno"
 
 # Set working directory
 WORKDIR /app
@@ -15,6 +21,10 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install nightly yt-dlp for latest YouTube fixes
+RUN pip install --upgrade --force-reinstall \
+    "yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.tar.gz"
 
 # Copy the rest of the application
 COPY . .

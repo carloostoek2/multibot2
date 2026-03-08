@@ -168,12 +168,13 @@ def _parse_upload_date(date_str: Optional[str]) -> Optional[str]:
 
 
 class YouTubeDownloader(YtDlpDownloader):
-    """YouTube-specific downloader with Shorts support.
+    """YouTube-specific downloader with Shorts support and client fallback.
 
     Extends YtDlpDownloader with YouTube-specific features:
     - Shorts detection and vertical format optimization
     - Enhanced metadata (view count, likes, upload date, tags)
     - Age-restricted content handling
+    - Multi-strategy client fallback for reliability
     - View count formatting
 
     Example:
@@ -188,6 +189,36 @@ class YouTubeDownloader(YtDlpDownloader):
             # Download with YouTube optimizations
             result = await downloader.download(url, options)
     """
+
+    # Multi-strategy fallback for YouTube downloads
+    # Each strategy tries different player clients and configurations
+    # to work around YouTube's anti-bot protection
+    _CLIENT_STRATEGIES = [
+        {
+            "name": "ios_no_auth",
+            "player_client": ["ios", "mweb"],
+            "use_cookies": False,
+            "format": "best[height<=1080]/best",
+        },
+        {
+            "name": "ios_with_auth",
+            "player_client": ["ios", "mweb"],
+            "use_cookies": True,
+            "format": "best[height<=1080]/best",
+        },
+        {
+            "name": "tv_embedded",
+            "player_client": ["tv_embedded", "web_embedded"],
+            "use_cookies": False,
+            "format": "best[height<=1080]/best",
+        },
+        {
+            "name": "android",
+            "player_client": ["android", "web"],
+            "use_cookies": False,
+            "format": "best[height<=720]/best",
+        },
+    ]
 
     @property
     def name(self) -> str:
@@ -218,12 +249,74 @@ class YouTubeDownloader(YtDlpDownloader):
         # Fall back to parent class for yt-dlp validation
         return await super().can_handle(url)
 
+    async def _extract_with_strategy(
+        self,
+        url: str,
+        options: DownloadOptions,
+        strategy: dict,
+    ) -> dict[str, Any]:
+        """Extract metadata using a specific client strategy.
+
+        Args:
+            url: The YouTube URL
+            options: Download configuration options
+            strategy: Client strategy configuration
+
+        Returns:
+            Metadata dictionary
+
+        Raises:
+            MetadataExtractionError: If extraction fails
+        """
+        from bot.config import config
+        import os
+
+        correlation_id = self._generate_correlation_id()
+        logger.info(f"[{correlation_id}] Trying strategy: {strategy['name']}")
+
+        def _extract() -> dict[str, Any]:
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "format": strategy["format"],
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": strategy["player_client"],
+                        "skip": ["unavailable"],
+                    }
+                },
+            }
+
+            # Add cookies if strategy requires them
+            if strategy.get("use_cookies") and config.COOKIES_FILE:
+                if os.path.exists(config.COOKIES_FILE):
+                    file_size = os.path.getsize(config.COOKIES_FILE)
+                    if file_size > 0:
+                        ydl_opts["cookiefile"] = config.COOKIES_FILE
+                        logger.info(f"[{correlation_id}] Using cookies with strategy {strategy['name']}")
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False, process=True)
+                    if not info:
+                        raise MetadataExtractionError(
+                            message="No metadata returned",
+                            url=url,
+                            correlation_id=correlation_id,
+                        )
+                    return info
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Strategy {strategy['name']} failed: {e}")
+                raise
+
+        return await asyncio.to_thread(_extract)
+
     async def extract_metadata(
         self,
         url: str,
         options: DownloadOptions,
     ) -> dict[str, Any]:
-        """Extract metadata with YouTube-specific fields.
+        """Extract metadata with YouTube-specific fields and client fallback.
 
         Extends base metadata extraction with YouTube-specific fields:
         - view_count: Number of views
@@ -235,6 +328,8 @@ class YouTubeDownloader(YtDlpDownloader):
         - aspect_ratio: For Shorts, hints at 9:16 format
         - view_count_formatted: Human-readable view count
 
+        Implements multi-strategy fallback to handle YouTube's anti-bot protection.
+
         Args:
             url: The YouTube URL
             options: Download configuration options
@@ -244,36 +339,56 @@ class YouTubeDownloader(YtDlpDownloader):
 
         Raises:
             URLValidationError: If URL is invalid
-            MetadataExtractionError: If metadata cannot be extracted
+            MetadataExtractionError: If metadata cannot be extracted with any strategy
         """
-        # Get base metadata from parent class
-        metadata = await super().extract_metadata(url, options)
-
-        # Add YouTube-specific fields
-        def _extract_youtube_info() -> dict[str, Any]:
-            """Extract full YouTube info for additional fields."""
-            import yt_dlp
-
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-            }
-
+        # Try each client strategy in order
+        last_error = None
+        for strategy in self._CLIENT_STRATEGIES:
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False, process=True)
-                    return info or {}
+                info = await self._extract_with_strategy(url, options, strategy)
+                logger.info(f"Strategy {strategy['name']} succeeded for {url}")
+
+                # Build metadata from successful extraction
+                metadata = self._build_metadata_from_info(info, url)
+                metadata["_strategy_used"] = strategy["name"]  # Track which strategy worked
+                return metadata
+
             except Exception as e:
-                logger.warning(f"Could not extract full YouTube info: {e}")
-                return {}
+                last_error = e
+                logger.warning(f"Strategy {strategy['name']} failed: {e}")
+                continue
 
-        # Run extraction in thread pool
-        try:
-            info = await asyncio.to_thread(_extract_youtube_info)
-        except Exception as e:
-            logger.warning(f"Failed to extract YouTube-specific metadata: {e}")
-            info = {}
+        # All strategies failed
+        raise MetadataExtractionError(
+            message=f"All client strategies failed. Last error: {last_error}",
+            url=url,
+            correlation_id=self._generate_correlation_id(),
+        )
 
+    def _build_metadata_from_info(self, info: dict, url: str) -> dict[str, Any]:
+        """Build metadata dictionary from yt-dlp info.
+
+        Args:
+            info: yt-dlp info dictionary
+            url: Original URL
+
+        Returns:
+            Metadata dictionary
+        """
+        metadata = {
+            "title": info.get("title", "Unknown"),
+            "duration": info.get("duration"),
+            "uploader": info.get("uploader") or info.get("channel"),
+            "thumbnail": info.get("thumbnail"),
+            "filesize": info.get("filesize") or info.get("filesize_approx"),
+            "formats": info.get("formats", []),
+            "description": self._truncate_description(info.get("description", "")),
+            "webpage_url": info.get("webpage_url", url),
+            "id": info.get("id"),
+            "extractor": info.get("extractor"),
+        }
+
+        # Add YouTube-specific fields directly from info (no second extraction)
         # Check for age restriction
         if _is_age_restricted(info):
             metadata["is_age_restricted"] = True
@@ -370,9 +485,11 @@ class YouTubeDownloader(YtDlpDownloader):
             "youtube": {
                 # Skip unavailable videos in playlists (shouldn't happen with noplaylist)
                 "skip": ["unavailable"],
-                # Note: Not specifying player_client - let yt-dlp choose automatically
-                # The 'web' client doesn't provide formats compatible with
-                # 'bestvideo+bestaudio/best' format selection
+                # Use 'android' player client - works with cookies and doesn't require
+                # JavaScript runtime (Node.js) for signature deciphering
+                # Other clients like 'web' or 'ios' may require JS which causes
+                # "Requested format is not available" errors in environments without Node.js
+                "player_client": ["android"],
             }
         }
 
@@ -387,12 +504,13 @@ class YouTubeDownloader(YtDlpDownloader):
         url: str,
         options: DownloadOptions,
     ) -> Any:
-        """Download content with YouTube-specific handling.
+        """Download content with YouTube-specific handling and client fallback.
 
         Extends base download with:
         - Age-restricted content detection
         - Better error messages for restricted content
         - Shorts-specific handling
+        - Multi-strategy client fallback for reliability
 
         Args:
             url: The YouTube URL to download
@@ -406,12 +524,14 @@ class YouTubeDownloader(YtDlpDownloader):
             FileTooLargeError: If file exceeds size limits
             DownloadFailedError: If download fails or content is restricted
         """
+        from bot.config import config
+        from bot.downloaders import DownloadResult
+        import os
+
         # First extract metadata to check for restrictions
         try:
             metadata = await self.extract_metadata(url, options)
         except MetadataExtractionError:
-            # If metadata extraction fails, try download anyway
-            # yt-dlp might still be able to handle it
             metadata = {}
 
         # Check for age restriction
@@ -419,32 +539,175 @@ class YouTubeDownloader(YtDlpDownloader):
             logger.warning(
                 f"Attempting to download age-restricted content: {url}"
             )
-            # yt-dlp may still be able to download with some extractors
-            # We'll try and handle failure gracefully
 
-        # Perform the download
-        try:
-            result = await super().download(url, options)
-            return result
+        # Try each client strategy
+        last_error = None
+        correlation_id = self._generate_correlation_id()
 
-        except DownloadFailedError as e:
-            # Check if this might be an age restriction issue
-            error_msg = str(e).lower()
-            if (
-                "age" in error_msg
-                or "restrict" in error_msg
-                or "sign in" in error_msg
-                or "login" in error_msg
-            ):
-                # Enhance error message for age restriction
-                raise DownloadFailedError(
-                    attempts_made=e.attempts_made,
-                    last_error=e.last_error,
-                    message=(
-                        "Este video tiene restricción de edad y no puede ser "
-                        "descargado sin autenticación."
-                    ),
-                    url=url,
-                    correlation_id=getattr(e, "correlation_id", None),
-                ) from e
-            raise
+        for strategy in self._CLIENT_STRATEGIES:
+            try:
+                logger.info(
+                    f"[{correlation_id}] Download attempt with strategy: {strategy['name']}"
+                )
+
+                result = await self._download_with_strategy(
+                    url, options, strategy, correlation_id
+                )
+
+                logger.info(
+                    f"[{correlation_id}] Download succeeded with strategy: {strategy['name']}"
+                )
+                return result
+
+            except Exception as e:
+                last_error = e
+                error_msg = str(e).lower()
+
+                # Check for specific error types
+                if "age" in error_msg or "restrict" in error_msg:
+                    logger.warning(f"Age restriction with strategy {strategy['name']}")
+                    # Continue to next strategy - some may handle age restrictions
+                elif "format" in error_msg and "not available" in error_msg:
+                    logger.warning(f"Format not available with strategy {strategy['name']}")
+                    # This is expected with some clients, continue
+                else:
+                    logger.warning(f"Strategy {strategy['name']} failed: {e}")
+
+                continue
+
+        # All strategies failed
+        error_msg = str(last_error).lower() if last_error else ""
+        if "age" in error_msg or "restrict" in error_msg or "sign in" in error_msg:
+            raise DownloadFailedError(
+                attempts_made=len(self._CLIENT_STRATEGIES),
+                last_error=last_error,
+                message=(
+                    "Este video tiene restricción de edad y no puede ser "
+                    "descargado sin autenticación."
+                ),
+                url=url,
+                correlation_id=correlation_id,
+            )
+
+        raise DownloadFailedError(
+            attempts_made=len(self._CLIENT_STRATEGIES),
+            last_error=last_error,
+            message=f"All download strategies failed. Last error: {last_error}",
+            url=url,
+            correlation_id=correlation_id,
+        )
+
+    async def _download_with_strategy(
+        self,
+        url: str,
+        options: DownloadOptions,
+        strategy: dict,
+        correlation_id: str,
+    ) -> DownloadResult:
+        """Download using a specific client strategy.
+
+        Args:
+            url: The YouTube URL
+            options: Download configuration
+            strategy: Client strategy configuration
+            correlation_id: Request tracing ID
+
+        Returns:
+            DownloadResult
+
+        Raises:
+            Exception: If download fails
+        """
+        from bot.config import config
+        import os
+
+        output_path = self._build_output_path(options, "download")
+
+        # Build yt-dlp options with strategy
+        ydl_opts = {
+            "format": strategy["format"],
+            "outtmpl": output_path,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "merge_output_format": "mp4",
+            "retries": 10,
+            "fragment_retries": 10,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": strategy["player_client"],
+                    "skip": ["unavailable"],
+                }
+            },
+        }
+
+        # Add progress hook if callback provided
+        if options.progress_callback:
+            ydl_opts["progress_hooks"] = [
+                self._create_progress_hook(options.progress_callback, correlation_id)
+            ]
+
+        # Add audio extraction postprocessor if requested
+        if options.extract_audio:
+            ydl_opts["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": options.audio_codec,
+                    "preferredquality": options.audio_bitrate.replace("k", ""),
+                }
+            ]
+            ydl_opts["format"] = options.audio_format
+
+        # Add cookies if strategy requires them
+        if strategy.get("use_cookies") and config.COOKIES_FILE:
+            if os.path.exists(config.COOKIES_FILE):
+                file_size = os.path.getsize(config.COOKIES_FILE)
+                if file_size > 0:
+                    ydl_opts["cookiefile"] = config.COOKIES_FILE
+                    logger.info(f"[{correlation_id}] Using cookies with strategy {strategy['name']}")
+
+        # Run download in thread pool
+        def _download_sync():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if not info:
+                    raise Exception("No info returned from download")
+
+                filepath = ydl.prepare_filename(info)
+
+                # Handle audio extraction extension change
+                if ydl_opts.get("postprocessors"):
+                    for pp in ydl_opts["postprocessors"]:
+                        if pp.get("key") == "FFmpegExtractAudio":
+                            codec = pp.get("preferredcodec", "mp3")
+                            filepath = os.path.splitext(filepath)[0] + f".{codec}"
+
+                # Verify file exists
+                if not os.path.exists(filepath):
+                    base_path = os.path.splitext(filepath)[0]
+                    for ext in [".mp4", ".webm", ".mkv", ".mp3", ".m4a", ".ogg"]:
+                        alt_path = base_path + ext
+                        if os.path.exists(alt_path):
+                            filepath = alt_path
+                            break
+
+                if not os.path.exists(filepath):
+                    raise Exception(f"Downloaded file not found: {filepath}")
+
+                return filepath, info
+
+        filepath, info = await asyncio.to_thread(_download_sync)
+
+        # Import here to avoid circular imports
+        from bot.downloaders import DownloadResult
+
+        return DownloadResult(
+            success=True,
+            file_path=filepath,
+            metadata={
+                "title": info.get("title"),
+                "duration": info.get("duration"),
+                "uploader": info.get("uploader"),
+                "strategy_used": strategy["name"],
+            },
+        )
