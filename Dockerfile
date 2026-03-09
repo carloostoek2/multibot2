@@ -36,5 +36,5 @@ RUN mkdir -p /tmp/bot_temp
 ENV PYTHONUNBUFFERED=1
 ENV TEMP_DIR=/tmp/bot_temp
 
-# Run the bot
-CMD ["python", "run.py"]
+# Run the bot (update yt-dlp first to ensure latest fixes)
+CMD yt-dlp --update-to nightly && python run.py
