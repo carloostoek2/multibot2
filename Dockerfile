@@ -1,9 +1,10 @@
 FROM python:3.11-slim
 
-# Install system dependencies (ffmpeg, curl for Deno, nodejs as fallback)
+# Install system dependencies (ffmpeg, curl/unzip for Deno, nodejs as fallback)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
+    unzip \
     nodejs \
     npm \
     && rm -rf /var/lib/apt/lists/*
