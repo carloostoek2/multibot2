@@ -30,6 +30,11 @@ from bot.downloaders.exceptions import (
     MetadataExtractionError,
 )
 
+# TYPE_CHECKING import to avoid circular imports
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from bot.downloaders.types import DownloadResult
+
 logger = logging.getLogger(__name__)
 
 # YouTube URL patterns for validation
@@ -603,7 +608,7 @@ class YouTubeDownloader(YtDlpDownloader):
         options: DownloadOptions,
         strategy: dict,
         correlation_id: str,
-    ) -> DownloadResult:
+    ) -> "DownloadResult":
         """Download using a specific client strategy.
 
         Args:
