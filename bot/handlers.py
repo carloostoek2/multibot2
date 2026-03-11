@@ -6739,14 +6739,27 @@ async def _start_download_from_message(
         if result.success:
             context.user_data[f"download_status_{correlation_id}"] = "completed"
 
-            # Delete progress message before sending files
+            # Update progress message to "Sending..." instead of deleting
+            # This keeps the user informed during slow uploads
             try:
-                await progress_message.delete()
+                await progress_message.edit_text("Enviando archivo...")
             except Exception:
-                pass
+                pass  # Message might be deleted or expired, that's ok
 
             # Send downloaded file
-            await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+            try:
+                await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+            except Exception as send_error:
+                logger.error(f"[{correlation_id}] Failed to send file: {send_error}")
+                # If sending failed, notify user but don't show generic error
+                # The file might have been partially sent or timed out
+                try:
+                    await message.reply_text(
+                        "El archivo se descargó pero hubo un problema al enviarlo. "
+                        "Intenta de nuevo o usa /download con la misma URL."
+                    )
+                except Exception:
+                    pass
 
         else:
             context.user_data[f"download_status_{correlation_id}"] = "error"
@@ -6774,9 +6787,21 @@ async def _start_download_from_message(
     except Exception as e:
         logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
         context.user_data[f"download_status_{correlation_id}"] = "error"
-        await message.reply_text(
-            f"Error inesperado: {type(e).__name__}. Intenta de nuevo mÃ¡s tarde."
-        )
+        # Don't show error for timeout - file might have been sent already
+        # Telegram has a 20-second timeout for large file uploads
+        error_name = type(e).__name__
+        if error_name in ('TimedOut', 'TimeoutError'):
+            logger.info(f"[{correlation_id}] Timeout during send - file may have been sent already")
+            # Don't send error message - file likely arrived
+        else:
+            # Only send error message if we haven't already sent something
+            # This prevents duplicate messages when the error is from sending
+            try:
+                await message.reply_text(
+                    f"Error inesperado: {error_name}. Intenta de nuevo mÃ¡s tarde."
+                )
+            except Exception:
+                pass
     finally:
         # Clean up facade reference but keep status for /downloads command
         context.user_data.pop(f"download_facade_{correlation_id}", None)
@@ -6993,9 +7018,9 @@ async def _send_downloaded_file_with_menu(
 
     except Exception as e:
         logger.error(f"[{correlation_id}] Failed to send downloaded file(s): {e}")
-        await message.reply_text(
-            "Error al enviar el archivo(s) descargado."
-        )
+        # Don't send error message here - let the caller handle it
+        # This prevents duplicate error messages
+        raise
 
 
 async def _start_combined_download(
