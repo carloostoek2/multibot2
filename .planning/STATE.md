@@ -84,6 +84,7 @@ Phase 12: Integration & Polish              [██████████] 100
 ### Pending Todos
 
 - **Simplificar flujo descarga eliminando menú** — Eliminar el menú intermedio y ejecutar descarga directa al recibir URL (area: downloader)
+- **Crear servicio de menú para consistencia de flujos y navegación** — Servicio unificado para menús inline con navegación automática y estados centralizados (area: ui)
 
 ## Active Plans
 
