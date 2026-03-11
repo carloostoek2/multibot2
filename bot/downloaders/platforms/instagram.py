@@ -414,6 +414,7 @@ class InstagramDownloader(YtDlpDownloader):
 
         Extends base download to handle Instagram carousel posts (multiple images).
         When a post contains multiple images/videos, downloads all of them.
+        Falls back to gallery-dl for image-only posts that yt-dlp cannot handle.
 
         Args:
             url: The Instagram URL to download from
@@ -448,7 +449,17 @@ class InstagramDownloader(YtDlpDownloader):
         allow_multiple = content_type == InstagramContentType.POST
 
         # First, extract metadata to check file size and content info
-        metadata = await self.extract_metadata(url, options)
+        try:
+            metadata = await self.extract_metadata(url, options)
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Metadata extraction failed: {e}")
+            metadata = {}
+
+        # Check if this might be an image-only post (0 formats returned)
+        formats = metadata.get("formats", [])
+        if not formats and content_type == InstagramContentType.POST:
+            logger.info(f"[{correlation_id}] No video formats found, trying gallery-dl for images")
+            return await self._download_with_gallery_dl(url, options, correlation_id)
 
         # Build output path
         output_path = self._build_output_path(options, metadata.get("title", "instagram"))
@@ -481,12 +492,62 @@ class InstagramDownloader(YtDlpDownloader):
             )
 
         except Exception as e:
+            # Check if this is a "No video formats found" error for posts
+            error_msg = str(e).lower()
+            if content_type == InstagramContentType.POST and (
+                "no video formats found" in error_msg or "no formats" in error_msg
+            ):
+                logger.info(f"[{correlation_id}] yt-dlp failed with image post, trying gallery-dl fallback")
+                return await self._download_with_gallery_dl(url, options, correlation_id)
             raise DownloadFailedError(
                 attempts_made=1,
                 last_error=e,
                 url=url,
                 correlation_id=correlation_id,
             ) from e
+
+    async def _download_with_gallery_dl(
+        self,
+        url: str,
+        options: DownloadOptions,
+        correlation_id: str,
+    ) -> Any:
+        """Download Instagram images using gallery-dl as fallback.
+
+        Args:
+            url: The Instagram URL to download
+            options: Download configuration options
+            correlation_id: Request tracing ID
+
+        Returns:
+            DownloadResult with downloaded file paths
+        """
+        from ..types import DownloadResult
+
+        try:
+            from ..gallery_dl_downloader import GalleryDlDownloader, GALLERY_DL_AVAILABLE
+        except ImportError:
+            GALLERY_DL_AVAILABLE = False
+
+        if not GALLERY_DL_AVAILABLE:
+            raise DownloadFailedError(
+                attempts_made=1,
+                message="Este post de Instagram solo contiene imágenes y no puedo descargarlas. "
+                        "Instala gallery-dl para soporte de imágenes: pip install gallery-dl",
+                url=url,
+                correlation_id=correlation_id,
+            )
+
+        logger.info(f"[{correlation_id}] Using gallery-dl fallback for Instagram images")
+        gallery_dl = GalleryDlDownloader()
+        result = await gallery_dl.download(url, options)
+
+        # Add Instagram-specific metadata
+        if result.metadata:
+            result.metadata["content_type"] = "post"
+            result.metadata["is_carousel"] = len(result.file_paths) > 1 if result.file_paths else False
+
+        return result
 
     def _download_sync_multi(
         self,

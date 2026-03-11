@@ -54,6 +54,7 @@ from .url_detector import (
 )
 
 # Import downloader implementations
+from .gallery_dl_downloader import GALLERY_DL_AVAILABLE, GalleryDlDownloader
 from .generic_downloader import GenericDownloader
 from .ytdlp_downloader import YtDlpDownloader
 
@@ -174,6 +175,8 @@ __all__ = [
     "detect_urls",
     "is_video_url",
     # Downloader implementations
+    "GALLERY_DL_AVAILABLE",
+    "GalleryDlDownloader",
     "GenericDownloader",
     "YtDlpDownloader",
     # Platform handlers
