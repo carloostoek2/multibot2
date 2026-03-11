@@ -310,6 +310,14 @@ class DownloadFacade:
                 # Perform the actual download
                 result = await downloader.download(url, temp_options)
 
+                # Debug logging for file_paths
+                if hasattr(result, 'file_paths'):
+                    logger.info(f"[{correlation_id}] Download result has file_paths: {result.file_paths}")
+                elif hasattr(result, 'file_path'):
+                    logger.info(f"[{correlation_id}] Download result has file_path: {result.file_path}")
+                else:
+                    logger.info(f"[{correlation_id}] Download result type: {type(result)}")
+
                 # Convert result to LifecycleResult format
                 if isinstance(result, LifecycleResult):
                     return result

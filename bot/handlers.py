@@ -6651,6 +6651,12 @@ async def _send_downloaded_file_with_menu(
     from telegram import InputMediaPhoto, InputMediaVideo
 
     # Extract file paths and metadata from result
+    logger.info(f"[{correlation_id}] _send_downloaded_file_with_menu received result type: {type(result)}")
+    if hasattr(result, 'file_paths'):
+        logger.info(f"[{correlation_id}] Result has file_paths: {result.file_paths}")
+    if hasattr(result, 'file_path'):
+        logger.info(f"[{correlation_id}] Result has file_path: {result.file_path}")
+
     if isinstance(result, LifecycleResult):
         file_paths = result.file_paths if hasattr(result, 'file_paths') and result.file_paths else ([result.file_path] if result.file_path else [])
         metadata = result.metadata or {}
