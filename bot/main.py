@@ -19,6 +19,13 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=log_level
 )
+
+# Reduce verbosity of third-party libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 logger.info(f"Logging configured at level: {config.LOG_LEVEL}")
 

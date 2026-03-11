@@ -6723,10 +6723,11 @@ async def _send_downloaded_file_with_menu(
                 )
 
         else:
-            # Single file - original behavior
+            # Single file - detect type and send appropriately
             file_path = file_paths[0]
             file_ext = os.path.splitext(file_path)[1].lower()
             audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+            image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 
             if format_type == 'audio' or file_ext in audio_extensions:
                 # Send as audio
@@ -6736,6 +6737,13 @@ async def _send_downloaded_file_with_menu(
                         caption=f"Descarga completada: {title}",
                         title=title,
                         performer=metadata.get('artist') or metadata.get('uploader')
+                    )
+            elif file_ext in image_extensions:
+                # Send as photo
+                with open(file_path, 'rb') as photo_file:
+                    await update.callback_query.message.reply_photo(
+                        photo=photo_file,
+                        caption=f"Descarga completada: {title}"
                     )
             else:
                 # Send as video with post-download menu
