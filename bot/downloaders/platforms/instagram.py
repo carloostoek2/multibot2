@@ -378,8 +378,9 @@ class InstagramDownloader(YtDlpDownloader):
         ydl_opts["socket_timeout"] = 30  # Instagram can be slow
 
         # For Instagram posts, allow both videos and images
-        # Use 'best' to get whatever is available (video or image)
-        ydl_opts["format"] = "best"
+        # 'best' prioritizes video, 'bestimage' falls back to images when no video
+        # This enables downloading image-only posts and carousel images
+        ydl_opts["format"] = "best/bestimage"
 
         # Allow downloading multiple images from carousel posts
         if allow_multiple:

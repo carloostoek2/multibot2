@@ -378,7 +378,7 @@ class YtDlpDownloader(BaseDownloader):
                 if not os.path.exists(filepath):
                     # Try to find the file with common extensions
                     base_path = os.path.splitext(filepath)[0]
-                    for ext in [".mp4", ".webm", ".mkv", ".mp3", ".m4a", ".ogg"]:
+                    for ext in [".mp4", ".webm", ".mkv", ".mp3", ".m4a", ".ogg", ".jpg", ".jpeg", ".png", ".webp"]:
                         alt_path = base_path + ext
                         if os.path.exists(alt_path):
                             filepath = alt_path
