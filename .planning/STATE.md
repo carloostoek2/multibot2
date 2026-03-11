@@ -83,7 +83,6 @@ Phase 12: Integration & Polish              [██████████] 100
 
 ### Pending Todos
 
-- **Simplificar flujo descarga eliminando menú** — Eliminar el menú intermedio y ejecutar descarga directa al recibir URL (area: downloader)
 - **Crear servicio de menú para consistencia de flujos y navegación** — Servicio unificado para menús inline con navegación automática y estados centralizados (area: ui)
 - **Crear servicio batch para descargas por lotes desde Instagram** — Procesar 5-10 URLs de Instagram en un mensaje con progreso agregado y manejo de errores granular (area: downloader)
 
