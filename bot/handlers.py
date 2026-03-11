@@ -6841,6 +6841,7 @@ async def _send_downloaded_file_with_menu(
     """Send downloaded file and show post-download menu.
 
     Supports both single files and multiple files (e.g., Instagram carousel).
+    Works with both callback queries and regular messages.
 
     Args:
         update: Telegram update object
@@ -6851,6 +6852,12 @@ async def _send_downloaded_file_with_menu(
     """
     from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
     from telegram import InputMediaPhoto, InputMediaVideo
+
+    # Get the appropriate message object (from callback or direct message)
+    if update.callback_query:
+        message = update.callback_query.message
+    else:
+        message = update.message
 
     # Extract file paths and metadata from result
     if isinstance(result, LifecycleResult):
@@ -6867,7 +6874,7 @@ async def _send_downloaded_file_with_menu(
     file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
 
     if not file_paths:
-        await update.callback_query.message.reply_text(
+        await message.reply_text(
             "Error: No se encontró el archivo descargado."
         )
         return
@@ -6912,7 +6919,7 @@ async def _send_downloaded_file_with_menu(
                     logger.warning(f"[{correlation_id}] Failed to add file {file_path}: {file_err}")
 
             if media_group:
-                sent_messages = await update.callback_query.message.reply_media_group(
+                sent_messages = await message.reply_media_group(
                     media=media_group
                 )
                 logger.info(f"[{correlation_id}] Sent media group with {len(sent_messages)} items")
@@ -6922,12 +6929,12 @@ async def _send_downloaded_file_with_menu(
                 if first_video:
                     context.user_data["video_menu_correlation_id"] = correlation_id
                     reply_markup = _get_video_menu_keyboard()
-                    await update.callback_query.message.reply_text(
+                    await message.reply_text(
                         "¿Qué quieres hacer con estos videos?",
                         reply_markup=reply_markup
                     )
             else:
-                await update.callback_query.message.reply_text(
+                await message.reply_text(
                     f"Error: No se pudieron procesar los {len(file_paths)} archivos."
                 )
 
@@ -6941,7 +6948,7 @@ async def _send_downloaded_file_with_menu(
             if format_type == 'audio' or file_ext in audio_extensions:
                 # Send as audio (use title-based caption for audio)
                 with open(file_path, 'rb') as audio_file:
-                    await update.callback_query.message.reply_audio(
+                    await message.reply_audio(
                         audio=audio_file,
                         caption=main_caption,
                         title=title,
@@ -6950,14 +6957,14 @@ async def _send_downloaded_file_with_menu(
             elif file_ext in image_extensions:
                 # Send as photo with original caption
                 with open(file_path, 'rb') as photo_file:
-                    await update.callback_query.message.reply_photo(
+                    await message.reply_photo(
                         photo=photo_file,
                         caption=main_caption
                     )
             else:
                 # Send as video with post-download menu
                 with open(file_path, 'rb') as video_file:
-                    sent_message = await update.callback_query.message.reply_video(
+                    sent_message = await message.reply_video(
                         video=video_file,
                         caption=main_caption,
                         supports_streaming=True
@@ -6968,7 +6975,7 @@ async def _send_downloaded_file_with_menu(
                 context.user_data["video_menu_correlation_id"] = correlation_id
 
                 reply_markup = _get_video_menu_keyboard()
-                await update.callback_query.message.reply_text(
+                await message.reply_text(
                     "¿Qué quieres hacer con este video?",
                     reply_markup=reply_markup
                 )
@@ -6986,7 +6993,7 @@ async def _send_downloaded_file_with_menu(
 
     except Exception as e:
         logger.error(f"[{correlation_id}] Failed to send downloaded file(s): {e}")
-        await update.callback_query.message.reply_text(
+        await message.reply_text(
             "Error al enviar el archivo(s) descargado."
         )
 
