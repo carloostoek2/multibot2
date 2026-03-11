@@ -238,38 +238,77 @@ class InstagramDownloader(YtDlpDownloader):
             URLValidationError: If the URL is invalid
             MetadataExtractionError: If metadata cannot be extracted
         """
-        # Get base metadata from parent
-        metadata = await super().extract_metadata(url, options)
+        from bot.config import config
+        import os
+
+        # Validate URL
+        self.validate_url(url)
+
+        correlation_id = self._generate_correlation_id()
+        logger.info(f"[{correlation_id}] Extracting Instagram metadata from {url}")
 
         # Add Instagram-specific fields
         content_type = detect_instagram_content_type(url)
-        metadata["content_type"] = content_type.name.lower()
-        metadata["is_reel"] = content_type == InstagramContentType.REEL
-        metadata["is_story"] = content_type == InstagramContentType.STORY
-        metadata["shortcode"] = extract_shortcode(url)
-
-        # Extract additional fields from yt-dlp info if available
-        # Note: _raw_info is not stored by parent, so we re-extract
-        correlation_id = self._generate_correlation_id()
 
         def _extract_instagram_info() -> dict[str, Any]:
-            """Extract additional Instagram-specific info."""
+            """Extract Instagram-specific info with image support."""
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
-                # Allow extracting info for carousels
+                # Allow extracting info for carousels and images
                 "extract_flat": False,
+                # Use 'best' format to allow both videos and images
+                "format": "best",
+                # Anti-bot headers
+                "http_headers": {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    ),
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
             }
+
+            # Add cookies if available
+            if config.COOKIES_FILE and os.path.exists(config.COOKIES_FILE):
+                file_size = os.path.getsize(config.COOKIES_FILE)
+                if file_size > 0:
+                    ydl_opts["cookiefile"] = config.COOKIES_FILE
+
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False, process=True)
+
+                    if not info:
+                        raise MetadataExtractionError(
+                            message="No metadata returned from Instagram",
+                            url=url,
+                            correlation_id=correlation_id,
+                        )
 
                     # Detect carousel posts (multiple images/videos)
                     entries = info.get("entries", [])
                     is_carousel = len(entries) > 1 if entries else False
                     media_count = len(entries) if entries else 1
 
-                    return {
+                    # Build metadata
+                    metadata = {
+                        "title": info.get("title", "Instagram Post"),
+                        "duration": info.get("duration"),
+                        "uploader": info.get("uploader") or info.get("channel"),
+                        "thumbnail": info.get("thumbnail"),
+                        "filesize": info.get("filesize") or info.get("filesize_approx"),
+                        "formats": info.get("formats", []),
+                        "description": info.get("description", ""),
+                        "webpage_url": info.get("webpage_url", url),
+                        "id": info.get("id"),
+                        "extractor": info.get("extractor"),
+                        # Instagram-specific
+                        "content_type": content_type.name.lower(),
+                        "is_reel": content_type == InstagramContentType.REEL,
+                        "is_story": content_type == InstagramContentType.STORY,
+                        "shortcode": extract_shortcode(url),
                         "username": info.get("uploader") or info.get("channel"),
                         "caption": info.get("description", ""),
                         "likes_count": info.get("like_count"),
@@ -278,18 +317,21 @@ class InstagramDownloader(YtDlpDownloader):
                         "view_count": info.get("view_count"),
                         "is_carousel": is_carousel,
                         "media_count": media_count,
-                        "media_type": info.get("media_type"),  # 'GraphImage', 'GraphVideo', 'GraphSidecar'
+                        "media_type": info.get("media_type"),
                     }
-            except Exception as e:
-                logger.debug(f"Could not extract extended Instagram info: {e}")
-                return {}
 
-        # Run extended extraction in thread pool
-        try:
-            extended_info = await asyncio.to_thread(_extract_instagram_info)
-            metadata.update(extended_info)
-        except Exception as e:
-            logger.debug(f"Extended metadata extraction failed: {e}")
+                    return metadata
+
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Instagram extraction error: {e}")
+                raise MetadataExtractionError(
+                    message=f"Instagram extraction failed: {e}",
+                    url=url,
+                    correlation_id=correlation_id,
+                ) from e
+
+        # Run extraction in thread pool
+        metadata = await asyncio.to_thread(_extract_instagram_info)
 
         # For Reels, mark aspect ratio
         if metadata.get("is_reel"):
@@ -334,6 +376,10 @@ class InstagramDownloader(YtDlpDownloader):
 
         # Instagram-specific options
         ydl_opts["socket_timeout"] = 30  # Instagram can be slow
+
+        # For Instagram posts, allow both videos and images
+        # Use 'best' to get whatever is available (video or image)
+        ydl_opts["format"] = "best"
 
         # Allow downloading multiple images from carousel posts
         if allow_multiple:
