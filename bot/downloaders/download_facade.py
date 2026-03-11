@@ -315,17 +315,24 @@ class DownloadFacade:
                     return result
                 elif isinstance(result, BaseDownloadResult):
                     # Handle DownloadResult from bot.downloaders module
+                    # Support both single file (file_path) and multi-file (file_paths)
+                    file_paths = result.file_paths if hasattr(result, 'file_paths') and result.file_paths else []
+                    file_path = result.file_path if result.file_path else (file_paths[0] if file_paths else None)
                     return LifecycleResult(
                         success=result.success,
-                        file_path=result.file_path,
+                        file_path=file_path,
+                        file_paths=file_paths,
                         metadata=result.metadata,
                         correlation_id=correlation_id,
                         temp_dir=temp_dir
                     )
                 elif isinstance(result, dict):
+                    file_paths = result.get('file_paths', [])
+                    file_path = result.get('file_path') or result.get('path') or (file_paths[0] if file_paths else None)
                     return LifecycleResult(
                         success=result.get('success', True),
-                        file_path=result.get('file_path') or result.get('path'),
+                        file_path=file_path,
+                        file_paths=file_paths,
                         metadata=result.get('metadata'),
                         correlation_id=correlation_id,
                         temp_dir=temp_dir

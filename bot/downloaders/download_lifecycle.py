@@ -200,16 +200,25 @@ class DownloadResult:
 
     Attributes:
         success: Indica si la descarga fue exitosa
-        file_path: Ruta al archivo descargado
+        file_path: Ruta al archivo descargado (primer archivo si son múltiples)
+        file_paths: Lista de rutas para descargas multi-archivo (ej: Instagram carousel)
         metadata: Metadatos adicionales de la descarga
         correlation_id: ID de correlación de la descarga
         temp_dir: Directorio temporal usado (para referencia)
     """
     success: bool
     file_path: Optional[str] = None
+    file_paths: list[str] = field(default_factory=list)
     metadata: Optional[Dict[str, Any]] = None
     correlation_id: str = ""
     temp_dir: Optional[str] = None
+
+    def __post_init__(self):
+        """Sincroniza file_path y file_paths después de la inicialización."""
+        if self.file_paths and not self.file_path:
+            self.file_path = self.file_paths[0]
+        elif self.file_path and not self.file_paths:
+            self.file_paths = [self.file_path]
 
 
 class DownloadLifecycle:
