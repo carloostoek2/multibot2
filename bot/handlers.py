@@ -6262,7 +6262,7 @@ async def handle_download_command(update: Update, context: ContextTypes.DEFAULT_
 async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle URL detection in regular text messages.
 
-    Detects URLs and shows inline menu for format selection.
+    Detects URLs and starts download immediately without showing a menu.
 
     Args:
         update: Telegram update object
@@ -6303,17 +6303,8 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data[f"download_url_{correlation_id}"] = url
     context.user_data[f"download_correlation_id_{user_id}"] = correlation_id
 
-    # Show format selection menu
-    reply_markup = _get_download_format_keyboard(correlation_id)
-    await update.message.reply_text(
-        "Enlace de video detectado. Selecciona el formato:\n"
-        "- Video: Solo descargar video\n"
-        "- Audio: Solo extraer audio\n"
-        "- Video + Nota de Video: Descargar y convertir a nota circular\n"
-        "- Video + Extraer Audio: Descargar y extraer audio\n"
-        "- Audio + Nota de Voz: Descargar y convertir a nota de voz",
-        reply_markup=reply_markup
-    )
+    # Start download immediately (no menu)
+    await _start_download_from_message(update, context, correlation_id, url)
 
 
 async def handle_download_format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6620,6 +6611,172 @@ async def _start_download(
         context.user_data[f"download_status_{correlation_id}"] = "error"
         error_msg = _get_error_message_for_exception(e, url, correlation_id)
         await query.edit_message_text(error_msg)
+    finally:
+        # Clean up facade reference but keep status for /downloads command
+        context.user_data.pop(f"download_facade_{correlation_id}", None)
+        try:
+            await facade.stop()
+        except Exception:
+            pass
+
+
+async def _start_download_from_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    correlation_id: str,
+    url: str
+) -> None:
+    """Start download directly from a message (no menu).
+
+    Downloads content immediately with default format (video),
+    then shows post-download menu for further processing.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        correlation_id: Unique download ID
+        url: URL to download
+    """
+    message = update.message
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    format_type = "video"  # Default: download as video (works for photos too)
+
+    # Detect platform for display
+    platform = _detect_platform_for_display(url)
+
+    # Create facade
+    facade = DownloadFacade()
+
+    try:
+        await facade.start()
+
+        # Store facade instance for cancellation support
+        context.user_data[f"download_facade_{correlation_id}"] = facade
+        context.user_data[f"download_url_{correlation_id}"] = url
+        context.user_data[f"download_format_{correlation_id}"] = format_type
+        context.user_data[f"download_status_{correlation_id}"] = "downloading"
+
+        # Send initial progress message with cancel button
+        reply_markup = _get_download_cancel_keyboard(correlation_id)
+        progress_message = await message.reply_text(
+            f"Descargando de {platform}...",
+            reply_markup=reply_markup
+        )
+
+        # Progress tracking with enhanced state management
+        last_message_text = [f"Descargando de {platform}..."]
+        last_update_time = [0.0]  # Track last update time for rate limiting
+
+        async def progress_callback(progress: dict) -> None:
+            """Update download progress message with cancel button."""
+            import time
+            from bot.downloaders.progress_tracker import format_progress_message
+
+            status = progress.get('status', 'downloading')
+            percent = progress.get('percent', 0)
+
+            # Rate limiting: only update every 1 second minimum
+            current_time = time.time()
+            if current_time - last_update_time[0] < 1.0 and status == 'downloading':
+                return
+
+            # Format message based on status
+            if status == 'downloading':
+                message_text = format_progress_message(progress)
+                # Add platform info to message
+                if platform:
+                    message_text = f"Descargando de {platform}...\n{message_text}"
+
+                if message_text != last_message_text[0]:
+                    try:
+                        await progress_message.edit_text(
+                            message_text,
+                            reply_markup=reply_markup
+                        )
+                        last_message_text[0] = message_text
+                        last_update_time[0] = current_time
+                    except Exception as e:
+                        logger.debug(f"Failed to update progress message: {e}")
+
+            elif status == 'completed':
+                # Remove cancel button, show completed
+                try:
+                    await progress_message.edit_text("Descarga completada")
+                    context.user_data[f"download_status_{correlation_id}"] = "completed"
+                except Exception:
+                    pass
+
+            elif status == 'error':
+                error_msg = progress.get('error', 'Error desconocido')
+                try:
+                    await progress_message.edit_text(f"Error: {error_msg}")
+                    context.user_data[f"download_status_{correlation_id}"] = "error"
+                except Exception:
+                    pass
+
+        # Create progress tracker with callback
+        from bot.downloaders.progress_tracker import ProgressTracker
+        tracker = ProgressTracker(
+            min_update_interval=3.0,
+            min_percent_change=5.0,
+            on_update=lambda p: asyncio.create_task(progress_callback(p))
+        )
+
+        # Download with progress callback integration
+        # IMPORTANT: cleanup_on_success=False so file remains for sending
+        config_overrides = {
+            'extract_audio': False,  # Download video by default
+            'cleanup_on_success': False,
+        }
+
+        result = await facade.download(
+            url=url,
+            chat_id=chat_id,
+            config_overrides=config_overrides
+        )
+
+        if result.success:
+            context.user_data[f"download_status_{correlation_id}"] = "completed"
+
+            # Delete progress message before sending files
+            try:
+                await progress_message.delete()
+            except Exception:
+                pass
+
+            # Send downloaded file
+            await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
+
+        else:
+            context.user_data[f"download_status_{correlation_id}"] = "error"
+            await progress_message.edit_text(
+                f"Error en la descarga: {getattr(result, 'error_message', 'Error desconocido')}"
+            )
+
+    except FileTooLargeError as e:
+        logger.warning(f"[{correlation_id}] File too large: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await message.reply_text(e.to_user_message())
+    except URLValidationError as e:
+        logger.warning(f"[{correlation_id}] URL validation error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await message.reply_text(e.to_user_message())
+    except UnsupportedURLError as e:
+        logger.warning(f"[{correlation_id}] Unsupported URL: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await message.reply_text(e.to_user_message())
+    except DownloadError as e:
+        logger.error(f"[{correlation_id}] Download error: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        error_msg = _get_error_message_for_exception(e, url, correlation_id)
+        await message.reply_text(error_msg)
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Unexpected error: {type(e).__name__}: {e}")
+        context.user_data[f"download_status_{correlation_id}"] = "error"
+        await message.reply_text(
+            f"Error inesperado: {type(e).__name__}. Intenta de nuevo mÃ¡s tarde."
+        )
     finally:
         # Clean up facade reference but keep status for /downloads command
         context.user_data.pop(f"download_facade_{correlation_id}", None)
