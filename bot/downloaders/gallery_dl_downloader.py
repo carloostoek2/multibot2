@@ -130,20 +130,23 @@ class GalleryDlDownloader(BaseDownloader):
                 items = list(extr)
 
                 # Try to get caption/description from extractor
-                caption = None
-                try:
-                    # gallery-dl extractors often have 'description' attribute
-                    caption = getattr(extr, 'description', None)
-                    if not caption:
-                        # Try to get from the first item's metadata if available
-                        if items and len(items) > 0:
-                            first_item = items[0]
-                            if isinstance(first_item, tuple) and len(first_item) > 1:
-                                item_metadata = first_item[1] if len(first_item) > 1 else {}
-                                if isinstance(item_metadata, dict):
-                                    caption = item_metadata.get('description') or item_metadata.get('caption')
-                except Exception:
-                    pass
+                # gallery-dl Instagram extractor puts caption in 'description' field
+                caption = getattr(extr, 'description', None)
+
+                # Try to get from the first item's metadata if items exist
+                if not caption and items:
+                    try:
+                        first_item = items[0]
+                        if isinstance(first_item, tuple) and len(first_item) > 1:
+                            item_metadata = first_item[1]
+                            if isinstance(item_metadata, dict):
+                                # gallery-dl uses 'description' for post caption
+                                caption = item_metadata.get('description') or item_metadata.get('caption', '')
+                                # Also try to get username from item metadata
+                                if not username and item_metadata.get('username'):
+                                    username = item_metadata['username']
+                    except Exception:
+                        pass
 
                 metadata = {
                     "title": getattr(extr, 'display_name', 'Instagram Post'),

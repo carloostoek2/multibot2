@@ -6647,7 +6647,8 @@ def _build_caption_from_metadata(metadata: dict, default_title: str = "Descarga"
     logger.debug(f"[caption_builder] Metadata keys: {list(metadata.keys())}")
 
     # Try to get original caption from metadata
-    caption = (metadata.get("caption") or "").strip()
+    # gallery-dl uses 'description', yt-dlp uses 'caption'
+    caption = (metadata.get("caption") or metadata.get("description") or "").strip()
     username = (metadata.get("username") or "").strip() or (metadata.get("uploader") or "").strip()
 
     logger.debug(f"[caption_builder] Extracted caption: {caption[:50] if caption else 'None'}...")
