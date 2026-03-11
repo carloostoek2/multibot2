@@ -97,6 +97,12 @@ class YtDlpDownloader(BaseDownloader):
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
+                # Anti-bot: Headers de navegador real
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                },
             }
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -158,6 +164,18 @@ class YtDlpDownloader(BaseDownloader):
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
+                # Anti-bot: Headers de navegador real para evitar detección
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "DNT": "1",
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1",
+                },
+                "retries": 3,
+                "fragment_retries": 3,
             }
 
             # Add cookies file if configured (for YouTube authentication)
@@ -430,13 +448,26 @@ class YtDlpDownloader(BaseDownloader):
         # Import config here to avoid circular imports
         from bot.config import config
 
-        # Base options
+        # Base options with anti-bot headers
         ydl_opts = {
             "format": options.video_format,
             "outtmpl": output_path,
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,  # Only download single video, not playlists
+            # Anti-bot: Headers de navegador real
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "DNT": "1",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            },
+            "retries": 5,
+            "fragment_retries": 5,
+            "file_access_retries": 3,
         }
 
         logger.info(f"[{correlation_id}] Building yt-dlp options with video_format: {options.video_format}")

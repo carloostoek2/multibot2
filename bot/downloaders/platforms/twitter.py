@@ -27,6 +27,8 @@ import logging
 import re
 from typing import Any, Optional
 
+import yt_dlp
+
 from bot.downloaders.ytdlp_downloader import YtDlpDownloader
 from bot.downloaders.base import DownloadOptions
 from bot.downloaders.exceptions import (

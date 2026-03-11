@@ -23,6 +23,8 @@ import re
 from datetime import datetime
 from typing import Any, Optional
 
+import yt_dlp
+
 from bot.downloaders.ytdlp_downloader import YtDlpDownloader
 from bot.downloaders.base import DownloadOptions
 from bot.downloaders.exceptions import (
@@ -196,32 +198,49 @@ class YouTubeDownloader(YtDlpDownloader):
     """
 
     # Multi-strategy fallback for YouTube downloads
-    # Each strategy tries different player clients and configurations
+    # Each strategy tries different player clients, user agents, and configurations
     # to work around YouTube's anti-bot protection
+    # Docs: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#using-client-identity
     _CLIENT_STRATEGIES = [
         {
             "name": "ios_no_auth",
             "player_client": ["ios", "mweb"],
             "use_cookies": False,
             "format": "best[height<=1080]/best",
+            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+            "referer": "https://m.youtube.com/",
         },
         {
             "name": "ios_with_auth",
             "player_client": ["ios", "mweb"],
             "use_cookies": True,
             "format": "best[height<=1080]/best",
-        },
-        {
-            "name": "tv_embedded",
-            "player_client": ["tv_embedded", "web_embedded"],
-            "use_cookies": False,
-            "format": "best[height<=1080]/best",
+            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+            "referer": "https://m.youtube.com/",
         },
         {
             "name": "android",
             "player_client": ["android", "web"],
             "use_cookies": False,
             "format": "best[height<=720]/best",
+            "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "referer": "https://m.youtube.com/",
+        },
+        {
+            "name": "android_with_auth",
+            "player_client": ["android", "web"],
+            "use_cookies": True,
+            "format": "best[height<=720]/best",
+            "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "referer": "https://m.youtube.com/",
+        },
+        {
+            "name": "tv_embedded",
+            "player_client": ["tv_embedded"],
+            "use_cookies": False,
+            "format": "best[height<=1080]/best",
+            "user_agent": "Mozilla/5.0 (SmartHub; SMART-TV; U; Linux/SmartTV; Android 11.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 TV Safari/537.36",
+            "referer": "https://www.youtube.com/tv",
         },
     ]
 
@@ -284,12 +303,23 @@ class YouTubeDownloader(YtDlpDownloader):
                 "quiet": True,
                 "no_warnings": True,
                 "format": strategy["format"],
+                # Anti-bot: Headers de navegador real
+                "http_headers": {
+                    "User-Agent": strategy.get("user_agent", "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36"),
+                    "Referer": strategy.get("referer", "https://www.youtube.com/"),
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
                 "extractor_args": {
                     "youtube": {
                         "player_client": strategy["player_client"],
                         "skip": ["unavailable"],
                     }
                 },
+                # Retries para mayor resiliencia
+                "retries": 5,
+                "fragment_retries": 5,
+                "file_access_retries": 3,
             }
 
             # Add cookies if strategy requires them
@@ -498,6 +528,14 @@ class YouTubeDownloader(YtDlpDownloader):
             }
         }
 
+        # Anti-bot: Headers de navegador móvil Android (consistente con estrategia android)
+        ydl_opts["http_headers"] = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            "Referer": "https://www.youtube.com/",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+
         # Check if this is a Shorts URL for format optimization
         # Note: We can't easily access the URL here, so we rely on the
         # format string from options which should already be appropriate
@@ -638,6 +676,14 @@ class YouTubeDownloader(YtDlpDownloader):
             "merge_output_format": "mp4",
             "retries": 10,
             "fragment_retries": 10,
+            "file_access_retries": 5,
+            # Anti-bot: Headers de navegador real
+            "http_headers": {
+                "User-Agent": strategy.get("user_agent", "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36"),
+                "Referer": strategy.get("referer", "https://www.youtube.com/"),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
             "extractor_args": {
                 "youtube": {
                     "player_client": strategy["player_client"],
