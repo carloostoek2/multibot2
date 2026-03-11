@@ -6643,9 +6643,15 @@ def _build_caption_from_metadata(metadata: dict, default_title: str = "Descarga"
     Returns:
         Caption string for Telegram message
     """
+    # Debug: log available metadata keys
+    logger.debug(f"[caption_builder] Metadata keys: {list(metadata.keys())}")
+
     # Try to get original caption from metadata
     caption = (metadata.get("caption") or "").strip()
     username = (metadata.get("username") or "").strip() or (metadata.get("uploader") or "").strip()
+
+    logger.debug(f"[caption_builder] Extracted caption: {caption[:50] if caption else 'None'}...")
+    logger.debug(f"[caption_builder] Extractor: {metadata.get('extractor')}, Username: {username}")
 
     # Build caption with username prefix for Instagram
     if caption:
