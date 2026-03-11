@@ -257,10 +257,18 @@ class InstagramDownloader(YtDlpDownloader):
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
+                # Allow extracting info for carousels
+                "extract_flat": False,
             }
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False, process=True)
+
+                    # Detect carousel posts (multiple images/videos)
+                    entries = info.get("entries", [])
+                    is_carousel = len(entries) > 1 if entries else False
+                    media_count = len(entries) if entries else 1
+
                     return {
                         "username": info.get("uploader") or info.get("channel"),
                         "caption": info.get("description", ""),
@@ -268,6 +276,9 @@ class InstagramDownloader(YtDlpDownloader):
                         "comments_count": info.get("comment_count"),
                         "upload_date": info.get("upload_date"),
                         "view_count": info.get("view_count"),
+                        "is_carousel": is_carousel,
+                        "media_count": media_count,
+                        "media_type": info.get("media_type"),  # 'GraphImage', 'GraphVideo', 'GraphSidecar'
                     }
             except Exception as e:
                 logger.debug(f"Could not extract extended Instagram info: {e}")
@@ -305,6 +316,7 @@ class InstagramDownloader(YtDlpDownloader):
         options: DownloadOptions,
         output_path: str,
         correlation_id: str,
+        allow_multiple: bool = False,
     ) -> dict:
         """Build yt-dlp options with Instagram-specific optimizations.
 
@@ -312,6 +324,8 @@ class InstagramDownloader(YtDlpDownloader):
             options: Download configuration
             output_path: Output file path template
             correlation_id: Request tracing ID
+            allow_multiple: Whether to allow downloading multiple files
+                          (for carousel posts with multiple images)
 
         Returns:
             Dictionary of yt-dlp options
@@ -320,6 +334,13 @@ class InstagramDownloader(YtDlpDownloader):
 
         # Instagram-specific options
         ydl_opts["socket_timeout"] = 30  # Instagram can be slow
+
+        # Allow downloading multiple images from carousel posts
+        if allow_multiple:
+            ydl_opts["noplaylist"] = False
+            # Add index to filename for multiple files
+            base_path = output_path.replace(".%(ext)s", "")
+            ydl_opts["outtmpl"] = f"{base_path}_%(playlist_index)s.%(ext)s"
 
         # Add headers to avoid blocks
         ydl_opts["http_headers"] = {
@@ -336,6 +357,192 @@ class InstagramDownloader(YtDlpDownloader):
         }
 
         return ydl_opts
+
+    async def download(
+        self,
+        url: str,
+        options: DownloadOptions,
+    ) -> Any:
+        """Download content from Instagram with support for multiple images.
+
+        Extends base download to handle Instagram carousel posts (multiple images).
+        When a post contains multiple images/videos, downloads all of them.
+
+        Args:
+            url: The Instagram URL to download from
+            options: Download configuration options
+
+        Returns:
+            DownloadResult containing:
+            - success: Whether download completed successfully
+            - file_path: Path to the downloaded file (if single file)
+            - file_paths: List of paths for carousel posts with multiple images
+            - metadata: Additional metadata about the download
+
+        Raises:
+            URLValidationError: If URL is invalid
+            FileTooLargeError: If any file exceeds size limits
+            DownloadFailedError: If download fails
+        """
+        from pathlib import Path
+        from ..types import DownloadResult
+
+        # Validate URL
+        self.validate_url(url)
+
+        # Generate correlation ID
+        correlation_id = self._generate_correlation_id()
+        logger.info(f"[{correlation_id}] Starting Instagram download from {url}")
+
+        # Detect content type
+        content_type = detect_instagram_content_type(url)
+
+        # Allow multiple files for posts (carousels), but not for stories/reels
+        allow_multiple = content_type == InstagramContentType.POST
+
+        # First, extract metadata to check file size and content info
+        metadata = await self.extract_metadata(url, options)
+
+        # Build output path
+        output_path = self._build_output_path(options, metadata.get("title", "instagram"))
+
+        # Build yt-dlp options with multiple file support
+        ydl_opts = self._build_ydl_options(
+            options, output_path, correlation_id, allow_multiple=allow_multiple
+        )
+
+        # Run download in thread pool
+        try:
+            file_paths = await asyncio.to_thread(
+                self._download_sync_multi,
+                url,
+                ydl_opts,
+                correlation_id,
+                allow_multiple,
+            )
+
+            # Return result with all file paths
+            return DownloadResult(
+                success=True,
+                file_path=file_paths[0] if file_paths else None,
+                file_paths=file_paths,
+                metadata={
+                    **metadata,
+                    "file_count": len(file_paths),
+                    "is_carousel": len(file_paths) > 1,
+                },
+            )
+
+        except Exception as e:
+            raise DownloadFailedError(
+                attempts_made=1,
+                last_error=e,
+                url=url,
+                correlation_id=correlation_id,
+            ) from e
+
+    def _download_sync_multi(
+        self,
+        url: str,
+        ydl_opts: dict,
+        correlation_id: str,
+        allow_multiple: bool,
+    ) -> list[str]:
+        """Synchronous download wrapper that handles multiple files.
+
+        Args:
+            url: The URL to download
+            ydl_opts: yt-dlp options dictionary
+            correlation_id: Request tracing ID
+            allow_multiple: Whether to allow multiple file downloads
+
+        Returns:
+            List of paths to downloaded files
+
+        Raises:
+            DownloadFailedError: If download fails
+        """
+        import os
+
+        downloaded_files = []
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Extract and download
+                info = ydl.extract_info(url, download=True)
+
+                if not info:
+                    raise DownloadFailedError(
+                        attempts_made=1,
+                        message="No info returned from download",
+                        correlation_id=correlation_id,
+                    )
+
+                # Handle both single entries and playlists/carousels
+                entries = info.get("entries", [info])
+
+                for i, entry in enumerate(entries):
+                    if entry is None:
+                        continue
+
+                    # Get the file path
+                    filepath = ydl.prepare_filename(entry)
+
+                    # Handle postprocessors (e.g., audio extraction)
+                    if ydl_opts.get("postprocessors"):
+                        for pp in ydl_opts["postprocessors"]:
+                            if pp.get("key") == "FFmpegExtractAudio":
+                                codec = pp.get("preferredcodec", "mp3")
+                                filepath = os.path.splitext(filepath)[0] + f".{codec}"
+
+                    # Verify file exists
+                    if os.path.exists(filepath):
+                        downloaded_files.append(filepath)
+                        logger.info(f"[{correlation_id}] Downloaded: {filepath}")
+                    else:
+                        # Try to find with different extensions
+                        base_path = os.path.splitext(filepath)[0]
+                        for ext in [".mp4", ".webm", ".mkv", ".mp3", ".m4a", ".jpg", ".jpeg", ".png"]:
+                            alt_path = base_path + ext
+                            if os.path.exists(alt_path):
+                                downloaded_files.append(alt_path)
+                                logger.info(f"[{correlation_id}] Found file: {alt_path}")
+                                break
+
+                if not downloaded_files:
+                    raise DownloadFailedError(
+                        attempts_made=1,
+                        message="No files were downloaded",
+                        correlation_id=correlation_id,
+                    )
+
+                logger.info(f"[{correlation_id}] Total files downloaded: {len(downloaded_files)}")
+                return downloaded_files
+
+        except DownloadError as e:
+            error_msg = str(e).lower()
+
+            if "private" in error_msg or "403" in error_msg:
+                raise DownloadFailedError(
+                    attempts_made=1,
+                    message="Este contenido de Instagram es privado.",
+                    url=url,
+                    correlation_id=correlation_id,
+                ) from e
+            elif "story" in error_msg and ("expired" in error_msg or "not available" in error_msg):
+                raise DownloadFailedError(
+                    attempts_made=1,
+                    message="Esta historia ha expirado o no está disponible.",
+                    url=url,
+                    correlation_id=correlation_id,
+                ) from e
+            else:
+                raise DownloadFailedError(
+                    attempts_made=1,
+                    message=f"Download error: {e}",
+                    url=url,
+                    correlation_id=correlation_id,
+                ) from e
 
     def _download_sync(
         self,
