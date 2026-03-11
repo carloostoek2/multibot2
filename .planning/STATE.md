@@ -84,6 +84,7 @@ Phase 12: Integration & Polish              [██████████] 100
 ### Pending Todos
 
 - **Simplificar flujo descarga eliminando menú** — Eliminar el menú intermedio y ejecutar descarga directa al recibir URL (area: downloader)
+- **Incluir caption original en descargas Instagram** — Extraer y enviar el caption del post de Instagram junto con el archivo descargado (area: downloader)
 
 ## Active Plans
 
