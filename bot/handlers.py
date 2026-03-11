@@ -6629,6 +6629,44 @@ async def _start_download(
             pass
 
 
+def _build_caption_from_metadata(metadata: dict, default_title: str = "Descarga") -> str:
+    """Build caption from metadata, using original caption if available.
+
+    For Instagram posts, uses the original caption from the post.
+    Falls back to default message if no caption is available.
+    Truncates to Telegram's caption limit (1024 characters).
+
+    Args:
+        metadata: Download metadata dictionary
+        default_title: Default title to use if no caption available
+
+    Returns:
+        Caption string for Telegram message
+    """
+    # Try to get original caption from metadata
+    caption = metadata.get("caption", "").strip()
+    username = metadata.get("username", "").strip() or metadata.get("uploader", "").strip()
+
+    # Build caption with username prefix for Instagram
+    if caption:
+        # For Instagram, prefix with username if available
+        if username and metadata.get("extractor") == "instagram":
+            full_caption = f"@{username}:\n{caption}"
+        else:
+            full_caption = caption
+    else:
+        # Fall back to default message
+        full_caption = f"Descarga completada: {default_title}"
+
+    # Telegram caption limit is 1024 characters
+    MAX_CAPTION_LENGTH = 1024
+    if len(full_caption) > MAX_CAPTION_LENGTH:
+        # Truncate and add ellipsis
+        full_caption = full_caption[:MAX_CAPTION_LENGTH - 3].rsplit(" ", 1)[0] + "..."
+
+    return full_caption
+
+
 async def _send_downloaded_file_with_menu(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -6673,6 +6711,9 @@ async def _send_downloaded_file_with_menu(
     title = metadata.get('title', 'Descarga')
     is_carousel = metadata.get('is_carousel', False) or len(file_paths) > 1
 
+    # Build caption from metadata (uses original caption for Instagram)
+    main_caption = _build_caption_from_metadata(metadata, title)
+
     try:
         # Handle multiple files (e.g., Instagram carousel)
         if len(file_paths) > 1:
@@ -6685,7 +6726,11 @@ async def _send_downloaded_file_with_menu(
             media_group = []
             for i, file_path in enumerate(file_paths[:10]):  # Telegram limit: 10 items per group
                 file_ext = os.path.splitext(file_path)[1].lower()
-                caption = f"{title} ({i+1}/{len(file_paths)})" if i == 0 else f"{i+1}/{len(file_paths)}"
+                # Use original caption for first item, include item count
+                if i == 0:
+                    caption = f"{main_caption}\n\n({i+1}/{len(file_paths)})"
+                else:
+                    caption = None
 
                 try:
                     if file_ext in image_extensions:
@@ -6730,27 +6775,27 @@ async def _send_downloaded_file_with_menu(
             image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 
             if format_type == 'audio' or file_ext in audio_extensions:
-                # Send as audio
+                # Send as audio (use title-based caption for audio)
                 with open(file_path, 'rb') as audio_file:
                     await update.callback_query.message.reply_audio(
                         audio=audio_file,
-                        caption=f"Descarga completada: {title}",
+                        caption=main_caption,
                         title=title,
                         performer=metadata.get('artist') or metadata.get('uploader')
                     )
             elif file_ext in image_extensions:
-                # Send as photo
+                # Send as photo with original caption
                 with open(file_path, 'rb') as photo_file:
                     await update.callback_query.message.reply_photo(
                         photo=photo_file,
-                        caption=f"Descarga completada: {title}"
+                        caption=main_caption
                     )
             else:
                 # Send as video with post-download menu
                 with open(file_path, 'rb') as video_file:
                     sent_message = await update.callback_query.message.reply_video(
                         video=video_file,
-                        caption=f"Descarga completada: {title}",
+                        caption=main_caption,
                         supports_streaming=True
                     )
 
@@ -7379,6 +7424,9 @@ async def send_downloaded_file(
 
     title = metadata.get('title', 'Descarga')
 
+    # Build caption from metadata (uses original caption for Instagram)
+    main_caption = _build_caption_from_metadata(metadata, title)
+
     try:
         # Handle multiple files
         if len(file_paths) > 1:
@@ -7388,7 +7436,11 @@ async def send_downloaded_file(
             media_group = []
             for i, file_path in enumerate(file_paths[:10]):
                 file_ext = os.path.splitext(file_path)[1].lower()
-                caption = f"{title} ({i+1}/{len(file_paths)})" if i == 0 else f"{i+1}/{len(file_paths)}"
+                # Use original caption for first item, include item count
+                if i == 0:
+                    caption = f"{main_caption}\n\n({i+1}/{len(file_paths)})"
+                else:
+                    caption = None
 
                 try:
                     if file_ext in image_extensions:
@@ -7415,13 +7467,12 @@ async def send_downloaded_file(
             file_path = file_paths[0]
             file_ext = os.path.splitext(file_path)[1].lower()
             audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
-            caption = f"Descarga completada: {title}"
 
             if file_ext in audio_extensions:
                 with open(file_path, 'rb') as audio_file:
                     await update.message.reply_audio(
                         audio=audio_file,
-                        caption=caption,
+                        caption=main_caption,
                         title=title,
                         performer=metadata.get('artist') or metadata.get('uploader')
                     )
@@ -7429,7 +7480,7 @@ async def send_downloaded_file(
                 with open(file_path, 'rb') as video_file:
                     await update.message.reply_video(
                         video=video_file,
-                        caption=caption,
+                        caption=main_caption,
                         supports_streaming=True
                     )
             logger.info(f"Downloaded file sent to user {update.effective_user.id}")
