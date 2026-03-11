@@ -384,6 +384,7 @@ class DownloadLifecycle:
             return DownloadResult(
                 success=raw_result.success,
                 file_path=raw_result.file_path,
+                file_paths=raw_result.file_paths if raw_result.file_paths else [],
                 metadata=raw_result.metadata,
                 correlation_id=self.correlation_id,
                 temp_dir=temp_dir
@@ -391,9 +392,12 @@ class DownloadLifecycle:
 
         # Si es diccionario, extraer campos conocidos
         if isinstance(raw_result, dict):
+            file_paths = raw_result.get("file_paths", [])
+            file_path = raw_result.get("file_path") or raw_result.get("path") or (file_paths[0] if file_paths else None)
             return DownloadResult(
                 success=raw_result.get("success", True),
-                file_path=raw_result.get("file_path") or raw_result.get("path"),
+                file_path=file_path,
+                file_paths=file_paths,
                 metadata=raw_result.get("metadata"),
                 correlation_id=self.correlation_id,
                 temp_dir=temp_dir
