@@ -6638,6 +6638,8 @@ async def _send_downloaded_file_with_menu(
 ) -> None:
     """Send downloaded file and show post-download menu.
 
+    Supports both single files and multiple files (e.g., Instagram carousel).
+
     Args:
         update: Telegram update object
         context: Telegram context object
@@ -6646,74 +6648,129 @@ async def _send_downloaded_file_with_menu(
         correlation_id: Unique download ID
     """
     from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+    from telegram import InputMediaPhoto, InputMediaVideo
 
+    # Extract file paths and metadata from result
     if isinstance(result, LifecycleResult):
-        file_path = result.file_path
+        file_paths = result.file_paths if hasattr(result, 'file_paths') and result.file_paths else ([result.file_path] if result.file_path else [])
         metadata = result.metadata or {}
     elif isinstance(result, dict):
-        file_path = result.get('file_path') or result.get('path')
+        file_paths = result.get('file_paths') or ([result.get('file_path')] if result.get('file_path') else [])
         metadata = result.get('metadata', {})
     else:
-        file_path = str(result)
+        file_paths = [str(result)] if result else []
         metadata = {}
 
-    if not file_path or not os.path.exists(file_path):
+    # Filter out None/empty paths and check existence
+    file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
+
+    if not file_paths:
         await update.callback_query.message.reply_text(
             "Error: No se encontró el archivo descargado."
         )
         return
 
-    # Determine file type
-    file_ext = os.path.splitext(file_path)[1].lower()
-    audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
-
-    title = metadata.get('title', 'Video')
+    title = metadata.get('title', 'Descarga')
+    is_carousel = metadata.get('is_carousel', False) or len(file_paths) > 1
 
     try:
-        if format_type == 'audio' or file_ext in audio_extensions:
-            # Send as audio
-            with open(file_path, 'rb') as audio_file:
-                await update.callback_query.message.reply_audio(
-                    audio=audio_file,
-                    caption=f"Descarga completada: {title}",
-                    title=title,
-                    performer=metadata.get('artist') or metadata.get('uploader')
+        # Handle multiple files (e.g., Instagram carousel)
+        if len(file_paths) > 1:
+            logger.info(f"[{correlation_id}] Sending {len(file_paths)} files as media group")
+
+            # Group files by type (images vs videos)
+            image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+            video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+
+            media_group = []
+            for i, file_path in enumerate(file_paths[:10]):  # Telegram limit: 10 items per group
+                file_ext = os.path.splitext(file_path)[1].lower()
+                caption = f"{title} ({i+1}/{len(file_paths)})" if i == 0 else f"{i+1}/{len(file_paths)}"
+
+                try:
+                    if file_ext in image_extensions:
+                        media_group.append(InputMediaPhoto(
+                            media=open(file_path, 'rb'),
+                            caption=caption if i == 0 else None
+                        ))
+                    elif file_ext in video_extensions:
+                        media_group.append(InputMediaVideo(
+                            media=open(file_path, 'rb'),
+                            caption=caption if i == 0 else None,
+                            supports_streaming=True
+                        ))
+                except Exception as file_err:
+                    logger.warning(f"[{correlation_id}] Failed to add file {file_path}: {file_err}")
+
+            if media_group:
+                sent_messages = await update.callback_query.message.reply_media_group(
+                    media=media_group
                 )
+                logger.info(f"[{correlation_id}] Sent media group with {len(sent_messages)} items")
+
+                # Show post-download menu for the first video if any
+                first_video = next((m for m in media_group if isinstance(m, InputMediaVideo)), None)
+                if first_video:
+                    context.user_data["video_menu_correlation_id"] = correlation_id
+                    reply_markup = _get_video_menu_keyboard()
+                    await update.callback_query.message.reply_text(
+                        "¿Qué quieres hacer con estos videos?",
+                        reply_markup=reply_markup
+                    )
+            else:
+                await update.callback_query.message.reply_text(
+                    f"Error: No se pudieron procesar los {len(file_paths)} archivos."
+                )
+
         else:
-            # Send as video with post-download menu
-            with open(file_path, 'rb') as video_file:
-                sent_message = await update.callback_query.message.reply_video(
-                    video=video_file,
-                    caption=f"Descarga completada: {title}",
-                    supports_streaming=True
+            # Single file - original behavior
+            file_path = file_paths[0]
+            file_ext = os.path.splitext(file_path)[1].lower()
+            audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+
+            if format_type == 'audio' or file_ext in audio_extensions:
+                # Send as audio
+                with open(file_path, 'rb') as audio_file:
+                    await update.callback_query.message.reply_audio(
+                        audio=audio_file,
+                        caption=f"Descarga completada: {title}",
+                        title=title,
+                        performer=metadata.get('artist') or metadata.get('uploader')
+                    )
+            else:
+                # Send as video with post-download menu
+                with open(file_path, 'rb') as video_file:
+                    sent_message = await update.callback_query.message.reply_video(
+                        video=video_file,
+                        caption=f"Descarga completada: {title}",
+                        supports_streaming=True
+                    )
+
+                # Show post-download menu for video
+                context.user_data["video_menu_file_id"] = sent_message.video.file_id
+                context.user_data["video_menu_correlation_id"] = correlation_id
+
+                reply_markup = _get_video_menu_keyboard()
+                await update.callback_query.message.reply_text(
+                    "¿Qué quieres hacer con este video?",
+                    reply_markup=reply_markup
                 )
 
-            # Show post-download menu for video
-            # Store file info for post-download actions
-            context.user_data["video_menu_file_id"] = sent_message.video.file_id
-            context.user_data["video_menu_correlation_id"] = correlation_id
-
-            reply_markup = _get_video_menu_keyboard()
-            await update.callback_query.message.reply_text(
-                "¿Qué quieres hacer con este video?",
-                reply_markup=reply_markup
-            )
-
-        logger.info(f"Downloaded file sent to user {update.effective_user.id}")
+        logger.info(f"[{correlation_id}] Downloaded file(s) sent to user {update.effective_user.id}")
 
         # Clean up temp directory after sending
         if isinstance(result, LifecycleResult) and result.temp_dir:
             import shutil
             try:
                 shutil.rmtree(result.temp_dir, ignore_errors=True)
-                logger.debug(f"Cleaned up temp directory: {result.temp_dir}")
+                logger.debug(f"[{correlation_id}] Cleaned up temp directory: {result.temp_dir}")
             except Exception as cleanup_err:
-                logger.warning(f"Failed to cleanup temp dir: {cleanup_err}")
+                logger.warning(f"[{correlation_id}] Failed to cleanup temp dir: {cleanup_err}")
 
     except Exception as e:
-        logger.error(f"Failed to send downloaded file: {e}")
+        logger.error(f"[{correlation_id}] Failed to send downloaded file(s): {e}")
         await update.callback_query.message.reply_text(
-            "Error al enviar el archivo descargado."
+            "Error al enviar el archivo(s) descargado."
         )
 
 
@@ -6920,19 +6977,25 @@ async def _process_to_videonote(
     """
     from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
 
+    # Handle both single and multiple files
     if isinstance(result, LifecycleResult):
-        file_path = result.file_path
+        file_paths = result.file_paths if hasattr(result, 'file_paths') and result.file_paths else ([result.file_path] if result.file_path else [])
         metadata = result.metadata or {}
     elif isinstance(result, dict):
-        file_path = result.get('file_path') or result.get('path')
+        file_paths = result.get('file_paths') or ([result.get('file_path')] if result.get('file_path') else [])
         metadata = result.get('metadata', {})
     else:
-        file_path = str(result)
+        file_paths = [str(result)] if result else []
         metadata = {}
 
-    if not file_path or not os.path.exists(file_path):
+    # Filter valid paths and find first video
+    file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
+    video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+    file_path = next((fp for fp in file_paths if os.path.splitext(fp)[1].lower() in video_extensions), file_paths[0] if file_paths else None)
+
+    if not file_path:
         await update.callback_query.message.reply_text(
-            "Error: No se encontró el archivo descargado."
+            "Error: No se encontró un video para procesar."
         )
         return
 
@@ -6983,19 +7046,25 @@ async def _process_extract_audio(
     """
     from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
 
+    # Handle both single and multiple files
     if isinstance(result, LifecycleResult):
-        file_path = result.file_path
+        file_paths = result.file_paths if hasattr(result, 'file_paths') and result.file_paths else ([result.file_path] if result.file_path else [])
         metadata = result.metadata or {}
     elif isinstance(result, dict):
-        file_path = result.get('file_path') or result.get('path')
+        file_paths = result.get('file_paths') or ([result.get('file_path')] if result.get('file_path') else [])
         metadata = result.get('metadata', {})
     else:
-        file_path = str(result)
+        file_paths = [str(result)] if result else []
         metadata = {}
 
-    if not file_path or not os.path.exists(file_path):
+    # Filter valid paths and find first video
+    file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
+    video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+    file_path = next((fp for fp in file_paths if os.path.splitext(fp)[1].lower() in video_extensions), file_paths[0] if file_paths else None)
+
+    if not file_path:
         await update.callback_query.message.reply_text(
-            "Error: No se encontró el archivo descargado."
+            "Error: No se encontró un video para extraer audio."
         )
         return
 
@@ -7051,19 +7120,25 @@ async def _process_to_voicenote(
     """
     from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
 
+    # Handle both single and multiple files
     if isinstance(result, LifecycleResult):
-        file_path = result.file_path
+        file_paths = result.file_paths if hasattr(result, 'file_paths') and result.file_paths else ([result.file_path] if result.file_path else [])
         metadata = result.metadata or {}
     elif isinstance(result, dict):
-        file_path = result.get('file_path') or result.get('path')
+        file_paths = result.get('file_paths') or ([result.get('file_path')] if result.get('file_path') else [])
         metadata = result.get('metadata', {})
     else:
-        file_path = str(result)
+        file_paths = [str(result)] if result else []
         metadata = {}
 
-    if not file_path or not os.path.exists(file_path):
+    # Filter valid paths and find first audio/video file
+    file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
+    audio_video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv', '.mp3', '.m4a', '.wav', '.ogg'}
+    file_path = next((fp for fp in file_paths if os.path.splitext(fp)[1].lower() in audio_video_extensions), file_paths[0] if file_paths else None)
+
+    if not file_path:
         await update.callback_query.message.reply_text(
-            "Error: No se encontró el archivo descargado."
+            "Error: No se encontró un archivo de audio/video para procesar."
         )
         return
 
@@ -7262,7 +7337,9 @@ async def send_downloaded_file(
     context: ContextTypes.DEFAULT_TYPE,
     result: Any
 ) -> None:
-    """Send downloaded file to user (legacy helper).
+    """Send downloaded file(s) to user (legacy helper).
+
+    Supports both single files and multiple files (e.g., Instagram carousel).
 
     Args:
         update: Telegram update object
@@ -7270,49 +7347,86 @@ async def send_downloaded_file(
         result: Download result with file_path and metadata
     """
     from bot.downloaders.download_lifecycle import DownloadResult as LifecycleResult
+    from telegram import InputMediaPhoto, InputMediaVideo
 
+    # Extract file paths and metadata
     if isinstance(result, LifecycleResult):
-        file_path = result.file_path
+        file_paths = result.file_paths if hasattr(result, 'file_paths') and result.file_paths else ([result.file_path] if result.file_path else [])
         metadata = result.metadata or {}
     elif isinstance(result, dict):
-        file_path = result.get('file_path') or result.get('path')
+        file_paths = result.get('file_paths') or ([result.get('file_path')] if result.get('file_path') else [])
         metadata = result.get('metadata', {})
     else:
-        file_path = str(result)
+        file_paths = [str(result)] if result else []
         metadata = {}
 
-    if not file_path or not os.path.exists(file_path):
+    # Filter valid paths
+    file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
+
+    if not file_paths:
         await update.message.reply_text(
             "Error: No se encontró el archivo descargado."
         )
         return
 
-    # Determine file type
-    file_ext = os.path.splitext(file_path)[1].lower()
-    audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
-
-    title = metadata.get('title', 'Video')
-    caption = f"Descarga completada: {title}"
+    title = metadata.get('title', 'Descarga')
 
     try:
-        if file_ext in audio_extensions:
-            with open(file_path, 'rb') as audio_file:
-                await update.message.reply_audio(
-                    audio=audio_file,
-                    caption=caption,
-                    title=title,
-                    performer=metadata.get('artist') or metadata.get('uploader')
-                )
+        # Handle multiple files
+        if len(file_paths) > 1:
+            image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+            video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+
+            media_group = []
+            for i, file_path in enumerate(file_paths[:10]):
+                file_ext = os.path.splitext(file_path)[1].lower()
+                caption = f"{title} ({i+1}/{len(file_paths)})" if i == 0 else f"{i+1}/{len(file_paths)}"
+
+                try:
+                    if file_ext in image_extensions:
+                        media_group.append(InputMediaPhoto(
+                            media=open(file_path, 'rb'),
+                            caption=caption if i == 0 else None
+                        ))
+                    elif file_ext in video_extensions:
+                        media_group.append(InputMediaVideo(
+                            media=open(file_path, 'rb'),
+                            caption=caption if i == 0 else None,
+                            supports_streaming=True
+                        ))
+                except Exception as file_err:
+                    logger.warning(f"Failed to add file {file_path}: {file_err}")
+
+            if media_group:
+                await update.message.reply_media_group(media=media_group)
+                logger.info(f"Downloaded media group sent to user {update.effective_user.id}")
+            else:
+                await update.message.reply_text("Error: No se pudieron procesar los archivos.")
         else:
-            with open(file_path, 'rb') as video_file:
-                await update.message.reply_video(
-                    video=video_file,
-                    caption=caption,
-                    supports_streaming=True
-                )
-        logger.info(f"Downloaded file sent to user {update.effective_user.id}")
+            # Single file
+            file_path = file_paths[0]
+            file_ext = os.path.splitext(file_path)[1].lower()
+            audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+            caption = f"Descarga completada: {title}"
+
+            if file_ext in audio_extensions:
+                with open(file_path, 'rb') as audio_file:
+                    await update.message.reply_audio(
+                        audio=audio_file,
+                        caption=caption,
+                        title=title,
+                        performer=metadata.get('artist') or metadata.get('uploader')
+                    )
+            else:
+                with open(file_path, 'rb') as video_file:
+                    await update.message.reply_video(
+                        video=video_file,
+                        caption=caption,
+                        supports_streaming=True
+                    )
+            logger.info(f"Downloaded file sent to user {update.effective_user.id}")
     except Exception as e:
-        logger.error(f"Failed to send downloaded file: {e}")
+        logger.error(f"Failed to send downloaded file(s): {e}")
         await update.message.reply_text(
             "Error al enviar el archivo descargado."
         )
