@@ -81,6 +81,10 @@ Phase 12: Integration & Polish              [██████████] 100
 - Concurrent downloads with progress tracking
 - Integration with existing video/audio tools
 
+### Pending Todos
+
+- **Simplificar flujo descarga eliminando menú** — Eliminar el menú intermedio y ejecutar descarga directa al recibir URL (area: downloader)
+
 ## Active Plans
 
 **09-01: URL Auto-Detection Infrastructure** — COMPLETE
