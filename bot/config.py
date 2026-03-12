@@ -226,8 +226,10 @@ class BotConfig:
         This allows deploying to Railway without volumes by encoding
         the cookies.txt file as a base64 environment variable.
 
-        If COOKIES_CONTENT_BASE64 is set and COOKIES_FILE is not,
-        decodes the base64 content and saves it to a temporary file.
+        Priority:
+        1. If COOKIES_CONTENT_BASE64 is set, always use it (overwrites COOKIES_FILE)
+        2. If COOKIES_FILE points to existing non-empty file, use it
+        3. Otherwise, no cookies available
         """
         import base64
         import logging
@@ -239,35 +241,42 @@ class BotConfig:
         if self.COOKIES_CONTENT_BASE64:
             logger.info(f"[COOKIES] COOKIES_CONTENT_BASE64 length: {len(self.COOKIES_CONTENT_BASE64)}")
 
-        # Skip if COOKIES_FILE is already configured and exists
+        # Priority 1: If COOKIES_CONTENT_BASE64 is provided, always use it
+        # This allows overriding an empty/missing COOKIES_FILE in production
+        if self.COOKIES_CONTENT_BASE64:
+            try:
+                logger.info("[COOKIES] Attempting to decode base64 cookies...")
+                # Decode base64 content
+                cookies_content = base64.b64decode(self.COOKIES_CONTENT_BASE64).decode('utf-8')
+                logger.info(f"[COOKIES] Decoded {len(cookies_content)} bytes of cookie content")
+
+                # Write to temporary location
+                cookies_path = "/tmp/cookies.txt"
+                with open(cookies_path, "w", encoding="utf-8") as f:
+                    f.write(cookies_content)
+
+                # Update COOKIES_FILE to point to the decoded file
+                # Need to use object.__setattr__ since the dataclass is frozen
+                object.__setattr__(self, "COOKIES_FILE", cookies_path)
+
+                logger.info(f"[COOKIES] SUCCESS: Cookies file created from base64 at {cookies_path}")
+                return
+
+            except Exception as e:
+                logger.error(f"[COOKIES] ERROR: Failed to decode cookies from base64: {e}")
+                # Continue to check if we can use existing COOKIES_FILE as fallback
+
+        # Priority 2: Use existing COOKIES_FILE if it exists and has content
         if self.COOKIES_FILE and os.path.exists(self.COOKIES_FILE):
-            logger.info(f"[COOKIES] Using existing cookies file: {self.COOKIES_FILE}")
-            return
+            file_size = os.path.getsize(self.COOKIES_FILE)
+            if file_size > 0:
+                logger.info(f"[COOKIES] Using existing cookies file: {self.COOKIES_FILE} ({file_size} bytes)")
+                return
+            else:
+                logger.warning(f"[COOKIES] COOKIES_FILE exists but is empty ({file_size} bytes): {self.COOKIES_FILE}")
 
-        # Skip if no base64 content provided
-        if not self.COOKIES_CONTENT_BASE64:
-            logger.info("[COOKIES] No COOKIES_CONTENT_BASE64 provided, skipping")
-            return
-
-        try:
-            logger.info("[COOKIES] Attempting to decode base64 cookies...")
-            # Decode base64 content
-            cookies_content = base64.b64decode(self.COOKIES_CONTENT_BASE64).decode('utf-8')
-            logger.info(f"[COOKIES] Decoded {len(cookies_content)} bytes of cookie content")
-
-            # Write to temporary location
-            cookies_path = "/tmp/cookies.txt"
-            with open(cookies_path, "w", encoding="utf-8") as f:
-                f.write(cookies_content)
-
-            # Update COOKIES_FILE to point to the decoded file
-            # Need to use object.__setattr__ since the dataclass is frozen
-            object.__setattr__(self, "COOKIES_FILE", cookies_path)
-
-            logger.info(f"[COOKIES] SUCCESS: Cookies file created from base64 at {cookies_path}")
-
-        except Exception as e:
-            logger.error(f"[COOKIES] ERROR: Failed to decode cookies from base64: {e}")
+        # No cookies available
+        logger.info("[COOKIES] No valid cookies configuration found")
 
 
 def load_config() -> BotConfig:
