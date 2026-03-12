@@ -221,11 +221,15 @@ class GalleryDlDownloader(BaseDownloader):
                 config.set(("extractor",), "base-directory", temp_dir)
                 config.set(("extractor",), "directory", [""])  # Empty for flat structure
 
-                # Add cookies if available - try to get from environment or default location
+                # Add cookies if available - use system config that handles COOKIES_CONTENT_BASE64
+                from bot.config import config as bot_config
                 import os
-                cookies_file = os.environ.get('COOKIES_FILE', '/data/data/com.termux/files/home/repos/multibot2/cookies.txt')
+                cookies_file = bot_config.COOKIES_FILE
                 if cookies_file and os.path.exists(cookies_file):
+                    logger.info(f"[{correlation_id}] Using cookies file for gallery-dl: {cookies_file}")
                     config.set(("extractor", "instagram"), "cookies", cookies_file)
+                else:
+                    logger.warning(f"[{correlation_id}] No cookies file available for gallery-dl")
 
                 # Run download job
                 dl_job = job.DownloadJob(url)
