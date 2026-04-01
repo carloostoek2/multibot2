@@ -49,6 +49,7 @@ from bot.audio_joiner import AudioJoiner
 from bot.audio_format_converter import AudioFormatConverter, detect_audio_format, get_supported_audio_formats
 from bot.audio_enhancer import AudioEnhancer
 from bot.audio_effects import AudioEffects
+from bot.screenshot_processor import ScreenshotProcessor
 
 # Import downloaders for URL handling
 from bot.downloaders import (
@@ -2687,7 +2688,7 @@ async def handle_audio_split_end_time(update: Update, context: ContextTypes.DEFA
 
 
 async def handle_split_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle text messages during active split sessions.
+    """Handle text messages during active split or screenshot sessions.
 
     Routes to appropriate handler based on active session type.
 
@@ -2711,6 +2712,72 @@ async def handle_split_text_input(update: Update, context: ContextTypes.DEFAULT_
             await handle_audio_split_start_time(update, context)
         elif session.get("state") == SPLIT_WAITING_END_TIME:
             await handle_audio_split_end_time(update, context)
+        return
+
+    # Check for screenshot session (automatic count or manual times)
+    screenshot_state = context.user_data.get("screenshot_state")
+    if screenshot_state in ("waiting_count", "waiting_times"):
+        await handle_screenshot_text_input(update, context)
+        return
+
+
+async def handle_screenshot_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle text input during screenshot sessions.
+
+    For automatic mode: accepts a number for count.
+    For manual mode: accepts timestamps in various formats.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = context.user_data.get("screenshot_correlation_id", str(uuid.uuid4())[:8])
+    screenshot_state = context.user_data.get("screenshot_state")
+    mode = context.user_data.get("screenshot_mode")
+
+    text = update.message.text.strip()
+    logger.info(f"[{correlation_id}] Screenshot text input: '{text}' (state={screenshot_state}, mode={mode})")
+
+    if screenshot_state == "waiting_count" and mode == "auto":
+        # Parse count from text
+        try:
+            count = int(text)
+            if count < 1 or count > 100:
+                await update.message.reply_text(
+                    "❌ Cantidad inválida. Ingresa un número entre 1 y 100."
+                )
+                return
+
+            # Process screenshots
+            await _process_screenshots(update, context, count)
+
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Número inválido. Por favor ingresa un número entero (ej: 12)"
+            )
+
+    elif screenshot_state == "waiting_times" and mode == "manual":
+        # Parse timestamps from text
+        timestamps, error = await _parse_screenshot_times(text)
+
+        if error:
+            await update.message.reply_text(f"❌ {error}")
+            return
+
+        # Store timestamps and process
+        context.user_data["screenshot_timestamps"] = timestamps
+
+        # Show confirmation and process
+        count = len(timestamps)
+        await update.message.reply_text(f"✓ Generando {count} captura(s) en los tiempos especificados...")
+
+        # Process screenshots with stored timestamps
+        await _process_screenshots(update, context, None)
+
+    else:
+        # Not in a screenshot session, ignore
+        logger.debug(f"[{correlation_id}] Ignoring text input, not in screenshot session")
         return
 
 
@@ -3396,6 +3463,9 @@ def _get_video_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Unir Videos", callback_data="video_action:join"),
             InlineKeyboardButton("Merge con Audio", callback_data="video_action:merge_audio"),
         ],
+        [
+            InlineKeyboardButton("📸 Capturas de Pantalla", callback_data="video_action:screenshots"),
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -3433,6 +3503,53 @@ def _get_video_audio_format_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("← Volver", callback_data="back:video"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_screenshot_mode_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for screenshot mode selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🔢 Automático", callback_data="screenshot:auto"),
+            InlineKeyboardButton("✏️ Manual", callback_data="screenshot:manual"),
+        ],
+        [
+            InlineKeyboardButton("← Volver", callback_data="back:video"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_screenshot_count_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for automatic screenshot count selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("5", callback_data="screenshot_count:5"),
+            InlineKeyboardButton("10", callback_data="screenshot_count:10"),
+            InlineKeyboardButton("15", callback_data="screenshot_count:15"),
+        ],
+        [
+            InlineKeyboardButton("20", callback_data="screenshot_count:20"),
+            InlineKeyboardButton("25", callback_data="screenshot_count:25"),
+            InlineKeyboardButton("30", callback_data="screenshot_count:30"),
+        ],
+        [
+            InlineKeyboardButton("← Volver", callback_data="screenshot:back_to_mode"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_screenshot_manual_nav_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for manual screenshot time input navigation."""
+    keyboard = [
+        [
+            InlineKeyboardButton("← Volver", callback_data="screenshot:back_to_mode"),
             InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
         ],
     ]
@@ -5662,6 +5779,23 @@ async def handle_video_menu_callback(update: Update, context: ContextTypes.DEFAU
                 "Error al iniciar la sesión de unión. Por favor intenta de nuevo."
             )
 
+    elif action == "screenshots":
+        # Store file_id and show mode selection
+        context.user_data["screenshot_file_id"] = file_id
+        context.user_data["screenshot_correlation_id"] = correlation_id
+        context.user_data["screenshot_mode"] = None
+        context.user_data["screenshot_state"] = "select_mode"
+
+        await query.edit_message_text(
+            "📸 *Capturas de Pantalla*\n\n"
+            "Elige el modo de captura:\n\n"
+            "🔢 *Automático*: Genera capturas uniformemente distribuidas en el video\n"
+            "✏️ *Manual*: Especifica los tiempos exactos para cada captura",
+            parse_mode="Markdown",
+            reply_markup=_get_screenshot_mode_keyboard()
+        )
+        logger.info(f"[{correlation_id}] Screenshot mode selection shown to user {user_id}")
+
     else:
         logger.warning(f"[{correlation_id}] Unknown video menu action: {action}")
         await query.edit_message_text("Acción no reconocida. Por favor intenta de nuevo.")
@@ -5843,6 +5977,280 @@ async def handle_video_format_selection(update: Update, context: ContextTypes.DE
             context.user_data.pop("video_menu_action", None)
 
 
+async def handle_screenshot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle screenshot-related callback queries.
+
+    Routes to appropriate action based on callback data:
+    - screenshot:auto: Show count selection keyboard
+    - screenshot:manual: Prompt for timestamps
+    - screenshot:back_to_mode: Return to mode selection
+    - screenshot_count:*: Process automatic count selection
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+    correlation_id = context.user_data.get("screenshot_correlation_id", str(uuid.uuid4())[:8])
+
+    logger.info(f"[{correlation_id}] Screenshot callback: {callback_data} from user {user_id}")
+
+    # Get file_id from context
+    file_id = context.user_data.get("screenshot_file_id")
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found for screenshots")
+        await query.edit_message_text("Error: no se encontró el video. Por favor envía el video de nuevo.")
+        return
+
+    # Route based on callback data
+    if callback_data == "screenshot:auto":
+        # Show count selection keyboard
+        context.user_data["screenshot_mode"] = "auto"
+        context.user_data["screenshot_state"] = "waiting_count"
+
+        await query.edit_message_text(
+            "🔢 *Modo Automático*\n\n"
+            "Selecciona la cantidad de capturas o envía un número directamente.\n\n"
+            "Las capturas se distribuirán均匀e a lo largo del video.",
+            parse_mode="Markdown",
+            reply_markup=_get_screenshot_count_keyboard()
+        )
+
+    elif callback_data == "screenshot:manual":
+        # Prompt for timestamps
+        context.user_data["screenshot_mode"] = "manual"
+        context.user_data["screenshot_state"] = "waiting_times"
+
+        await query.edit_message_text(
+            "✏️ *Modo Manual*\n\n"
+            "Ingresa los tiempos exactos para las capturas.\n\n"
+            "Formatos aceptados:\n"
+            "• Minutos:segundos → `1:30`, `3:45`\n"
+            "• Segundos → `85`, `160`\n"
+            "• Combinados → `1:30, 85, 3:45`\n\n"
+            "Ejemplo: `1:25, 2:40, 5:10`",
+            parse_mode="Markdown",
+            reply_markup=_get_screenshot_manual_nav_keyboard()
+        )
+
+    elif callback_data == "screenshot:back_to_mode":
+        # Return to mode selection
+        context.user_data["screenshot_mode"] = None
+        context.user_data["screenshot_state"] = "select_mode"
+
+        await query.edit_message_text(
+            "📸 *Capturas de Pantalla*\n\n"
+            "Elige el modo de captura:\n\n"
+            "🔢 *Automático*: Genera capturas uniformemente distribuidas en el video\n"
+            "✏️ *Manual*: Especifica los tiempos exactos para cada captura",
+            parse_mode="Markdown",
+            reply_markup=_get_screenshot_mode_keyboard()
+        )
+
+    elif callback_data.startswith("screenshot_count:"):
+        # Process automatic count selection
+        try:
+            count = int(callback_data.split(":")[1])
+            await _process_screenshots(update, context, count)
+        except ValueError:
+            await query.edit_message_text("Cantidad inválida.")
+            logger.warning(f"[{correlation_id}] Invalid screenshot count: {callback_data}")
+
+
+async def _process_screenshots(update: Update, context: ContextTypes.DEFAULT_TYPE, count: int) -> None:
+    """Process screenshot extraction and sending.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        count: Number of screenshots (for auto mode) or None for manual
+    """
+    query = update.callback_query
+    correlation_id = context.user_data.get("screenshot_correlation_id", str(uuid.uuid4())[:8])
+    user_id = update.effective_user.id
+    file_id = context.user_data.get("screenshot_file_id")
+
+    mode = context.user_data.get("screenshot_mode")
+
+    # Show processing message
+    processing_msg = None
+    if hasattr(query, 'message') and query.message:
+        try:
+            processing_msg = await query.message.reply_text("⏳ Procesando capturas de pantalla...")
+        except Exception:
+            processing_msg = None
+
+    with TempManager(correlation_id) as temp_mgr:
+        try:
+            # Download video
+            input_filename = f"screenshot_input_{correlation_id}.mp4"
+            input_path = temp_mgr.get_temp_path(input_filename)
+
+            logger.info(f"[{correlation_id}] Downloading video for screenshots from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+                logger.info(f"[{correlation_id}] Video downloaded to {input_path}")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download video: {e}")
+                raise DownloadError("No pude descargar el video") from e
+
+            # Validate video
+            is_valid, error_msg = validate_video_file(str(input_path))
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Video validation failed: {error_msg}")
+                raise ValidationError(error_msg)
+
+            # Create screenshot processor
+            processor = ScreenshotProcessor(str(input_path), correlation_id)
+
+            # Extract screenshots
+            if mode == "auto":
+                screenshot_paths = await processor.extract_auto(count)
+            elif mode == "manual":
+                timestamps = context.user_data.get("screenshot_timestamps", [])
+                screenshot_paths = await processor.extract_at_times(timestamps)
+            else:
+                raise ValueError(f"Unknown screenshot mode: {mode}")
+
+            # Delete processing message if exists
+            if processing_msg:
+                try:
+                    await processing_msg.delete()
+                except Exception:
+                    pass
+
+            # Send screenshots in albums of 10
+            await _send_screenshots_in_albums(update, context, screenshot_paths, correlation_id)
+
+            # Cleanup
+            processor.cleanup()
+
+            # Clear screenshot context
+            context.user_data.pop("screenshot_file_id", None)
+            context.user_data.pop("screenshot_correlation_id", None)
+            context.user_data.pop("screenshot_mode", None)
+            context.user_data.pop("screenshot_state", None)
+            context.user_data.pop("screenshot_timestamps", None)
+
+            logger.info(f"[{correlation_id}] Screenshots sent successfully to user {user_id}")
+
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Screenshot processing error: {e}")
+            if processing_msg:
+                try:
+                    await processing_msg.delete()
+                except Exception:
+                    pass
+            error_text = str(e) if e else "Error desconocido"
+            if hasattr(query, 'message') and query.message:
+                await query.message.reply_text(f"❌ Error: {error_text}")
+
+
+async def _send_screenshots_in_albums(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    screenshot_paths: list,
+    correlation_id: str
+) -> None:
+    """Send screenshots grouped in albums of max 10.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        screenshot_paths: List of paths to screenshot files
+        correlation_id: Correlation ID for logging
+    """
+    from telegram import InputMediaPhoto
+
+    user_id = update.effective_user.id
+    total = len(screenshot_paths)
+    album_size = 10
+
+    logger.info(f"[{correlation_id}] Sending {total} screenshots in albums to user {user_id}")
+
+    for i in range(0, total, album_size):
+        album_paths = screenshot_paths[i:i + album_size]
+        album_num = (i // album_size) + 1
+        total_albums = (total + album_size - 1) // album_size
+
+        media_group = []
+        for j, path in enumerate(album_paths):
+            global_idx = i + j + 1
+            caption = f"Captura {global_idx}/{total}" if j == 0 else None
+            media_group.append(InputMediaPhoto(media=open(path, 'rb'), caption=caption))
+
+        try:
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.message.reply_media_group(media=media_group)
+            elif hasattr(update, 'message') and update.message:
+                await update.message.reply_media_group(media=media_group)
+
+            logger.info(f"[{correlation_id}] Sent album {album_num}/{total_albums} ({len(album_paths)} screenshots)")
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Failed to send album {album_num}: {e}")
+            # Try sending individually as fallback
+            for path in album_paths:
+                try:
+                    with open(path, 'rb') as f:
+                        if hasattr(update, 'callback_query') and update.callback_query:
+                            await update.callback_query.message.reply_photo(photo=f)
+                        elif hasattr(update, 'message') and update.message:
+                            await update.message.reply_photo(photo=f)
+                except Exception as ex:
+                    logger.error(f"[{correlation_id}] Failed to send individual screenshot: {ex}")
+
+
+async def _parse_screenshot_times(text: str) -> tuple[list[float], str]:
+    """Parse screenshot timestamps from user input.
+
+    Supports formats:
+    - MM:SS or M:SS -> 1:30, 3:45
+    - Seconds only -> 85, 160
+    - Mixed/combined -> 1:30, 85, 3:45
+
+    Args:
+        text: User input text
+
+    Returns:
+        Tuple of (list of timestamps in seconds, error message or empty string)
+    """
+    timestamps = []
+    parts = text.replace(' ', '').split(',')
+
+    for part in parts:
+        if not part:
+            continue
+
+        if ':' in part:
+            # Format: MM:SS or M:SS
+            try:
+                if part.count(':') == 1:
+                    minutes, seconds = part.split(':')
+                    ts = int(minutes) * 60 + int(seconds)
+                else:
+                    return [], f"Formato inválido: {part}. Usa M:SS o MM:SS"
+                timestamps.append(ts)
+            except ValueError:
+                return [], f"No pude entender el tiempo: {part}"
+        else:
+            # Format: seconds only
+            try:
+                timestamps.append(int(part))
+            except ValueError:
+                return [], f"No pude entender el número: {part}"
+
+    if not timestamps:
+        return [], "No se encontraron tiempos válidos. Usa el formato: 1:30, 85, 3:45"
+
+    return timestamps, ""
+
+
 async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle cancel callback from inline keyboard.
 
@@ -5899,6 +6307,12 @@ async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_T
     # Clear merge keys
     context.user_data.pop("merge_video_file_id", None)
     context.user_data.pop("merge_video_correlation_id", None)
+
+    # Clear screenshot keys
+    context.user_data.pop("screenshot_file_id", None)
+    context.user_data.pop("screenshot_correlation_id", None)
+    context.user_data.pop("screenshot_mode", None)
+    context.user_data.pop("screenshot_state", None)
 
     await query.edit_message_text("Operación cancelada.")
     logger.info(f"[{correlation_id}] Operation cancelled by user {user_id}")
