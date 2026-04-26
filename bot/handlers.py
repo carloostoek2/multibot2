@@ -7332,9 +7332,12 @@ async def _send_downloaded_file_with_menu(
             # Group files by type (images vs videos)
             image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
             video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+            audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
 
+            # Send first batch (up to 10) as media group
+            first_batch = file_paths[:10]
             media_group = []
-            for i, file_path in enumerate(file_paths[:10]):  # Telegram limit: 10 items per group
+            for i, file_path in enumerate(first_batch):
                 file_ext = os.path.splitext(file_path)[1].lower()
                 # Use original caption for first item, include item count
                 if i == 0:
@@ -7354,27 +7357,75 @@ async def _send_downloaded_file_with_menu(
                             caption=caption if i == 0 else None,
                             supports_streaming=True
                         ))
+                    else:
+                        # Audio or unknown - add as photo for now (fallback)
+                        media_group.append(InputMediaPhoto(
+                            media=open(file_path, 'rb'),
+                            caption=caption if i == 0 else None
+                        ))
                 except Exception as file_err:
                     logger.warning(f"[{correlation_id}] Failed to add file {file_path}: {file_err}")
 
+            has_video_menu = False
             if media_group:
                 sent_messages = await message.reply_media_group(
                     media=media_group
                 )
                 logger.info(f"[{correlation_id}] Sent media group with {len(sent_messages)} items")
 
-                # Show post-download menu for the first video if any
+                # Check if we need to show video menu
                 first_video = next((m for m in media_group if isinstance(m, InputMediaVideo)), None)
                 if first_video:
-                    context.user_data["video_menu_correlation_id"] = correlation_id
-                    reply_markup = _get_video_menu_keyboard()
-                    await message.reply_text(
-                        "¿Qué quieres hacer con estos videos?",
-                        reply_markup=reply_markup
-                    )
-            else:
+                    has_video_menu = True
+
+            # Send remaining files individually (if more than 10)
+            remaining = file_paths[10:]
+            if remaining:
+                logger.info(f"[{correlation_id}] Sending {len(remaining)} remaining files individually")
+                for i, file_path in enumerate(remaining):
+                    file_ext = os.path.splitext(file_path)[1].lower()
+                    item_caption = f"{main_caption}\n\n({len(first_batch) + i + 1}/{len(file_paths)})"
+
+                    try:
+                        if file_ext in image_extensions:
+                            with open(file_path, 'rb') as photo_file:
+                                await message.reply_photo(
+                                    photo=photo_file,
+                                    caption=item_caption
+                                )
+                        elif file_ext in video_extensions:
+                            with open(file_path, 'rb') as video_file:
+                                sent_msg = await message.reply_video(
+                                    video=video_file,
+                                    caption=item_caption,
+                                    supports_streaming=True
+                                )
+                            has_video_menu = True
+                        elif file_ext in audio_extensions:
+                            with open(file_path, 'rb') as audio_file:
+                                await message.reply_audio(
+                                    audio=audio_file,
+                                    caption=item_caption,
+                                    title=title,
+                                    performer=metadata.get('artist') or metadata.get('uploader')
+                                )
+                        else:
+                            # Fallback: send as document
+                            with open(file_path, 'rb') as doc_file:
+                                await message.reply_document(
+                                    document=doc_file,
+                                    caption=item_caption
+                                )
+                    except Exception as file_err:
+                        logger.warning(f"[{correlation_id}] Failed to send remaining file {file_path}: {file_err}")
+
+            # Show post-download menu for videos if any video was sent
+            if has_video_menu:
+                context.user_data["video_menu_correlation_id"] = correlation_id
+                reply_markup = _get_video_menu_keyboard()
                 await message.reply_text(
-                    f"Error: No se pudieron procesar los {len(file_paths)} archivos."
+                    "¿Qué quieres hacer con estos videos?",
+                    reply_markup=reply_markup
                 )
 
         else:
