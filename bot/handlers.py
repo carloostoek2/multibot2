@@ -7270,6 +7270,41 @@ def _build_caption_from_metadata(metadata: dict, default_title: str = "Descarga"
     return full_caption
 
 
+def _split_file_if_needed(file_path: str, output_dir: str, correlation_id: str) -> list[str]:
+    """Check file size and split if exceeds Telegram limit.
+
+    Args:
+        file_path: Path to the file to check
+        output_dir: Directory for output segments
+        correlation_id: Unique download ID for logging
+
+    Returns:
+        List of file paths (original if small, split parts if large)
+    """
+    from bot.split_processor import VideoSplitter
+
+    file_size = os.path.getsize(file_path)
+    logger.info(f"[{correlation_id}] File size: {file_size / (1024 * 1024):.1f} MB")
+
+    if file_size <= TELEGRAM_MAX_FILE_SIZE:
+        logger.info(f"[{correlation_id}] File within Telegram limit, no splitting needed")
+        return [file_path]
+
+    # File exceeds Telegram limit - need to split
+    file_size_mb = file_size / (1024 * 1024)
+    max_size_mb = TELEGRAM_MAX_FILE_SIZE / (1024 * 1024)
+    logger.info(f"[{correlation_id}] File exceeds {max_size_mb:.0f}MB limit, splitting required")
+
+    # Calculate number of parts needed (add 1 to ensure each part is under limit)
+    num_parts = int((file_size / TELEGRAM_MAX_FILE_SIZE) + 1)
+    # Limit to prevent too many parts
+    num_parts = min(10, max(1, num_parts))
+
+    logger.info(f"[{correlation_id}] Splitting into {num_parts} parts")
+    splitter = VideoSplitter(file_path, output_dir)
+    return splitter.split_by_parts(num_parts)
+
+
 async def _send_downloaded_file_with_menu(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -7333,6 +7368,17 @@ async def _send_downloaded_file_with_menu(
             image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
             video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
             audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
+
+            # Check each file size and split if needed
+            processed_file_paths = []
+            for fp in file_paths:
+                fp_dir = os.path.dirname(fp)
+                split_dir = os.path.join(fp_dir, "split")
+                parts = _split_file_if_needed(fp, split_dir, correlation_id)
+                processed_file_paths.extend(parts)
+
+            file_paths = processed_file_paths
+            logger.info(f"[{correlation_id}] After splitting: {len(file_paths)} files")
 
             # Send first batch (up to 10) as media group
             first_batch = file_paths[:10]
@@ -7429,45 +7475,66 @@ async def _send_downloaded_file_with_menu(
                 )
 
         else:
-            # Single file - detect type and send appropriately
+            # Single file - check size and split if needed
             file_path = file_paths[0]
+
+            # Get output directory for split files
+            file_dir = os.path.dirname(file_path)
+            split_dir = os.path.join(file_dir, "split")
+
+            # Check if file needs splitting
+            file_parts = _split_file_if_needed(file_path, split_dir, correlation_id)
             file_ext = os.path.splitext(file_path)[1].lower()
             audio_extensions = {'.mp3', '.aac', '.wav', '.ogg', '.flac', '.m4a', '.opus'}
             image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 
-            if format_type == 'audio' or file_ext in audio_extensions:
-                # Send as audio (use title-based caption for audio)
-                with open(file_path, 'rb') as audio_file:
-                    await message.reply_audio(
-                        audio=audio_file,
-                        caption=main_caption,
-                        title=title,
-                        performer=metadata.get('artist') or metadata.get('uploader')
-                    )
-            elif file_ext in image_extensions:
-                # Send as photo with original caption
-                with open(file_path, 'rb') as photo_file:
-                    await message.reply_photo(
-                        photo=photo_file,
-                        caption=main_caption
-                    )
-            else:
-                # Send as video with post-download menu
-                with open(file_path, 'rb') as video_file:
-                    sent_message = await message.reply_video(
-                        video=video_file,
-                        caption=main_caption,
-                        supports_streaming=True
-                    )
+            # Send each part
+            num_parts = len(file_parts)
+            for i, part_path in enumerate(file_parts):
+                # Build caption with part number
+                if num_parts > 1:
+                    part_caption = f"{main_caption}\n\n(Parte {i+1}/{num_parts})"
+                else:
+                    part_caption = main_caption
 
-                # Show post-download menu for video
-                context.user_data["video_menu_file_id"] = sent_message.video.file_id
-                context.user_data["video_menu_correlation_id"] = correlation_id
+                if format_type == 'audio' or file_ext in audio_extensions:
+                    # Send as audio
+                    with open(part_path, 'rb') as audio_file:
+                        await message.reply_audio(
+                            audio=audio_file,
+                            caption=part_caption,
+                            title=title,
+                            performer=metadata.get('artist') or metadata.get('uploader')
+                        )
+                elif file_ext in image_extensions:
+                    # Send as photo
+                    with open(part_path, 'rb') as photo_file:
+                        await message.reply_photo(
+                            photo=photo_file,
+                            caption=part_caption
+                        )
+                else:
+                    # Send as video
+                    with open(part_path, 'rb') as video_file:
+                        sent_message = await message.reply_video(
+                            video=video_file,
+                            caption=part_caption,
+                            supports_streaming=True
+                        )
 
-                reply_markup = _get_video_menu_keyboard()
+                    # Show post-download menu only for last video part
+                    if i == num_parts - 1:
+                        context.user_data["video_menu_file_id"] = sent_message.video.file_id
+                        context.user_data["video_menu_correlation_id"] = correlation_id
+                        reply_markup = _get_video_menu_keyboard()
+                        await message.reply_text(
+                            "¿Qué quieres hacer con este video?",
+                            reply_markup=reply_markup
+                        )
+
+            if num_parts > 1:
                 await message.reply_text(
-                    "¿Qué quieres hacer con este video?",
-                    reply_markup=reply_markup
+                    f"Video dividido en {num_parts} partes y enviado."
                 )
 
         logger.info(f"[{correlation_id}] Downloaded file(s) sent to user {update.effective_user.id}")
