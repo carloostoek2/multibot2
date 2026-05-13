@@ -46,7 +46,7 @@ from bot.handlers import (
     handle_effects_command, handle_pipeline_builder,
     handle_audio_menu_callback, handle_audio_menu_format_selection,
     handle_video_menu_callback, handle_video_format_selection,
-    handle_cancel_callback, handle_back_callback,
+    handle_cancel_callback, handle_voice_cancel_callback, handle_back_callback,
     handle_split_text_input, handle_screenshot_callback,
     handle_join_video_callback, handle_join_audio_callback,
     handle_download_command, handle_url_detection,
@@ -124,6 +124,7 @@ def main() -> None:
 
     # Navigation handlers - must be first to catch cancel/back before other patterns
     application.add_handler(CallbackQueryHandler(handle_cancel_callback, pattern="^cancel$"))
+    application.add_handler(CallbackQueryHandler(handle_voice_cancel_callback, pattern="^voice_cancel:"))
     application.add_handler(CallbackQueryHandler(handle_back_callback, pattern="^back:"))
 
     # Download callback handlers (specific patterns before general)

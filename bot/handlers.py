@@ -2783,10 +2783,9 @@ async def handle_screenshot_text_input(update: Update, context: ContextTypes.DEF
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle voice messages by converting them to MP3 format.
+    """Handle voice messages by converting them to MP3 format with automatic processing.
 
-    Downloads the voice note (OGG Opus), converts it to MP3 format,
-    and sends it back as a downloadable audio file.
+    Flow: voice note → MP3 → normalize to -16 LUFS (podcast) → bass boost (intensity 4) → send processed audio.
 
     Args:
         update: Telegram update object
@@ -2794,7 +2793,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     """
     user_id = update.effective_user.id
     correlation_id = str(uuid.uuid4())[:8]
-    logger.info(f"[{correlation_id}] Voice message received from user {user_id}")
+    logger.info(f"[{correlation_id}] Voice message received from user {user_id} - running podcast pipeline")
 
     # Get voice from message
     voice = update.message.voice
@@ -2812,24 +2811,36 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(error_msg)
             return
 
-    # Send "processing" message to user
+    # Send "processing" message with cancel button
+    keyboard = [[InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     processing_message = None
     try:
         processing_message = await update.message.reply_text(
-            "Convirtiendo nota de voz a MP3..."
+            "🎙️ Procesando nota de voz...\n\n"
+            "1️⃣ Convirtiendo a MP3...\n"
+            "⏳ Espera por favor",
+            reply_markup=reply_markup
         )
     except Exception as e:
         logger.warning(f"[{correlation_id}] Could not send processing message to user {user_id}: {e}")
+
+    # Store correlation_id for cancel handling
+    context.user_data["voice_pipeline_correlation_id"] = correlation_id
 
     # Use TempManager as context manager for automatic cleanup
     with TempManager() as temp_mgr:
         try:
             # Generate safe filenames
-            # Telegram voice messages are OGG Opus format with .oga extension
             input_filename = f"voice_{user_id}_{voice.file_unique_id}.oga"
-            output_filename = f"voice_{user_id}_{voice.file_unique_id}.mp3"
+            mp3_filename = f"voice_{user_id}_{voice.file_unique_id}.mp3"
+            normalized_filename = f"normalized_{user_id}_{correlation_id}.mp3"
+            output_filename = f"podcast_{user_id}_{correlation_id}.mp3"
 
             input_path = temp_mgr.get_temp_path(input_filename)
+            mp3_path = temp_mgr.get_temp_path(mp3_filename)
+            normalized_path = temp_mgr.get_temp_path(normalized_filename)
             output_path = temp_mgr.get_temp_path(output_filename)
 
             # Download voice file
@@ -2849,17 +2860,17 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
             # Check disk space before processing
             voice_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
-            required_space = estimate_required_space(int(voice_size_mb))
+            required_space = estimate_required_space(int(voice_size_mb)) * 3  # 3x for pipeline
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
                 logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
                 raise ValidationError(space_error)
 
-            # Convert to MP3 with timeout
+            # Step 1: Convert to MP3
             logger.info(f"[{correlation_id}] Converting voice to MP3 for user {user_id}")
             try:
                 loop = asyncio.get_event_loop()
-                converter = VoiceToMp3Converter(str(input_path), str(output_path))
+                converter = VoiceToMp3Converter(str(input_path), str(mp3_path))
                 success = await asyncio.wait_for(
                     loop.run_in_executor(None, converter.process),
                     timeout=config.PROCESSING_TIMEOUT
@@ -2873,20 +2884,97 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 logger.error(f"[{correlation_id}] Voice to MP3 conversion timed out for user {user_id}")
                 raise ProcessingTimeoutError("La conversión tardó demasiado") from e
 
+            # Update progress message
+            try:
+                await processing_message.edit_text(
+                    "🎙️ Procesando nota de voz...\n\n"
+                    "✅ Convertido a MP3\n"
+                    "2️⃣ Normalizando a -16 LUFS (podcast)...\n"
+                    "⏳ Espera por favor",
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+            # Step 2: Normalize to -16 LUFS (podcast preset)
+            logger.info(f"[{correlation_id}] Normalizing to -16 LUFS (podcast) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(mp3_path), str(normalized_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.normalize, -16.0),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Normalization failed for user {user_id}")
+                    raise AudioEffectsError("No pude normalizar el audio")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Normalization timed out for user {user_id}")
+                raise ProcessingTimeoutError("La normalización tardó demasiado") from e
+
+            # Update progress message
+            try:
+                await processing_message.edit_text(
+                    "🎙️ Procesando nota de voz...\n\n"
+                    "✅ Convertido a MP3\n"
+                    "✅ Normalizado a -16 LUFS\n"
+                    "3️⃣ Aplicando bass boost (intensidad 4)...\n"
+                    "⏳ Espera por favor",
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+            # Step 3: Apply bass boost (intensity 4)
+            logger.info(f"[{correlation_id}] Applying bass boost (intensity 4) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                enhancer = AudioEnhancer(str(normalized_path), str(output_path))
+                success = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: enhancer.bass_boost(4.0)),
+                    timeout=config.PROCESSING_TIMEOUT
+                )
+
+                if not success:
+                    logger.error(f"[{correlation_id}] Bass boost failed for user {user_id}")
+                    raise AudioEnhancementError("No pude aplicar el bass boost")
+
+            except asyncio.TimeoutError as e:
+                logger.error(f"[{correlation_id}] Bass boost timed out for user {user_id}")
+                raise ProcessingTimeoutError("El bass boost tardó demasiado") from e
+
+            # Update progress message
+            try:
+                await processing_message.edit_text(
+                    "🎙️ Procesando nota de voz...\n\n"
+                    "✅ Convertido a MP3\n"
+                    "✅ Normalizado a -16 LUFS\n"
+                    "✅ Bass boost aplicado\n"
+                    "📤 Enviando archivo...",
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
             # Send as audio file with metadata
-            logger.info(f"[{correlation_id}] Sending MP3 to user {user_id}")
+            logger.info(f"[{correlation_id}] Sending processed audio to user {user_id}")
             try:
                 with open(output_path, "rb") as audio_file:
                     await update.message.reply_audio(
                         audio=audio_file,
-                        title="Nota de voz",
-                        performer="Telegram Voice",
-                        filename=f"voice_{user_id}.mp3"
+                        title="Nota de voz procesada",
+                        performer="Podcast Pipeline",
+                        filename=f"voice_{user_id}_processed.mp3"
                     )
-                logger.info(f"[{correlation_id}] MP3 sent successfully to user {user_id}")
+                logger.info(f"[{correlation_id}] Processed audio sent successfully to user {user_id}")
             except Exception as e:
-                logger.error(f"[{correlation_id}] Failed to send MP3 to user {user_id}: {e}")
+                logger.error(f"[{correlation_id}] Failed to send processed audio to user {user_id}: {e}")
                 raise
+
+            # Clean up correlation_id
+            context.user_data.pop("voice_pipeline_correlation_id", None)
 
             # Delete processing message on success
             if processing_message:
@@ -2895,10 +2983,13 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 except Exception as e:
                     logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
 
-        except (DownloadError, ValidationError, VoiceToMp3Error, ProcessingTimeoutError) as e:
+        except (DownloadError, ValidationError, VoiceToMp3Error, AudioEffectsError, AudioEnhancementError, ProcessingTimeoutError) as e:
             # Handle known processing errors
             logger.error(f"[{correlation_id}] Processing error: {e}")
             await handle_processing_error(update, e, user_id)
+
+            # Clean up correlation_id
+            context.user_data.pop("voice_pipeline_correlation_id", None)
 
             # Delete processing message on error
             if processing_message:
@@ -6305,6 +6396,9 @@ async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("pipeline_effects", None)
     context.user_data.pop("pipeline_selecting_effect", None)
 
+    # Clear voice pipeline keys
+    context.user_data.pop("voice_pipeline_correlation_id", None)
+
     # Clear merge keys
     context.user_data.pop("merge_video_file_id", None)
     context.user_data.pop("merge_video_correlation_id", None)
@@ -6317,6 +6411,35 @@ async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.edit_message_text("Operación cancelada.")
     logger.info(f"[{correlation_id}] Operation cancelled by user {user_id}")
+
+
+async def handle_voice_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle cancel callback for voice processing pipeline.
+
+    Cancels the voice note processing pipeline and cleans up resources.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse correlation_id from callback data
+    if not callback_data.startswith("voice_cancel:"):
+        logger.warning(f"Invalid voice cancel callback data: {callback_data}")
+        return
+
+    correlation_id = callback_data.split(":")[1]
+
+    # Clear voice pipeline keys
+    context.user_data.pop("voice_pipeline_correlation_id", None)
+
+    await query.edit_message_text("❌ Procesamiento de nota de voz cancelado.")
+    logger.info(f"[{correlation_id}] Voice pipeline cancelled by user {user_id}")
 
 
 async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
