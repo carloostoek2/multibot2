@@ -57,6 +57,7 @@ from bot.downloaders import (
     download_url,
     URLDetector,
     URLType,
+    is_youtube_url,
 )
 from bot.downloaders.exceptions import (
     DownloadError,
@@ -6717,8 +6718,183 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data[f"download_url_{correlation_id}"] = url
     context.user_data[f"download_correlation_id_{user_id}"] = correlation_id
 
+    # YouTube URLs get automatic screenshot extraction (no questions asked)
+    if is_youtube_url(url):
+        logger.info(f"[{correlation_id}] YouTube URL detected, starting auto screenshot flow")
+        await _handle_youtube_auto_screenshot_flow(update, context, url, correlation_id)
+        return
+
     # Start download immediately (no menu)
     await _start_download_from_message(update, context, correlation_id, url)
+
+
+async def _handle_youtube_auto_screenshot_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    url: str,
+    correlation_id: str
+) -> None:
+    """Handle YouTube URLs automatically: download + 10 screenshots + send + cleanup.
+
+    When a YouTube URL is detected, this function automatically downloads the video,
+    extracts 10 evenly distributed screenshots, sends them to the user,
+    and cleans up all temporary files — no questions asked.
+    """
+    message = update.message
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    facade = DownloadFacade()
+
+    try:
+        await facade.start()
+
+        # Store for cancellation support (matches cancel handler expectations)
+        context.user_data[f"download_facade_{correlation_id}"] = facade
+        context.user_data[f"download_format_{correlation_id}"] = "video"
+        context.user_data[f"download_status_{correlation_id}"] = "downloading"
+
+        # Send initial progress message with cancel button
+        reply_markup = _get_download_cancel_keyboard(correlation_id)
+        progress_message = await message.reply_text(
+            "Descargando video de YouTube...",
+            reply_markup=reply_markup
+        )
+
+        # Progress tracking with rate limiting
+        last_message_text = ["Descargando video de YouTube..."]
+        last_update_time = [0.0]
+
+        async def progress_callback(progress: dict) -> None:
+            from bot.downloaders.progress_tracker import format_progress_message
+
+            status = progress.get('status', 'downloading')
+
+            current_time = time.time()
+            if current_time - last_update_time[0] < 1.0 and status == 'downloading':
+                return
+
+            if status == 'downloading':
+                msg = f"Descargando video de YouTube...\n{format_progress_message(progress)}"
+                if msg != last_message_text[0]:
+                    try:
+                        await progress_message.edit_text(msg, reply_markup=reply_markup)
+                        last_message_text[0] = msg
+                        last_update_time[0] = current_time
+                    except Exception:
+                        pass
+
+            elif status == 'completed':
+                try:
+                    await progress_message.edit_text("Descarga completada, procesando...")
+                except Exception:
+                    pass
+
+            elif status == 'error':
+                error_msg = progress.get('error', 'Error desconocido')
+                try:
+                    await progress_message.edit_text(f"Error en descarga: {error_msg}")
+                except Exception:
+                    pass
+
+        # Create progress tracker
+        from bot.downloaders.progress_tracker import ProgressTracker
+        tracker = ProgressTracker(
+            min_update_interval=3.0,
+            min_percent_change=5.0,
+            on_update=lambda p: asyncio.create_task(progress_callback(p))
+        )
+
+        # Download the video (keep file on success for screenshot extraction)
+        config_overrides = {
+            'extract_audio': False,
+            'cleanup_on_success': False,
+        }
+
+        result = await facade.download(
+            url=url,
+            chat_id=chat_id,
+            config_overrides=config_overrides
+        )
+
+        if not result.success:
+            context.user_data[f"download_status_{correlation_id}"] = "error"
+            await progress_message.edit_text(
+                f"Error al descargar el video: {getattr(result, 'error_message', 'Error desconocido')}"
+            )
+            return
+
+        context.user_data[f"download_status_{correlation_id}"] = "completed"
+
+        if not result.file_path:
+            await progress_message.edit_text("Error: No se encontró el archivo descargado")
+            return
+
+        video_path = result.file_path
+
+        # Update message to show screenshot extraction is starting
+        try:
+            await progress_message.edit_text("Generando capturas de pantalla...")
+        except Exception:
+            pass
+
+        # Extract 10 evenly distributed screenshots
+        processor = ScreenshotProcessor(video_path, correlation_id)
+        try:
+            screenshot_paths = await processor.extract_auto(10)
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Screenshot extraction failed: {e}")
+            await progress_message.edit_text(f"Error al generar capturas: {str(e)}")
+            processor.cleanup()
+            return
+
+        # Delete progress message before sending results
+        try:
+            await progress_message.delete()
+        except Exception:
+            pass
+
+        # Send the 10 screenshots in albums
+        await _send_screenshots_in_albums(update, context, screenshot_paths, correlation_id)
+
+        logger.info(f"[{correlation_id}] YouTube auto screenshot flow completed for user {user_id}")
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] YouTube auto screenshot error: {type(e).__name__}: {e}")
+        error_name = type(e).__name__
+        try:
+            await message.reply_text(
+                f"Error inesperado: {error_name}. Intenta de nuevo más tarde."
+            )
+        except Exception:
+            pass
+    finally:
+        # Clean up user_data
+        context.user_data.pop(f"download_facade_{correlation_id}", None)
+        context.user_data.pop(f"download_status_{correlation_id}", None)
+        context.user_data.pop(f"download_format_{correlation_id}", None)
+        # Keep download_url_{correlation_id} for potential retry
+
+        # Stop facade (stops download manager)
+        try:
+            await facade.stop()
+        except Exception:
+            pass
+
+        # Clean up downloaded video file
+        if 'video_path' in locals() and video_path and os.path.exists(video_path):
+            try:
+                os.remove(video_path)
+                logger.debug(f"[{correlation_id}] Cleaned up video file: {video_path}")
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Failed to clean up video file: {e}")
+
+        # Clean up screenshot artifacts if processor was created
+        if 'processor' in locals():
+            try:
+                processor.cleanup()
+            except Exception:
+                pass
 
 
 async def handle_download_format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
