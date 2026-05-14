@@ -55,7 +55,14 @@ from bot.handlers import (
     handle_postdownload_callback, handle_postdownload_audio_callback,
     handle_postdownload_format_callback, handle_postdownload_intensity_callback,
     handle_postdownload_effect_strength_callback,
-    handle_recent_downloads, handle_reprocess_download
+    handle_recent_downloads, handle_reprocess_download,
+    # Image handlers
+    handle_photo, handle_image_document,
+    handle_image_menu_callback,
+    handle_image_compress_callback, handle_image_convert_callback,
+    handle_image_resize_callback,
+    # YouTube menu handler
+    handle_youtube_menu_callback,
 )
 from bot.error_handler import error_handler
 from bot.temp_manager import active_temp_managers
@@ -185,6 +192,15 @@ def main() -> None:
     # Screenshot handlers
     application.add_handler(CallbackQueryHandler(handle_screenshot_callback, pattern="^screenshot(:|_count:)"))
 
+    # Image processing callback handlers
+    application.add_handler(CallbackQueryHandler(handle_image_compress_callback, pattern="^image_compress:"))
+    application.add_handler(CallbackQueryHandler(handle_image_convert_callback, pattern="^image_convert:"))
+    application.add_handler(CallbackQueryHandler(handle_image_resize_callback, pattern="^image_resize:"))
+    application.add_handler(CallbackQueryHandler(handle_image_menu_callback, pattern="^image_action:"))
+
+    # YouTube URL menu handler (must be before general download callbacks)
+    application.add_handler(CallbackQueryHandler(handle_youtube_menu_callback, pattern="^youtube:"))
+
     # Join session button handlers (for done/cancel buttons)
     application.add_handler(CallbackQueryHandler(handle_join_video_callback, pattern="^join_video_action:"))
     application.add_handler(CallbackQueryHandler(handle_join_audio_callback, pattern="^join_audio_action:"))
@@ -202,6 +218,12 @@ def main() -> None:
 
     # Add handler for audio files (MP3, OGG, etc.)
     application.add_handler(MessageHandler(filters.AUDIO, handle_audio_file))
+
+    # Add handler for photo messages (inline images from camera/gallery)
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    # Add handler for image files sent as documents (original quality)
+    application.add_handler(MessageHandler(filters.Document.IMAGE, handle_image_document))
 
     # URL detection handler - detects URLs in regular text messages
     # Must be registered BEFORE handle_split_text_input to check for URLs first

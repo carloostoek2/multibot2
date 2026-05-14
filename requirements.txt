@@ -1,6 +1,9 @@
 python-telegram-bot>=21.0
 python-dotenv>=1.0.0
 
+# Image processing
+Pillow>=10.0.0
+
 # Downloader dependencies
 yt-dlp>=2026.2.4
 aiohttp>=3.9.0

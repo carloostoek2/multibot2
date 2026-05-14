@@ -116,11 +116,11 @@ class DownloadOptions:
         # Need to use object.__setattr__ because dataclass is frozen
         errors = []
 
-        # Validate max_filesize doesn't exceed Telegram limits
-        if self.max_filesize > TELEGRAM_MAX_FILE_SIZE:
+        # Validate max_filesize doesn't exceed practical limit (500MB = ~10 split parts at 50MB)
+        if self.max_filesize > 500 * 1024 * 1024:
             errors.append(
-                f"max_filesize ({self.max_filesize}) exceeds Telegram limit "
-                f"({TELEGRAM_MAX_FILE_SIZE} bytes = 50MB)"
+                f"max_filesize ({self.max_filesize}) exceeds maximum practical limit "
+                f"(500MB). Larger files cannot be split and sent via Telegram."
             )
 
         # Validate retry settings are non-negative

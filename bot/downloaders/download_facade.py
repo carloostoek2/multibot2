@@ -120,6 +120,7 @@ class DownloadConfig:
     cleanup_on_failure: bool = True
     extract_audio: bool = False
     preferred_quality: str = "best"
+    max_filesize_mb: int = 50  # Default 50MB, increase to 500 for auto-split
 
     def to_download_options(self, output_path: Optional[str] = None) -> DownloadOptions:
         """Convert DownloadConfig to DownloadOptions.
@@ -134,7 +135,7 @@ class DownloadConfig:
             output_path=output_path or "/tmp",
             extract_audio=self.extract_audio,
             preferred_quality=self.preferred_quality,
-            max_filesize=TELEGRAM_MAX_FILE_SIZE,
+            max_filesize=self.max_filesize_mb * 1024 * 1024,
         )
 
 
@@ -270,6 +271,7 @@ class DownloadFacade:
                 cleanup_on_failure=config_overrides.get('cleanup_on_failure', self._config.cleanup_on_failure),
                 extract_audio=config_overrides.get('extract_audio', self._config.extract_audio),
                 preferred_quality=config_overrides.get('preferred_quality', self._config.preferred_quality),
+                max_filesize_mb=config_overrides.get('max_filesize_mb', self._config.max_filesize_mb),
             )
 
         # Route URL to appropriate downloader

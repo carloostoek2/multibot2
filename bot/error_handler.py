@@ -151,6 +151,38 @@ class VideoMergeError(VideoProcessingError):
         super().__init__(self.message)
 
 
+class ImageProcessingError(VideoProcessingError):
+    """Base exception for image processing errors."""
+
+    def __init__(self, message: str = "Error procesando la imagen"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class ImageCompressionError(ImageProcessingError):
+    """Exception raised when image compression fails."""
+
+    def __init__(self, message: str = "No pude comprimir la imagen"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class ImageConversionError(ImageProcessingError):
+    """Exception raised when image format conversion fails."""
+
+    def __init__(self, message: str = "No pude convertir el formato de la imagen"):
+        self.message = message
+        super().__init__(self.message)
+
+
+class ImageResizeError(ImageProcessingError):
+    """Exception raised when image resizing fails."""
+
+    def __init__(self, message: str = "No pude redimensionar la imagen"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -168,6 +200,10 @@ ERROR_MESSAGES = {
     AudioEnhancementError: "No pude aplicar la mejora de audio. Verifica que el archivo sea válido.",
     AudioEffectsError: "No pude aplicar el efecto de audio. Verifica que el archivo sea válido.",
     VideoMergeError: "No pude unir el video con el audio. Verifica que los archivos sean válidos.",
+    ImageProcessingError: "Ocurrió un error al procesar la imagen. Por favor intenta de nuevo.",
+    ImageCompressionError: "No pude comprimir la imagen. Verifica que sea un archivo válido.",
+    ImageConversionError: "No pude convertir el formato de la imagen. Verifica que el formato sea válido.",
+    ImageResizeError: "No pude redimensionar la imagen. Verifica las dimensiones ingresadas.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
     ValidationError: "El archivo no es válido. Verifica que sea un video correcto.",
     # Telegram API errors

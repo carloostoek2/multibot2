@@ -32,6 +32,10 @@ from bot.error_handler import (
     AudioEnhancementError,
     AudioEffectsError,
     VideoMergeError,
+    ImageProcessingError,
+    ImageCompressionError,
+    ImageConversionError,
+    ImageResizeError,
     handle_processing_error,
 )
 from bot.config import config
@@ -50,6 +54,7 @@ from bot.audio_format_converter import AudioFormatConverter, detect_audio_format
 from bot.audio_enhancer import AudioEnhancer
 from bot.audio_effects import AudioEffects
 from bot.screenshot_processor import ScreenshotProcessor
+from bot.image_processor import ImageProcessor, SUPPORTED_IMAGE_FORMATS
 
 # Import downloaders for URL handling
 from bot.downloaders import (
@@ -274,6 +279,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "💡 También puedes usar los menús inline:\n"
         "- Envía un video → Menú con opciones (Nota de Video, Extraer Audio, Merge con Audio, etc.)\n"
         "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)\n"
+        "- Envía una foto o imagen → Menú con opciones (Comprimir, Convertir, Redimensionar, Info)\n"
         "- Envía un enlace de video → Menú de descarga con opciones combinadas"
     )
 
@@ -6498,6 +6504,23 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         logger.info(f"User {user_id} navigated back to audio menu")
 
+    elif menu_type == "image":
+        # Re-show image menu with stored file_id
+        file_id = context.user_data.get("image_menu_file_id")
+        if not file_id:
+            await query.edit_message_text(
+                "Error: no se encontró la imagen. Por favor envía la imagen de nuevo."
+            )
+            logger.warning(f"Back to image menu failed: no file_id for user {user_id}")
+            return
+
+        reply_markup = _get_image_menu_keyboard()
+        await query.edit_message_text(
+            "¿Qué quieres hacer con esta imagen?",
+            reply_markup=reply_markup
+        )
+        logger.info(f"User {user_id} navigated back to image menu")
+
     else:
         logger.warning(f"Unknown back menu type: {menu_type}")
 
@@ -6841,10 +6864,20 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data[f"download_url_{correlation_id}"] = url
     context.user_data[f"download_correlation_id_{user_id}"] = correlation_id
 
-    # YouTube URLs get automatic screenshot extraction (no questions asked)
+    # YouTube URLs get a menu: screenshots or download
     if is_youtube_url(url):
-        logger.info(f"[{correlation_id}] YouTube URL detected, starting auto screenshot flow")
-        await _handle_youtube_auto_screenshot_flow(update, context, url, correlation_id)
+        logger.info(f"[{correlation_id}] YouTube URL detected, showing menu")
+        keyboard = [
+            [
+                InlineKeyboardButton("📸 Capturas", callback_data=f"youtube:screenshots:{correlation_id}"),
+                InlineKeyboardButton("📥 Descargar Video", callback_data=f"youtube:download:{correlation_id}"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "Link de YouTube detectado. ¿Qué quieres hacer?",
+            reply_markup=reply_markup
+        )
         return
 
     # Start download immediately (no menu)
@@ -6863,9 +6896,17 @@ async def _handle_youtube_auto_screenshot_flow(
     extracts 10 evenly distributed screenshots, sends them to the user,
     and cleans up all temporary files — no questions asked.
     """
-    message = update.message
+    # Support both direct messages and callback queries
+    is_callback = bool(update.callback_query)
+    message = update.callback_query.message if is_callback else update.message
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+
+    if is_callback:
+        query = update.callback_query
+        await query.edit_message_text("Procesando solicitud...")
+        # Use query.message for subsequent replies
+        message = query.message
 
     facade = DownloadFacade()
 
@@ -7018,6 +7059,48 @@ async def _handle_youtube_auto_screenshot_flow(
                 processor.cleanup()
             except Exception:
                 pass
+
+
+async def handle_youtube_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle YouTube URL menu selection.
+
+    Routes to screenshots or download based on user choice.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data: youtube:screenshots:correlation_id or youtube:download:correlation_id
+    callback_data = query.data
+    if not callback_data.startswith("youtube:"):
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 3:
+        return
+
+    action = parts[1]
+    correlation_id = parts[2]
+
+    url = context.user_data.get(f"download_url_{correlation_id}")
+    if not url:
+        await query.edit_message_text("Error: No se encontró la URL. Intenta de nuevo.")
+        return
+
+    logger.info(f"[{correlation_id}] YouTube menu action '{action}' selected by user {user_id}")
+
+    if action == "screenshots":
+        context.user_data[f"download_format_{correlation_id}"] = "video"
+        await _handle_youtube_auto_screenshot_flow(update, context, url, correlation_id)
+
+    elif action == "download":
+        context.user_data[f"download_format_{correlation_id}"] = "video"
+        await _start_download(update, context, correlation_id, url, "video")
 
 
 async def handle_download_format_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7274,9 +7357,11 @@ async def _start_download(
 
         # Download with progress callback integration
         # IMPORTANT: cleanup_on_success=False so file remains for sending
+        # max_filesize_mb=500 allows downloads up to 500MB (auto-split handles >50MB)
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
             'cleanup_on_success': False,
+            'max_filesize_mb': 500,
         }
 
         result = await facade.download(
@@ -7968,9 +8053,11 @@ async def _start_combined_download(
 
         # Download with progress callback integration
         # IMPORTANT: cleanup_on_success=False so file remains for sending
+        # max_filesize_mb=500 allows downloads up to 500MB (auto-split handles >50MB)
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
             'cleanup_on_success': False,
+            'max_filesize_mb': 500,
         }
 
         result = await facade.download(
@@ -9668,3 +9755,622 @@ async def _handle_postdownload_compress(
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error compressing audio: {e}")
             await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+# ──────────────────────────────────────────────
+# Image Processing Handlers
+# ──────────────────────────────────────────────
+
+
+def _get_image_menu_keyboard() -> InlineKeyboardMarkup:
+    """Generate inline keyboard for image processing menu."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Comprimir", callback_data="image_action:compress"),
+            InlineKeyboardButton("Convertir Formato", callback_data="image_action:convert"),
+        ],
+        [
+            InlineKeyboardButton("Redimensionar", callback_data="image_action:resize"),
+            InlineKeyboardButton("Info de Imagen", callback_data="image_action:info"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle photo messages by showing an inline menu with image options.
+
+    When a user sends a photo, displays an inline keyboard with options:
+    - Comprimir: Reduce file size
+    - Convertir Formato: Change image format
+    - Redimensionar: Resize image
+    - Info: Show image metadata
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Photo received from user {user_id}")
+
+    # Get the largest photo size
+    photo = update.message.photo[-1]
+
+    # Validate file size
+    if photo.file_size:
+        is_valid, error_msg = validate_file_size(photo.file_size, config.MAX_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Store file info for callback handler
+    context.user_data["image_menu_file_id"] = photo.file_id
+    context.user_data["image_menu_correlation_id"] = correlation_id
+
+    # Show inline menu
+    reply_markup = _get_image_menu_keyboard()
+    await update.message.reply_text(
+        "Imagen recibida. Selecciona una acción:",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Image menu displayed to user {user_id}")
+
+
+async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle image files sent as documents.
+
+    Some users send images as documents to preserve original quality.
+    Shows the same image processing inline menu.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] Image document received from user {user_id}")
+
+    document = update.message.document
+
+    # Validate file size
+    if document.file_size:
+        is_valid, error_msg = validate_file_size(document.file_size, config.MAX_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(f"[{correlation_id}] File size validation failed: {error_msg}")
+            await update.message.reply_text(error_msg)
+            return
+
+    # Store file info
+    context.user_data["image_menu_file_id"] = document.file_id
+    context.user_data["image_menu_correlation_id"] = correlation_id
+
+    # Show inline menu
+    reply_markup = _get_image_menu_keyboard()
+    await update.message.reply_text(
+        "Imagen recibida. Selecciona una acción:",
+        reply_markup=reply_markup
+    )
+    logger.info(f"[{correlation_id}] Image document menu displayed to user {user_id}")
+
+
+async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle image menu selection callbacks from inline keyboard.
+
+    Routes to appropriate action based on user selection:
+    - compress: Show compression quality options
+    - convert: Show format selection
+    - resize: Show resize percentage options
+    - info: Show image metadata
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data (format: "image_action:<action>")
+    callback_data = query.data
+    if not callback_data or not callback_data.startswith("image_action:"):
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    action = callback_data.split(":")[1]
+
+    # Retrieve file_id from context
+    file_id = context.user_data.get("image_menu_file_id")
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_id:
+        logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
+        await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
+        return
+
+    logger.info(f"[{correlation_id}] Image menu action '{action}' selected by user {user_id}")
+
+    if action == "compress":
+        # Show compression quality selection
+        keyboard = [
+            [
+                InlineKeyboardButton("Máxima (90%)", callback_data="image_compress:90"),
+                InlineKeyboardButton("Alta (75%)", callback_data="image_compress:75"),
+            ],
+            [
+                InlineKeyboardButton("Media (50%)", callback_data="image_compress:50"),
+                InlineKeyboardButton("Baja (25%)", callback_data="image_compress:25"),
+            ],
+            [
+                InlineKeyboardButton("Mínima (10%)", callback_data="image_compress:10"),
+            ],
+            [
+                InlineKeyboardButton("← Volver", callback_data="back:image"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el nivel de compresión:\n\n"
+            "• Máxima (90%) - calidad casi sin pérdida\n"
+            "• Alta (75%) - buen balance calidad/tamaño\n"
+            "• Media (50%) - compresión notable\n"
+            "• Baja (25%) - archivo pequeño\n"
+            "• Mínima (10%) - máxima compresión",
+            reply_markup=reply_markup
+        )
+
+    elif action == "convert":
+        # Show format selection
+        keyboard = [
+            [
+                InlineKeyboardButton("JPEG", callback_data="image_convert:jpeg"),
+                InlineKeyboardButton("PNG", callback_data="image_convert:png"),
+                InlineKeyboardButton("WebP", callback_data="image_convert:webp"),
+            ],
+            [
+                InlineKeyboardButton("← Volver", callback_data="back:image"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el formato de conversión:\n\n"
+            "• JPEG - Alto compatible, con pérdida\n"
+            "• PNG - Sin pérdida, ideal para gráficos\n"
+            "• WebP - Buena compresión, moderno",
+            reply_markup=reply_markup
+        )
+
+    elif action == "resize":
+        # Show resize options
+        keyboard = [
+            [
+                InlineKeyboardButton("25%", callback_data="image_resize:25"),
+                InlineKeyboardButton("50%", callback_data="image_resize:50"),
+                InlineKeyboardButton("75%", callback_data="image_resize:75"),
+            ],
+            [
+                InlineKeyboardButton("150%", callback_data="image_resize:150"),
+                InlineKeyboardButton("200%", callback_data="image_resize:200"),
+            ],
+            [
+                InlineKeyboardButton("← Volver", callback_data="back:image"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el porcentaje de redimensionamiento:",
+            reply_markup=reply_markup
+        )
+
+    elif action == "info":
+        await _handle_image_menu_info(update, context, file_id, correlation_id)
+
+
+async def _handle_image_menu_info(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+    correlation_id: str
+) -> None:
+    """Show image metadata (dimensions, format, file size).
+
+    Downloads the image, extracts metadata using Pillow, and displays it.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        file_id: Telegram file ID of the image
+        correlation_id: Correlation ID for tracing
+    """
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    await query.edit_message_text("Obteniendo información de la imagen...")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"image_info_{user_id}_{correlation_id}.img"
+            input_path = temp_mgr.get_temp_path(input_filename)
+
+            # Download image
+            logger.info(f"[{correlation_id}] Downloading image for info")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Download failed: {e}")
+                await query.edit_message_text("No pude descargar la imagen. Intenta de nuevo.")
+                return
+
+            # Get image info
+            info = ImageProcessor.get_image_info(input_path)
+            if info["width"] == 0:
+                await query.edit_message_text("No pude leer la información de la imagen.")
+                return
+
+            # Format file size
+            size_bytes = info["file_size"]
+            if size_bytes > 1024 * 1024:
+                size_str = f"{size_bytes / (1024*1024):.1f} MB"
+            else:
+                size_str = f"{size_bytes / 1024:.0f} KB"
+
+            # Format the info message
+            format_display = info["format"].upper() if info["format"] != "unknown" else "Desconocido"
+            info_text = (
+                f"🖼 Información de la imagen:\n\n"
+                f"📐 Dimensiones: {info['width']} x {info['height']} px\n"
+                f"📦 Formato: {format_display}\n"
+                f"📄 Peso: {size_str}\n"
+                f"🎨 Modo de color: {info['mode']}"
+            )
+
+            await query.edit_message_text(info_text)
+
+            reply_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("← Volver al menú", callback_data="back:image")],
+            ])
+            await query.message.reply_text(
+                "¿Quieres hacer algo más con esta imagen?",
+                reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Image info displayed to user {user_id}")
+
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Error getting image info: {e}")
+            await query.edit_message_text("Ocurrió un error al obtener la información.")
+
+
+async def handle_image_compress_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle image compression quality selection.
+
+    Downloads the image, compresses it with the selected quality,
+    and sends the result back.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data (format: "image_compress:<quality>")
+    callback_data = query.data
+    try:
+        quality = int(callback_data.split(":")[1])
+    except (IndexError, ValueError):
+        await query.edit_message_text("Error: calidad inválida.")
+        return
+
+    # Retrieve file info
+    file_id = context.user_data.get("image_menu_file_id")
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_id:
+        await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
+        return
+
+    logger.info(f"[{correlation_id}] Compressing image at quality {quality} for user {user_id}")
+    await query.edit_message_text(f"Comprimiendo imagen (calidad {quality}%)...")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"image_compress_input_{user_id}_{correlation_id}.img"
+            output_filename = f"compressed_{user_id}_{correlation_id}.jpg"
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download image
+            logger.info(f"[{correlation_id}] Downloading image for compression")
+            file = await context.bot.get_file(file_id)
+            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+            # Compress
+            loop = asyncio.get_event_loop()
+            success, error = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: ImageProcessor.compress(str(input_path), str(output_path), quality=quality)
+                ),
+                timeout=config.PROCESSING_TIMEOUT
+            )
+
+            if not success:
+                error_msg = error or "No pude comprimir la imagen"
+                raise ImageCompressionError(error_msg)
+
+            # Get original and compressed sizes for comparison
+            original_size = os.path.getsize(input_path)
+            compressed_size = os.path.getsize(output_path)
+            reduction = (1 - compressed_size / original_size) * 100 if original_size > 0 else 0
+
+            # Send compressed image
+            with open(output_path, "rb") as img_file:
+                await query.message.reply_document(
+                    document=img_file,
+                    filename=f"comprimida_{correlation_id}.jpg",
+                    caption=f"✅ Comprimida al {quality}%\n"
+                            f"📦 {_format_size(original_size)} → {_format_size(compressed_size)} "
+                            f"({reduction:.0f}% menos)"
+                )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con esta imagen?",
+                reply_markup=reply_markup
+            )
+            logger.info(
+                f"[{correlation_id}] Image compressed: {original_size} -> {compressed_size} bytes "
+                f"({reduction:.1f}% reduction)"
+            )
+
+        except ImageCompressionError as e:
+            logger.error(f"[{correlation_id}] Compression failed: {e}")
+            await query.edit_message_text(f"Error: {e.message}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Compression timed out")
+            await query.edit_message_text("La compresión tardó demasiado. Intenta con una imagen más pequeña.")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error compressing image: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def handle_image_convert_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle image format conversion selection.
+
+    Downloads the image, converts it to the selected format,
+    and sends the result back.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data (format: "image_convert:<format>")
+    callback_data = query.data
+    try:
+        target_format = callback_data.split(":")[1]
+    except IndexError:
+        await query.edit_message_text("Error: formato inválido.")
+        return
+
+    if target_format not in SUPPORTED_IMAGE_FORMATS:
+        await query.edit_message_text(f"Formato '{target_format}' no soportado.")
+        return
+
+    # Retrieve file info
+    file_id = context.user_data.get("image_menu_file_id")
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_id:
+        await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
+        return
+
+    fmt_info = SUPPORTED_IMAGE_FORMATS[target_format]
+    logger.info(f"[{correlation_id}] Converting image to {target_format} for user {user_id}")
+    await query.edit_message_text(f"Convirtiendo a {target_format.upper()}...")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"image_convert_input_{user_id}_{correlation_id}.img"
+            output_filename = f"convertida_{user_id}_{correlation_id}{fmt_info['ext']}"
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download image
+            logger.info(f"[{correlation_id}] Downloading image for conversion")
+            file = await context.bot.get_file(file_id)
+            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+            # Convert format
+            loop = asyncio.get_event_loop()
+            success, error = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: ImageProcessor.convert_format(str(input_path), str(output_path), target_format)
+                ),
+                timeout=config.PROCESSING_TIMEOUT
+            )
+
+            if not success:
+                error_msg = error or "No pude convertir la imagen"
+                raise ImageConversionError(error_msg)
+
+            # Determine content type for sending
+            caption = f"✅ Convertida a {target_format.upper()}"
+            if os.path.exists(input_path):
+                original_size = os.path.getsize(input_path)
+                new_size = os.path.getsize(output_path)
+                caption += f"\n📦 {_format_size(original_size)} → {_format_size(new_size)}"
+
+            # Send converted image
+            with open(output_path, "rb") as img_file:
+                await query.message.reply_document(
+                    document=img_file,
+                    filename=f"convertida_{correlation_id}{fmt_info['ext']}",
+                    caption=caption
+                )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con esta imagen?",
+                reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Image converted to {target_format} successfully")
+
+        except ImageConversionError as e:
+            logger.error(f"[{correlation_id}] Conversion failed: {e}")
+            await query.edit_message_text(f"Error: {e.message}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Conversion timed out")
+            await query.edit_message_text("La conversión tardó demasiado. Intenta con una imagen más pequeña.")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error converting image: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def handle_image_resize_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle image resize percentage selection.
+
+    Downloads the image, resizes it by the selected percentage,
+    and sends the result back.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+
+    # Parse callback data (format: "image_resize:<percentage>")
+    callback_data = query.data
+    try:
+        percentage = int(callback_data.split(":")[1])
+    except (IndexError, ValueError):
+        await query.edit_message_text("Error: porcentaje inválido.")
+        return
+
+    if percentage < 1 or percentage > 1000:
+        await query.edit_message_text("El porcentaje debe estar entre 1 y 1000.")
+        return
+
+    # Retrieve file info
+    file_id = context.user_data.get("image_menu_file_id")
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_id:
+        await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
+        return
+
+    logger.info(f"[{correlation_id}] Resizing image to {percentage}% for user {user_id}")
+    await query.edit_message_text(f"Redimensionando imagen al {percentage}%...")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"image_resize_input_{user_id}_{correlation_id}.img"
+            output_filename = f"redimensionada_{user_id}_{correlation_id}.jpg"
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            # Download image
+            logger.info(f"[{correlation_id}] Downloading image for resize")
+            file = await context.bot.get_file(file_id)
+            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+            # Get original dimensions for the caption
+            orig_info = ImageProcessor.get_image_info(str(input_path))
+
+            # Resize
+            loop = asyncio.get_event_loop()
+            success, error = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: ImageProcessor.resize(str(input_path), str(output_path), percentage=percentage)
+                ),
+                timeout=config.PROCESSING_TIMEOUT
+            )
+
+            if not success:
+                error_msg = error or "No pude redimensionar la imagen"
+                raise ImageResizeError(error_msg)
+
+            # Get new dimensions
+            new_info = ImageProcessor.get_image_info(str(output_path))
+
+            caption = (
+                f"✅ Redimensionada al {percentage}%\n"
+                f"📐 {orig_info['width']}x{orig_info['height']} → "
+                f"{new_info['width']}x{new_info['height']} px"
+            )
+
+            # Send resized image
+            with open(output_path, "rb") as img_file:
+                await query.message.reply_document(
+                    document=img_file,
+                    filename=f"redimensionada_{correlation_id}.jpg",
+                    caption=caption
+                )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¡Listo! ¿Quieres hacer algo más con esta imagen?",
+                reply_markup=reply_markup
+            )
+            logger.info(f"[{correlation_id}] Image resized to {percentage}% successfully")
+
+        except ImageResizeError as e:
+            logger.error(f"[{correlation_id}] Resize failed: {e}")
+            await query.edit_message_text(f"Error: {e.message}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Resize timed out")
+            await query.edit_message_text("El redimensionamiento tardó demasiado. Intenta con una imagen más pequeña.")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error resizing image: {e}")
+            await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+def _get_image_post_menu_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for post-image-processing options.
+
+    Args:
+        correlation_id: Correlation ID for tracing
+
+    Returns:
+        InlineKeyboardMarkup with post-processing options
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("← Volver al menú", callback_data="back:image"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format file size in human-readable format.
+
+    Args:
+        size_bytes: File size in bytes
+
+    Returns:
+        Formatted string like "1.5 MB" or "500 KB"
+    """
+    if size_bytes > 1024 * 1024:
+        return f"{size_bytes / (1024*1024):.1f} MB"
+    elif size_bytes > 1024:
+        return f"{size_bytes / 1024:.0f} KB"
+    return f"{size_bytes} B"
