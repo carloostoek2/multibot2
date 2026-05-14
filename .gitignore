@@ -60,3 +60,10 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Cookies (authentication data)
+cookies.txt
+cookies_codificado.md
+
+# Claude Code memory and worktrees
+.claude/
