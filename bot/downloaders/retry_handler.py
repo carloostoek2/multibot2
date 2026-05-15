@@ -89,6 +89,7 @@ def is_retryable_error(error: Exception) -> bool:
         "unavailable",
         "invalid",
         "unsupported",
+        "unexpected response",  # API/platform incompatibility (e.g. TikTok changed their API)
     ]
 
     for indicator in permanent_indicators:

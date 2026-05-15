@@ -75,7 +75,7 @@ from .exceptions import (
 )
 from .platform_router import PlatformRouter, RouteResult, route_url
 from .progress_tracker import ProgressTracker, format_progress_message
-from .retry_handler import RetryHandler, TimeoutConfig
+from .retry_handler import RetryHandler, TimeoutConfig, is_retryable_error
 from .url_detector import URLDetector
 
 logger = logging.getLogger(__name__)
@@ -353,7 +353,10 @@ class DownloadFacade:
         return await self._retry_handler.execute(
             download_operation,
             operation_name=f"download_{route_result.platform}",
-            is_retryable=lambda e: not isinstance(e, (FileTooLargeError, URLValidationError, UnsupportedURLError))
+            is_retryable=lambda e: (
+                not isinstance(e, (FileTooLargeError, URLValidationError, UnsupportedURLError))
+                and is_retryable_error(e)
+            )
         )
 
     async def download_with_progress(

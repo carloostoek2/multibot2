@@ -483,6 +483,20 @@ class TikTokDownloader(YtDlpDownloader):
             result = await super().download(url, options)
             return result
 
+        except MetadataExtractionError as e:
+            # Metadata extraction failure during download — check for known
+            # non-retriable platform errors (API changes, geo-blocking, etc.)
+            error_msg = str(e).lower()
+            if "unexpected response" in error_msg:
+                raise DownloadFailedError(
+                    attempts_made=1,
+                    last_error=e,
+                    message=str(e),  # Keep original error text for pattern matching in error handler
+                    url=url,
+                    correlation_id=getattr(e, "correlation_id", None),
+                ) from e
+            raise
+
         except DownloadFailedError as e:
             # Check for TikTok-specific error conditions
             error_msg = str(e).lower()

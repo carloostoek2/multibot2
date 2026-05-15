@@ -6616,6 +6616,11 @@ def _get_error_message_for_exception(e: Exception, url: str, correlation_id: str
             return "Este contenido requiere inicio de sesión en Instagram."
 
     if platform == "TikTok":
+        if "unexpected response" in error_msg:
+            return (
+                "TikTok cambió su estructura y no está disponible temporalmente. "
+                "Intenta de nuevo más tarde o descarga el video manualmente."
+            )
         if "slideshow" in error_msg or "carousel" in error_msg:
             return "Los slideshows de TikTok no son soportados."
         if "watermark" in error_msg:
@@ -7545,19 +7550,25 @@ async def _start_download_from_message(
                 pass  # Message might be deleted or expired, that's ok
 
             # Send downloaded file
+            # Don't show error for timeout - file might have been sent already
+            # Telegram has a 20-second timeout for large file uploads
             try:
                 await _send_downloaded_file_with_menu(update, context, result, format_type, correlation_id)
             except Exception as send_error:
+                error_name = type(send_error).__name__
                 logger.error(f"[{correlation_id}] Failed to send file: {send_error}")
-                # If sending failed, notify user but don't show generic error
-                # The file might have been partially sent or timed out
-                try:
-                    await message.reply_text(
-                        "El archivo se descargó pero hubo un problema al enviarlo. "
-                        "Intenta de nuevo o usa /download con la misma URL."
-                    )
-                except Exception:
-                    pass
+                # Only notify user for non-timeout errors
+                # For timeouts, the file likely arrived despite the error
+                if error_name not in ('TimedOut', 'TimeoutError'):
+                    try:
+                        await message.reply_text(
+                            "El archivo se descargó pero hubo un problema al enviarlo. "
+                            "Intenta de nuevo o usa /download con la misma URL."
+                        )
+                    except Exception:
+                        pass
+                else:
+                    logger.info(f"[{correlation_id}] Timeout during send - file may have been sent already")
 
         else:
             context.user_data[f"download_status_{correlation_id}"] = "error"
