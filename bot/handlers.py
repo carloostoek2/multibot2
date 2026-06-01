@@ -6953,6 +6953,13 @@ async def _handle_youtube_auto_screenshot_flow(
                     except Exception:
                         pass
 
+            elif status == 'waiting':
+                wait_msg = progress.get('message', 'Aplicando delay...')
+                try:
+                    await progress_message.edit_text(wait_msg, reply_markup=reply_markup)
+                except Exception:
+                    pass
+
             elif status == 'completed':
                 try:
                     await progress_message.edit_text("Descarga completada, procesando...")
@@ -7336,6 +7343,13 @@ async def _start_download(
                     except Exception as e:
                         logger.debug(f"Failed to update progress message: {e}")
 
+            elif status == 'waiting':
+                wait_msg = progress.get('message', 'Aplicando delay...')
+                try:
+                    await query.edit_message_text(wait_msg, reply_markup=reply_markup)
+                except Exception:
+                    pass
+
             elif status == 'completed':
                 # Remove cancel button, show completed
                 try:
@@ -7501,6 +7515,13 @@ async def _start_download_from_message(
                         last_update_time[0] = current_time
                     except Exception as e:
                         logger.debug(f"Failed to update progress message: {e}")
+
+            elif status == 'waiting':
+                wait_msg = progress.get('message', 'Aplicando delay...')
+                try:
+                    await progress_message.edit_text(wait_msg, reply_markup=reply_markup)
+                except Exception:
+                    pass
 
             elif status == 'completed':
                 # Remove cancel button, show completed
@@ -8038,6 +8059,13 @@ async def _start_combined_download(
                         last_update_time[0] = current_time
                     except Exception as e:
                         logger.debug(f"Failed to update progress message: {e}")
+
+            elif status == 'waiting':
+                wait_msg = progress.get('message', 'Aplicando delay...')
+                try:
+                    await query.edit_message_text(wait_msg, reply_markup=reply_markup)
+                except Exception:
+                    pass
 
             elif status == 'completed':
                 try:

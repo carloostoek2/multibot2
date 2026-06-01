@@ -73,6 +73,12 @@ class BotConfig:
     DOWNLOAD_MAX_RETRIES: int = 3
     DOWNLOAD_RETRY_DELAY: int = 2  # seconds between retries
 
+    # Instagram inter-download delay (seconds) — avoids automation detection
+    # Random delay between the end of one Instagram download and start of the next.
+    # 8-25s simulates natural human pauses (copying, reading, switching apps).
+    INSTAGRAM_INTER_DOWNLOAD_DELAY_MIN: int = 8
+    INSTAGRAM_INTER_DOWNLOAD_DELAY_MAX: int = 25
+
     # Cookie file for authenticated downloads (YouTube, etc.)
     # Path to a cookies.txt file exported from browser
     # See: https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
