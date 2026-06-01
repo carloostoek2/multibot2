@@ -495,17 +495,6 @@ class InstagramDownloader(YtDlpDownloader):
         # Validate URL
         self.validate_url(url)
 
-        # Apply inter-download delay to avoid Instagram automation detection
-        waited = await _apply_instagram_delay()
-        if waited > 0 and options.progress_callback:
-            try:
-                options.progress_callback({
-                    'status': 'waiting',
-                    'message': f'Aplicando delay de {waited:.1f}s para evitar detección...',
-                })
-            except Exception:
-                pass
-
         try:
             return await self._download_impl(url, options)
         finally:

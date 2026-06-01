@@ -7554,6 +7554,19 @@ async def _start_download_from_message(
             'cleanup_on_success': False,
         }
 
+        # Apply Instagram inter-download delay before starting
+        from bot.downloaders.platforms.instagram import _apply_instagram_delay, is_instagram_url
+        if is_instagram_url(url):
+            waited = await _apply_instagram_delay()
+            if waited > 0:
+                try:
+                    await progress_message.edit_text(
+                        f"Aplicando delay de {waited:.1f}s para evitar detección...",
+                        reply_markup=reply_markup,
+                    )
+                except Exception:
+                    pass
+
         result = await facade.download(
             url=url,
             chat_id=chat_id,

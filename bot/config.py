@@ -75,9 +75,9 @@ class BotConfig:
 
     # Instagram inter-download delay (seconds) — avoids automation detection
     # Random delay between the end of one Instagram download and start of the next.
-    # 8-25s simulates natural human pauses (copying, reading, switching apps).
-    INSTAGRAM_INTER_DOWNLOAD_DELAY_MIN: int = 8
-    INSTAGRAM_INTER_DOWNLOAD_DELAY_MAX: int = 25
+    # 30-60s simulates natural human pauses between browsing and sharing links.
+    INSTAGRAM_INTER_DOWNLOAD_DELAY_MIN: int = 30
+    INSTAGRAM_INTER_DOWNLOAD_DELAY_MAX: int = 60
 
     # Cookie file for authenticated downloads (YouTube, etc.)
     # Path to a cookies.txt file exported from browser
