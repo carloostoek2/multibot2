@@ -52,14 +52,21 @@ def _get_instagram_delay_config() -> tuple[float, float]:
 
 
 async def _apply_instagram_delay() -> float:
-    """Wait a random interval since the last Instagram download completed.
+    """Compute the inter-download delay (if any) since the last Instagram download completed.
 
     Called at the START of each download. If the previous download finished
-    recently, sleeps for the remaining portion of a random target delay so
+    recently, returns the remaining portion of a random target delay so
     Instagram sees human-paced request patterns.
 
+    The caller is responsible for sleeping the returned duration (after
+    showing any user notification). Note that going through
+    InstagramDownloader.download ensures the marker is set in its finally
+    block (regardless of delay).
+
+    The lock is held only briefly for the timestamp read/decision.
+
     Returns:
-        Seconds actually waited (0 if no delay was needed).
+        Seconds the caller should sleep (0 if no delay needed).
     """
     global _last_instagram_download_end
 
@@ -76,16 +83,20 @@ async def _apply_instagram_delay() -> float:
                     "(target %.1fs, elapsed %.1fs desde la última descarga)",
                     remaining, target_delay, elapsed,
                 )
-                await asyncio.sleep(remaining)
                 return remaining
 
     return 0.0
 
 
-def _mark_instagram_download_complete() -> None:
-    """Record that an Instagram download just finished (success or failure)."""
+async def _mark_instagram_download_complete() -> None:
+    """Record that an Instagram download just finished (success or failure).
+
+    Protected by the delay lock for safe concurrent updates to the shared
+    timestamp (prevents TOCTOU/lost updates with concurrent _apply readers).
+    """
     global _last_instagram_download_end
-    _last_instagram_download_end = time.monotonic()
+    async with _instagram_delay_lock:
+        _last_instagram_download_end = time.monotonic()
 
 
 class InstagramContentType(Enum):
@@ -473,8 +484,10 @@ class InstagramDownloader(YtDlpDownloader):
         When a post contains multiple images/videos, downloads all of them.
         Falls back to gallery-dl for image-only posts that yt-dlp cannot handle.
 
-        A random inter-download delay is applied before starting to avoid
-        Instagram automation detection when multiple links are sent in succession.
+        Callers (e.g. handlers) apply a random inter-download delay before
+        calling this to avoid Instagram automation detection when multiple
+        links are sent in succession. The completion marker is always set
+        in the finally block.
 
         Args:
             url: The Instagram URL to download from
@@ -498,14 +511,14 @@ class InstagramDownloader(YtDlpDownloader):
         try:
             return await self._download_impl(url, options)
         finally:
-            _mark_instagram_download_complete()
+            await _mark_instagram_download_complete()
 
     async def _download_impl(
         self,
         url: str,
         options: DownloadOptions,
     ) -> Any:
-        """Inner implementation — handled by download() with delay + completion marker."""
+        """Inner implementation — download() wrapper ensures completion marker."""
         from pathlib import Path
         from ..types import DownloadResult
 

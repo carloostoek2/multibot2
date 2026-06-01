@@ -71,6 +71,14 @@ from bot.downloaders.exceptions import (
     UnsupportedURLError,
 )
 
+# Internal IG inter-download delay helpers (used by the three _start_* paths;
+# hoisted to avoid repeated local imports on hot paths; _apply/_mark are private).
+from bot.downloaders.platforms.instagram import (
+    _apply_instagram_delay,
+    _mark_instagram_download_complete,
+    is_instagram_url,
+)
+
 logger = logging.getLogger(__name__)
 
 # URL detector instance for detecting URLs in messages
@@ -7383,6 +7391,41 @@ async def _start_download(
             'max_filesize_mb': 500,
         }
 
+        # Capture pre-delay text to avoid "Analizando" -> "Descargando" jump on restore (Issue 11)
+        pre_delay_text = last_message_text[0]
+
+        # Apply Instagram inter-download delay before starting (notify user during wait)
+        # (covers /download command + IG button flows for consistent behavior)
+        if is_instagram_url(url):
+            waited = await _apply_instagram_delay()
+            if waited > 0:
+                try:
+                    await query.edit_message_text(
+                        f"Aplicando delay de {waited:.1f}s para evitar detección de Instagram...",
+                        reply_markup=reply_markup
+                    )
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Failed to show Instagram delay notification: {e}")
+                await asyncio.sleep(waited)
+                # Restore normal message for seamless transition
+                try:
+                    await query.edit_message_text(
+                        pre_delay_text,
+                        reply_markup=reply_markup
+                    )
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Failed to restore post-delay message: {e}")
+
+        # Guard: respect cancel that arrived during the (potentially long) delay sleep (Issue 1).
+        # Uses the exact download_status user_data pattern from handle_download_cancel_callback.
+        if context.user_data.get(f"download_status_{correlation_id}") == "cancelled":
+            return
+
+        # Note on Issue 5: any hypothetical exception in this narrow window after _apply
+        # (but before facade reaches InstagramDownloader.download's finally) would skip
+        # the timestamp _mark. This is best-effort; normal errors are handled inside
+        # the downloader (which always marks). The window is tiny and pre-existing
+        # for waited==0 IG cases.
         result = await facade.download(
             url=url,
             chat_id=chat_id,
@@ -7554,19 +7597,37 @@ async def _start_download_from_message(
             'cleanup_on_success': False,
         }
 
-        # Apply Instagram inter-download delay before starting
-        from bot.downloaders.platforms.instagram import _apply_instagram_delay, is_instagram_url
+        # Apply Instagram inter-download delay before starting (notify user during wait)
         if is_instagram_url(url):
             waited = await _apply_instagram_delay()
             if waited > 0:
                 try:
                     await progress_message.edit_text(
-                        f"Aplicando delay de {waited:.1f}s para evitar detección...",
+                        f"Aplicando delay de {waited:.1f}s para evitar detección de Instagram...",
                         reply_markup=reply_markup,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Failed to show Instagram delay notification: {e}")
+                await asyncio.sleep(waited)
+                # Restore normal start message for seamless transition after delay
+                try:
+                    await progress_message.edit_text(
+                        f"Descargando de {platform}...",
+                        reply_markup=reply_markup,
+                    )
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Failed to restore post-delay message: {e}")
 
+        # Guard: respect cancel that arrived during the (potentially long) delay sleep (Issue 1).
+        # Uses the exact download_status user_data pattern from handle_download_cancel_callback.
+        if context.user_data.get(f"download_status_{correlation_id}") == "cancelled":
+            return
+
+        # Note on Issue 5: any hypothetical exception in this narrow window after _apply
+        # (but before facade reaches InstagramDownloader.download's finally) would skip
+        # the timestamp _mark. This is best-effort; normal errors are handled inside
+        # the downloader (which always marks). The window is tiny and pre-existing
+        # for waited==0 IG cases.
         result = await facade.download(
             url=url,
             chat_id=chat_id,
@@ -8112,6 +8173,38 @@ async def _start_combined_download(
             'max_filesize_mb': 500,
         }
 
+        # Apply Instagram inter-download delay before starting (notify user during wait)
+        # (covers /download command + IG button flows for consistent behavior)
+        if is_instagram_url(url):
+            waited = await _apply_instagram_delay()
+            if waited > 0:
+                try:
+                    await query.edit_message_text(
+                        f"Aplicando delay de {waited:.1f}s para evitar detección de Instagram...",
+                        reply_markup=reply_markup
+                    )
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Failed to show Instagram delay notification: {e}")
+                await asyncio.sleep(waited)
+                # Restore normal message for seamless transition
+                try:
+                    await query.edit_message_text(
+                        f"Descargando de {platform} para convertir a {action_name}...",
+                        reply_markup=reply_markup
+                    )
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Failed to restore post-delay message: {e}")
+
+        # Guard: respect cancel that arrived during the (potentially long) delay sleep (Issue 1).
+        # Uses the exact download_status user_data pattern from handle_download_cancel_callback.
+        if context.user_data.get(f"download_status_{correlation_id}") == "cancelled":
+            return
+
+        # Note on Issue 5: any hypothetical exception in this narrow window after _apply
+        # (but before facade reaches InstagramDownloader.download's finally) would skip
+        # the timestamp _mark. This is best-effort; normal errors are handled inside
+        # the downloader (which always marks). The window is tiny and pre-existing
+        # for waited==0 IG cases.
         result = await facade.download(
             url=url,
             chat_id=chat_id,
@@ -8448,6 +8541,9 @@ async def handle_download_cancel_callback(update: Update, context: ContextTypes.
                 else:
                     logger.info(f"[{correlation_id}] Cancel failed - download not found or already finished")
                     await query.edit_message_text("No se pudo cancelar (¿ya completada?)")
+                    # Mark as cancelled so any in-flight pre-download delay sleep in _start_*
+                    # can detect it via the existing user_data status guard (Issue 1).
+                    context.user_data[f"download_status_{correlation_id}"] = "cancelled"
         except Exception as e:
             logger.error(f"[{correlation_id}] Error during cancel: {e}")
             await query.edit_message_text("Error al cancelar la descarga")
