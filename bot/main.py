@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 logger.info(f"Logging configured at level: {config.LOG_LEVEL}")
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, filters
+
+from bot.telegram_client import create_application
 
 from bot.handlers import (
     start, handle_video, handle_convert_command, handle_extract_audio_command,
@@ -102,8 +104,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, signal_handler)
     logger.info("Signal handlers registered for graceful shutdown")
 
-    # Create the Application and pass it your bot's token
-    application = Application.builder().token(config.BOT_TOKEN).build()
+    # Create the Application (cloud API or local Bot API server)
+    application = create_application()
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))

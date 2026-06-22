@@ -120,7 +120,7 @@ class DownloadConfig:
     cleanup_on_failure: bool = True
     extract_audio: bool = False
     preferred_quality: str = "best"
-    max_filesize_mb: int = 50  # Default 50MB, increase to 500 for auto-split
+    max_filesize_mb: int = 500  # Cloud: 500MB with auto-split; local API: up to 2000MB
 
     def to_download_options(self, output_path: Optional[str] = None) -> DownloadOptions:
         """Convert DownloadConfig to DownloadOptions.

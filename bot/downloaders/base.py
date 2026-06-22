@@ -30,8 +30,16 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
-# Telegram bot upload limit in bytes (50 MB)
-TELEGRAM_MAX_FILE_SIZE = 50 * 1024 * 1024
+
+def get_telegram_max_file_size() -> int:
+    """Return the active Telegram upload limit in bytes."""
+    from bot.config import config
+
+    return config.telegram_max_upload_bytes
+
+
+# Backwards-compatible alias evaluated at import time from current config.
+TELEGRAM_MAX_FILE_SIZE = get_telegram_max_file_size()
 
 
 @dataclass(frozen=True)
@@ -116,11 +124,13 @@ class DownloadOptions:
         # Need to use object.__setattr__ because dataclass is frozen
         errors = []
 
-        # Validate max_filesize doesn't exceed practical limit (500MB = ~10 split parts at 50MB)
-        if self.max_filesize > 500 * 1024 * 1024:
+        from bot.config import TELEGRAM_LOCAL_MAX_UPLOAD_MB
+
+        max_practical_bytes = TELEGRAM_LOCAL_MAX_UPLOAD_MB * 1024 * 1024
+        if self.max_filesize > max_practical_bytes:
             errors.append(
                 f"max_filesize ({self.max_filesize}) exceeds maximum practical limit "
-                f"(500MB). Larger files cannot be split and sent via Telegram."
+                f"({TELEGRAM_LOCAL_MAX_UPLOAD_MB}MB)."
             )
 
         # Validate retry settings are non-negative
@@ -544,4 +554,5 @@ __all__ = [
     "BaseDownloader",
     "DownloadOptions",
     "TELEGRAM_MAX_FILE_SIZE",
+    "get_telegram_max_file_size",
 ]

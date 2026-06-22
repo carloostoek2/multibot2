@@ -4,8 +4,9 @@ import logging
 import os
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, Union
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ChatType
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -6822,8 +6823,36 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # Import PlatformRouter for metadata extraction
 from bot.downloaders.platform_router import PlatformRouter
 
-# Constants
-TELEGRAM_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# Telegram upload limit (50MB cloud, up to 2000MB with local Bot API)
+TELEGRAM_MAX_FILE_SIZE = config.telegram_max_upload_bytes
+
+
+@contextmanager
+def _open_file_for_send(file_path: str) -> Iterator[Union[Path, Any]]:
+    """Yield a local Path in local mode, or an open file handle in cloud mode."""
+    abs_path = os.path.abspath(file_path)
+    if config.TELEGRAM_LOCAL_MODE:
+        yield Path(abs_path)
+        return
+
+    file_handle = open(abs_path, "rb")
+    try:
+        yield file_handle
+    finally:
+        file_handle.close()
+
+
+def _get_download_max_filesize_mb() -> int:
+    """Return the configured download size limit in megabytes."""
+    return config.DOWNLOAD_MAX_SIZE_MB
+
+
+def _media_input(file_path: str) -> Union[Path, Any]:
+    """Return a local Path or open file handle for Telegram media uploads."""
+    abs_path = os.path.abspath(file_path)
+    if config.TELEGRAM_LOCAL_MODE:
+        return Path(abs_path)
+    return open(abs_path, "rb")
 
 
 def _detect_platform_for_display(url: str) -> str:
@@ -6959,7 +6988,8 @@ def _get_error_message_for_exception(e: Exception, url: str, correlation_id: str
     # File too large for Telegram
     if "file is too big" in error_msg or "too large" in error_msg or "entity too large" in error_msg:
         logger.warning(f"[{correlation_id}] File too large for Telegram: {e}")
-        return "El archivo excede el límite de Telegram (50MB)."
+        max_mb = config.TELEGRAM_MAX_UPLOAD_SIZE_MB
+        return f"El archivo excede el límite de Telegram ({max_mb}MB)."
 
     # Generic download errors
     if "404" in error_msg or "not found" in error_msg:
@@ -7666,11 +7696,10 @@ async def _start_download(
 
         # Download with progress callback integration
         # IMPORTANT: cleanup_on_success=False so file remains for sending
-        # max_filesize_mb=500 allows downloads up to 500MB (auto-split handles >50MB)
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
             'cleanup_on_success': False,
-            'max_filesize_mb': 500,
+            'max_filesize_mb': _get_download_max_filesize_mb(),
         }
 
         # Capture pre-delay text to avoid "Analizando" -> "Descargando" jump on restore (Issue 11)
@@ -8045,6 +8074,8 @@ def _build_caption_from_metadata(metadata: dict, default_title: str = "Descarga"
 def _split_file_if_needed(file_path: str, output_dir: str, correlation_id: str) -> list[str]:
     """Check file size and split if exceeds Telegram limit.
 
+    With local Bot API enabled, files up to 2000MB are sent without splitting.
+
     Args:
         file_path: Path to the file to check
         output_dir: Directory for output segments
@@ -8058,17 +8089,24 @@ def _split_file_if_needed(file_path: str, output_dir: str, correlation_id: str) 
     file_size = os.path.getsize(file_path)
     logger.info(f"[{correlation_id}] File size: {file_size / (1024 * 1024):.1f} MB")
 
-    if file_size <= TELEGRAM_MAX_FILE_SIZE:
+    max_file_size = config.telegram_max_upload_bytes
+    if file_size <= max_file_size:
         logger.info(f"[{correlation_id}] File within Telegram limit, no splitting needed")
         return [file_path]
 
-    # File exceeds Telegram limit - need to split
-    file_size_mb = file_size / (1024 * 1024)
-    max_size_mb = TELEGRAM_MAX_FILE_SIZE / (1024 * 1024)
+    if config.TELEGRAM_LOCAL_MODE:
+        logger.info(
+            f"[{correlation_id}] Local Bot API enabled — sending file without splitting "
+            f"({file_size / (1024 * 1024):.1f} MB)"
+        )
+        return [file_path]
+
+    # File exceeds cloud Telegram limit - need to split
+    max_size_mb = max_file_size / (1024 * 1024)
     logger.info(f"[{correlation_id}] File exceeds {max_size_mb:.0f}MB limit, splitting required")
 
     # Calculate number of parts needed (add 1 to ensure each part is under limit)
-    num_parts = int((file_size / TELEGRAM_MAX_FILE_SIZE) + 1)
+    num_parts = int((file_size / max_file_size) + 1)
     # Limit to prevent too many parts
     num_parts = min(10, max(1, num_parts))
 
@@ -8166,19 +8204,19 @@ async def _send_downloaded_file_with_menu(
                 try:
                     if file_ext in image_extensions:
                         media_group.append(InputMediaPhoto(
-                            media=open(file_path, 'rb'),
+                            media=_media_input(file_path),
                             caption=caption if i == 0 else None
                         ))
                     elif file_ext in video_extensions:
                         media_group.append(InputMediaVideo(
-                            media=open(file_path, 'rb'),
+                            media=_media_input(file_path),
                             caption=caption if i == 0 else None,
                             supports_streaming=True
                         ))
                     else:
                         # Audio or unknown - add as photo for now (fallback)
                         media_group.append(InputMediaPhoto(
-                            media=open(file_path, 'rb'),
+                            media=_media_input(file_path),
                             caption=caption if i == 0 else None
                         ))
                 except Exception as file_err:
@@ -8206,13 +8244,13 @@ async def _send_downloaded_file_with_menu(
 
                     try:
                         if file_ext in image_extensions:
-                            with open(file_path, 'rb') as photo_file:
+                            with _open_file_for_send(file_path) as photo_file:
                                 await message.reply_photo(
                                     photo=photo_file,
                                     caption=item_caption
                                 )
                         elif file_ext in video_extensions:
-                            with open(file_path, 'rb') as video_file:
+                            with _open_file_for_send(file_path) as video_file:
                                 sent_msg = await message.reply_video(
                                     video=video_file,
                                     caption=item_caption,
@@ -8220,7 +8258,7 @@ async def _send_downloaded_file_with_menu(
                                 )
                             has_video_menu = True
                         elif file_ext in audio_extensions:
-                            with open(file_path, 'rb') as audio_file:
+                            with _open_file_for_send(file_path) as audio_file:
                                 await message.reply_audio(
                                     audio=audio_file,
                                     caption=item_caption,
@@ -8229,7 +8267,7 @@ async def _send_downloaded_file_with_menu(
                                 )
                         else:
                             # Fallback: send as document
-                            with open(file_path, 'rb') as doc_file:
+                            with _open_file_for_send(file_path) as doc_file:
                                 await message.reply_document(
                                     document=doc_file,
                                     caption=item_caption
@@ -8271,7 +8309,7 @@ async def _send_downloaded_file_with_menu(
 
                 if format_type == 'audio' or file_ext in audio_extensions:
                     # Send as audio
-                    with open(part_path, 'rb') as audio_file:
+                    with _open_file_for_send(part_path) as audio_file:
                         await message.reply_audio(
                             audio=audio_file,
                             caption=part_caption,
@@ -8280,14 +8318,14 @@ async def _send_downloaded_file_with_menu(
                         )
                 elif file_ext in image_extensions:
                     # Send as photo
-                    with open(part_path, 'rb') as photo_file:
+                    with _open_file_for_send(part_path) as photo_file:
                         await message.reply_photo(
                             photo=photo_file,
                             caption=part_caption
                         )
                 else:
                     # Send as video
-                    with open(part_path, 'rb') as video_file:
+                    with _open_file_for_send(part_path) as video_file:
                         sent_message = await message.reply_video(
                             video=video_file,
                             caption=part_caption,
@@ -8448,11 +8486,10 @@ async def _start_combined_download(
 
         # Download with progress callback integration
         # IMPORTANT: cleanup_on_success=False so file remains for sending
-        # max_filesize_mb=500 allows downloads up to 500MB (auto-split handles >50MB)
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
             'cleanup_on_success': False,
-            'max_filesize_mb': 500,
+            'max_filesize_mb': _get_download_max_filesize_mb(),
         }
 
         # Apply Instagram inter-download delay before starting (notify user during wait)
