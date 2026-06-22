@@ -47,7 +47,7 @@ class AudioEffects:
     MIN_TARGET_LUFS = -23.0
     MAX_TARGET_LUFS = -5.0
 
-    # Stereo 3D effect intensity presets (apulsator speed)
+    # Stereo 3D effect intensity presets (apulsator hz = modulation frequency)
     STEREO_3D_INTENSITIES = {
         "suave": 0.15,
         "medio": 0.33,
@@ -460,11 +460,11 @@ class AudioEffects:
         if channels <= 1:
             af_filter = (
                 f"pan=stereo|c0=c0|c1=c0,"
-                f"apulsator=mode=sine:amount=1:speed={speed}"
+                f"apulsator=mode=sine:amount=1:hz={speed}"
             )
             logger.debug("Mono source detected; applying upmix before apulsator")
         else:
-            af_filter = f"apulsator=mode=sine:amount=1:speed={speed}"
+            af_filter = f"apulsator=mode=sine:amount=1:hz={speed}"
             logger.debug(f"Stereo source detected ({channels} ch); applying apulsator only")
 
         cmd = [

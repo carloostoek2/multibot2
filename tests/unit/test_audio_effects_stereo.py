@@ -45,7 +45,7 @@ class TestAudioEffectsStereo3d:
         cmd = mock_run.call_args[0][0]
         af_filter = cmd[cmd.index("-af") + 1]
         assert "pan=stereo" not in af_filter
-        assert "apulsator=mode=sine:amount=1:speed=0.15" in af_filter
+        assert "apulsator=mode=sine:amount=1:hz=0.15" in af_filter
 
     @patch("bot.audio_effects.AudioEffects._check_ffmpeg", return_value=True)
     def test_invalid_intensity_raises(self, _ffmpeg, input_file, tmp_path):
