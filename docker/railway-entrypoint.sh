@@ -14,7 +14,7 @@ if [[ "${TELEGRAM_LOCAL_MODE:-false}" == "true" ]]; then
 
   mkdir -p /var/lib/telegram-bot-api /tmp/telegram-bot-api
 
-  telegram-bot-api \
+  /usr/local/bin/telegram-bot-api \
     --api-id="${TELEGRAM_API_ID}" \
     --api-hash="${TELEGRAM_API_HASH}" \
     --dir=/var/lib/telegram-bot-api \

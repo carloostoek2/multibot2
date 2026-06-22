@@ -9,12 +9,18 @@ RUN apt-get update && apt-get install -y \
     unzip \
     nodejs \
     npm \
-    libstdc++6 \
+    musl \
     openssl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Alpine-built binary needs musl to run on Debian
 COPY --from=telegram-api /usr/local/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
+COPY --from=telegram-api /lib/ld-musl-x86_64.so.1 /lib/ld-musl-x86_64.so.1
+COPY --from=telegram-api /usr/lib/libssl.so.3 /usr/lib/libssl.so.3
+COPY --from=telegram-api /usr/lib/libcrypto.so.3 /usr/lib/libcrypto.so.3
+COPY --from=telegram-api /usr/lib/libstdc++.so.6 /usr/lib/libstdc++.so.6
+COPY --from=telegram-api /usr/lib/libgcc_s.so.1 /usr/lib/libgcc_s.so.1
 
 # Install Deno (preferred JavaScript runtime for yt-dlp)
 RUN curl -fsSL https://deno.land/install.sh | sh
