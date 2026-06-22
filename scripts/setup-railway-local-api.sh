@@ -40,6 +40,13 @@ if ! railway volume list --service "$BOT_API_SERVICE" --json 2>/dev/null | grep 
   railway volume add --service "$BOT_API_SERVICE" --mount-path /var/lib/telegram-bot-api
 fi
 
+echo "==> Sharing telegram-bot-api volume with ${BOT_SERVICE} for incoming file downloads"
+BOT_API_VOLUME_ID="$(railway volume list --service "$BOT_API_SERVICE" --json | python3 -c "import json,sys; vols=json.load(sys.stdin).get('volumes',[]); print(vols[0]['id'] if vols else '')")"
+if [[ -n "$BOT_API_VOLUME_ID" ]]; then
+  railway service link "$BOT_SERVICE"
+  railway volume attach --volume "$BOT_API_VOLUME_ID" --yes || true
+fi
+
 echo "==> Setting ${BOT_SERVICE} local API variables"
 railway variable set \
   TELEGRAM_LOCAL_MODE=true \

@@ -121,6 +121,9 @@ def _get_message_audio_source(message) -> tuple[str | None, int | None, str | No
 async def _download_with_retry(file, destination_path: str, max_retries: int = 3, correlation_id: str = None) -> bool:
     """Download file with retry logic for transient failures.
 
+    With local Bot API, copies from a shared filesystem when available and
+    otherwise downloads via the configured local file endpoint.
+
     Args:
         file: Telegram file object to download
         destination_path: Path to save the file
@@ -133,11 +136,19 @@ async def _download_with_retry(file, destination_path: str, max_retries: int = 3
     Raises:
         NetworkError, TimedOut: If all retries exhausted
     """
+    import shutil
+
     cid = correlation_id or "no-cid"
+
+    if file.file_path and os.path.isfile(file.file_path):
+        shutil.copy2(file.file_path, destination_path)
+        logger.info(f"[{cid}] File copied from shared path to {destination_path}")
+        return True
+
     for attempt in range(max_retries):
         try:
             await file.download_to_drive(destination_path)
-            logger.info(f"[{cid}] Video downloaded to {destination_path}")
+            logger.info(f"[{cid}] File downloaded to {destination_path}")
             return True
         except (NetworkError, TimedOut) as e:
             if attempt < max_retries - 1:

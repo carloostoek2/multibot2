@@ -30,6 +30,7 @@ class BotConfig:
     # Enables uploads/downloads beyond the 50MB cloud limit (up to 2000MB).
     TELEGRAM_LOCAL_MODE: bool = False
     TELEGRAM_API_BASE_URL: Optional[str] = None
+    TELEGRAM_API_FILE_BASE_URL: Optional[str] = None
     TELEGRAM_API_TIMEOUT: float = 30.0
     TELEGRAM_MAX_UPLOAD_SIZE_MB: int = TELEGRAM_CLOUD_MAX_UPLOAD_MB
 
@@ -415,6 +416,7 @@ def load_config() -> BotConfig:
         BOT_TOKEN=os.getenv("BOT_TOKEN", ""),
         TELEGRAM_LOCAL_MODE=telegram_local_mode,
         TELEGRAM_API_BASE_URL=os.getenv("TELEGRAM_API_BASE_URL") or None,
+        TELEGRAM_API_FILE_BASE_URL=os.getenv("TELEGRAM_API_FILE_BASE_URL") or None,
         TELEGRAM_API_TIMEOUT=parsed_timeout,
         TELEGRAM_MAX_UPLOAD_SIZE_MB=_int_env(
             "TELEGRAM_MAX_UPLOAD_SIZE_MB", default_upload_mb
