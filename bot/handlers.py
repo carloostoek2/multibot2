@@ -6,7 +6,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Union
+from typing import Any, Iterator
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ChatType
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -6828,13 +6828,13 @@ TELEGRAM_MAX_FILE_SIZE = config.telegram_max_upload_bytes
 
 
 @contextmanager
-def _open_file_for_send(file_path: str) -> Iterator[Union[Path, Any]]:
-    """Yield a local Path in local mode, or an open file handle in cloud mode."""
-    abs_path = os.path.abspath(file_path)
-    if config.TELEGRAM_LOCAL_MODE:
-        yield Path(abs_path)
-        return
+def _open_file_for_send(file_path: str) -> Iterator[Any]:
+    """Yield an open file handle for Telegram uploads.
 
+    Local Bot API raises the upload limit to 2000MB via multipart uploads.
+    File paths are only used when bot and API share the same filesystem.
+    """
+    abs_path = os.path.abspath(file_path)
     file_handle = open(abs_path, "rb")
     try:
         yield file_handle
@@ -6847,12 +6847,9 @@ def _get_download_max_filesize_mb() -> int:
     return config.DOWNLOAD_MAX_SIZE_MB
 
 
-def _media_input(file_path: str) -> Union[Path, Any]:
-    """Return a local Path or open file handle for Telegram media uploads."""
-    abs_path = os.path.abspath(file_path)
-    if config.TELEGRAM_LOCAL_MODE:
-        return Path(abs_path)
-    return open(abs_path, "rb")
+def _media_input(file_path: str) -> Any:
+    """Return an open file handle for Telegram media uploads."""
+    return open(os.path.abspath(file_path), "rb")
 
 
 def _detect_platform_for_display(url: str) -> str:

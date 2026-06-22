@@ -1,6 +1,4 @@
 """Tests for Local Bot API file handling helpers."""
-import os
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -28,24 +26,16 @@ def _mock_config(*, local_mode: bool, max_upload_bytes: int = 50 * 1024 * 1024):
 class TestLocalApiHandlers:
     """Validate local-mode file send and split behavior."""
 
-    def test_media_input_returns_path_in_local_mode(self, sample_video):
-        with patch("bot.handlers.config", _mock_config(local_mode=True)):
-            media = _media_input(sample_video)
-        assert isinstance(media, Path)
-        assert media == Path(os.path.abspath(sample_video))
-
-    def test_media_input_returns_file_handle_in_cloud_mode(self, sample_video):
-        with patch("bot.handlers.config", _mock_config(local_mode=False)):
-            media = _media_input(sample_video)
+    def test_media_input_returns_file_handle(self, sample_video):
+        media = _media_input(sample_video)
         try:
             assert hasattr(media, "read")
         finally:
             media.close()
 
-    def test_open_file_for_send_yields_path_in_local_mode(self, sample_video):
-        with patch("bot.handlers.config", _mock_config(local_mode=True)):
-            with _open_file_for_send(sample_video) as media:
-                assert isinstance(media, Path)
+    def test_open_file_for_send_yields_file_handle(self, sample_video):
+        with _open_file_for_send(sample_video) as media:
+            assert hasattr(media, "read")
 
     def test_split_skipped_in_local_mode_for_large_files(self, tmp_path):
         large_file = tmp_path / "large.mp4"

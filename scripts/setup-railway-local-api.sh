@@ -16,18 +16,16 @@ fi
 BOT_API_SERVICE="${BOT_API_SERVICE:-telegram-bot-api}"
 BOT_SERVICE="${BOT_SERVICE:-bot}"
 
-echo "==> Ensuring ${BOT_API_SERVICE} service exists"
+echo "==> Ensuring ${BOT_API_SERVICE} service exists (Docker image only)"
 if ! railway service status --service "$BOT_API_SERVICE" --json >/dev/null 2>&1; then
-  railway add --service "$BOT_API_SERVICE" --repo carloostoek2/multibot2
+  railway add \
+    --service "$BOT_API_SERVICE" \
+    --image aiogram/telegram-bot-api:latest \
+    --variables "TELEGRAM_API_ID=${API_ID}" \
+    --variables "TELEGRAM_API_HASH=${API_HASH}" \
+    --variables "TELEGRAM_LOCAL=1" \
+    --variables "TELEGRAM_HTTP_IP_ADDRESS=0.0.0.0"
 fi
-
-echo "==> Configuring ${BOT_API_SERVICE} build from docker/telegram-bot-api/Dockerfile"
-railway environment edit \
-  --service-config "$BOT_API_SERVICE" \
-  build.builder DOCKERFILE
-railway environment edit \
-  --service-config "$BOT_API_SERVICE" \
-  build.dockerfilePath "docker/telegram-bot-api/Dockerfile"
 
 echo "==> Setting ${BOT_API_SERVICE} variables"
 railway variable set \
@@ -45,15 +43,15 @@ fi
 echo "==> Setting ${BOT_SERVICE} local API variables"
 railway variable set \
   TELEGRAM_LOCAL_MODE=true \
-  TELEGRAM_API_BASE_URL='http://${{telegram-bot-api.RAILWAY_PRIVATE_DOMAIN}}:${{telegram-bot-api.PORT}}/bot' \
+  TELEGRAM_API_BASE_URL=http://telegram-bot-api.railway.internal:8081/bot \
   TELEGRAM_MAX_UPLOAD_SIZE_MB=2000 \
   DOWNLOAD_MAX_SIZE_MB=2000 \
   DOWNLOAD_MAX_SIZE_GENERIC_MB=2000 \
   TELEGRAM_API_TIMEOUT=120 \
   --service "$BOT_SERVICE"
 
-echo "==> Deploying ${BOT_API_SERVICE}"
-railway up --service "$BOT_API_SERVICE" --detach -m "Deploy local Telegram Bot API server"
+echo "==> Deploying ${BOT_API_SERVICE} (image pull — do NOT use 'railway up' on this service)"
+railway redeploy --service "$BOT_API_SERVICE" --yes
 
 echo "==> Deploying ${BOT_SERVICE}"
 railway up --service "$BOT_SERVICE" --detach -m "Enable local Bot API for files > 50MB"
