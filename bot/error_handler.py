@@ -183,6 +183,14 @@ class ImageResizeError(ImageProcessingError):
         super().__init__(self.message)
 
 
+class ImageEnhancementError(ImageProcessingError):
+    """Exception raised when image enhancement fails."""
+
+    def __init__(self, message: str = "No pude mejorar la imagen"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -204,6 +212,7 @@ ERROR_MESSAGES = {
     ImageCompressionError: "No pude comprimir la imagen. Verifica que sea un archivo válido.",
     ImageConversionError: "No pude convertir el formato de la imagen. Verifica que el formato sea válido.",
     ImageResizeError: "No pude redimensionar la imagen. Verifica las dimensiones ingresadas.",
+    ImageEnhancementError: "No pude mejorar la imagen. Verifica que sea un archivo válido.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
     ValidationError: "El archivo no es válido. Verifica que sea un video correcto.",
     # Telegram API errors
@@ -215,6 +224,46 @@ ERROR_MESSAGES = {
 }
 
 DEFAULT_ERROR_MESSAGE = "Ocurrió un error inesperado. Por favor intenta de nuevo."
+
+
+def _error_type_default_message(error_type: type) -> str | None:
+    """Return the default constructor message for an error class, if any."""
+    init_defaults = getattr(error_type.__init__, "__defaults__", None)
+    if init_defaults:
+        return init_defaults[0]
+    return None
+
+
+def get_user_error_message(error: Exception) -> str:
+    """Return a user-facing Spanish message for a processing error.
+
+    Uses ERROR_MESSAGES for known exception types. ValidationError and other
+    exceptions with user-ready ``.message`` text take precedence. When multiple
+    mapped types match, the most specific (deepest subclass) wins.
+    """
+    if isinstance(error, ValidationError):
+        return getattr(error, "message", ERROR_MESSAGES.get(ValidationError, DEFAULT_ERROR_MESSAGE))
+
+    matching_types = [
+        (error_type, message)
+        for error_type, message in ERROR_MESSAGES.items()
+        if isinstance(error, error_type)
+    ]
+    if matching_types:
+        error_type, default_message = max(
+            matching_types,
+            key=lambda item: len(item[0].__mro__),
+        )
+        custom_message = getattr(error, "message", None)
+        type_default = _error_type_default_message(error_type)
+        if custom_message and custom_message != type_default:
+            return custom_message
+        return default_message
+
+    if getattr(error, "message", None):
+        return error.message
+
+    return DEFAULT_ERROR_MESSAGE
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

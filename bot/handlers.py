@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ChatType
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import NetworkError, TimedOut
 
@@ -36,7 +37,10 @@ from bot.error_handler import (
     ImageCompressionError,
     ImageConversionError,
     ImageResizeError,
+    ImageEnhancementError,
     handle_processing_error,
+    get_user_error_message,
+    DEFAULT_ERROR_MESSAGE,
 )
 from bot.config import config
 from bot.validators import (
@@ -54,7 +58,7 @@ from bot.audio_format_converter import AudioFormatConverter, detect_audio_format
 from bot.audio_enhancer import AudioEnhancer
 from bot.audio_effects import AudioEffects
 from bot.screenshot_processor import ScreenshotProcessor
-from bot.image_processor import ImageProcessor, SUPPORTED_IMAGE_FORMATS
+from bot.image_processor import ImageProcessor, SUPPORTED_IMAGE_FORMATS, ENHANCEMENT_PROFILES
 
 # Import downloaders for URL handling
 from bot.downloaders import (
@@ -83,6 +87,35 @@ logger = logging.getLogger(__name__)
 
 # URL detector instance for detecting URLs in messages
 url_detector = URLDetector()
+
+# Audio file extensions accepted when sent as Telegram documents
+AUDIO_DOCUMENT_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"}
+
+
+def _is_audio_document(document) -> bool:
+    """Return True if a Telegram document attachment is an audio file."""
+    if not document:
+        return False
+    mime_type = (document.mime_type or "").lower()
+    if mime_type.startswith("audio/"):
+        return True
+    filename = (document.file_name or "").lower()
+    return Path(filename).suffix in AUDIO_DOCUMENT_EXTENSIONS
+
+
+def _get_message_audio_source(message) -> tuple[str | None, int | None, str | None]:
+    """Extract audio file_id, file_size, and unique_id from a message.
+
+    Supports native Telegram audio messages and audio sent as documents.
+    """
+    if message.audio:
+        audio = message.audio
+        return audio.file_id, audio.file_size, audio.file_unique_id
+    document = message.document
+    if document and _is_audio_document(document):
+        return document.file_id, document.file_size, document.file_unique_id
+    return None, None, None
+
 
 async def _download_with_retry(file, destination_path: str, max_retries: int = 3, correlation_id: str = None) -> bool:
     """Download file with retry logic for transient failures.
@@ -1697,17 +1730,17 @@ async def handle_join_audio_file(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
 
-    # Get audio from message
-    audio = update.message.audio
-    if not audio:
+    # Get audio from message (native audio or document attachment)
+    file_id, file_size, file_unique_id = _get_message_audio_source(update.message)
+    if not file_id:
         await update.message.reply_text(
             "Por favor envía un archivo de audio válido."
         )
         return
 
     # Validate file size before downloading
-    if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+    if file_size:
+        is_valid, error_msg = validate_file_size(file_size, config.MAX_AUDIO_FILE_SIZE_MB)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -1727,13 +1760,13 @@ async def handle_join_audio_file(update: Update, context: ContextTypes.DEFAULT_T
 
         # Generate safe filename
         audio_index = len(session["audios"]) + 1
-        input_filename = f"join_audio_{user_id}_{audio_index:02d}_{audio.file_unique_id}.mp3"
+        input_filename = f"join_audio_{user_id}_{audio_index:02d}_{file_unique_id}.mp3"
         input_path = temp_mgr.get_temp_path(input_filename)
 
         # Download audio
         logger.info(f"Downloading audio {audio_index} for join session, user {user_id}")
         try:
-            file = await audio.get_file()
+            file = await context.bot.get_file(file_id)
             await _download_with_retry(file, input_path)
             logger.info(f"Audio downloaded to {input_path}")
         except Exception as e:
@@ -2048,11 +2081,52 @@ async def handle_join_audio_callback(update: Update, context: ContextTypes.DEFAU
         logger.warning(f"Unknown join audio action: {action}")
 
 
-async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle audio file messages by converting them to voice notes.
+async def _route_incoming_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Route incoming audio to join or merge handlers when a session is active."""
+    if context.user_data.get("join_audio_session"):
+        await handle_join_audio_file(update, context)
+        return True
+    if context.user_data.get("merge_video_file_id"):
+        await handle_merge_audio_received(update, context)
+        return True
+    return False
 
-    Downloads the audio file, validates it, converts it to OGG Opus format,
-    and sends it back as a Telegram voice note.
+
+async def _show_audio_menu_for_file(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+    file_size: int | None,
+    source_label: str = "Audio",
+) -> None:
+    """Validate audio size and show the standard audio processing menu."""
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] {source_label} received from user {user_id}")
+
+    if file_size:
+        logger.debug(f"[{correlation_id}] Audio file size: {file_size} bytes")
+        is_valid, error_msg = validate_file_size(file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        if not is_valid:
+            logger.warning(
+                f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}"
+            )
+            await update.message.reply_text(error_msg)
+            return
+
+    context.user_data["audio_menu_file_id"] = file_id
+    context.user_data["audio_menu_correlation_id"] = correlation_id
+
+    reply_markup = _get_audio_menu_keyboard()
+    await update.message.reply_text(
+        "Audio recibido. Selecciona una acción:",
+        reply_markup=reply_markup,
+    )
+    logger.info(f"[{correlation_id}] Audio menu displayed to user {user_id}")
+
+
+async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio file messages by showing the audio processing menu.
 
     If there's an active audio join session, routes to handle_join_audio_file instead.
     If there's an active video-audio merge session, routes to handle_merge_audio_received.
@@ -2061,50 +2135,50 @@ async def handle_audio_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         update: Telegram update object
         context: Telegram context object
     """
-    user_id = update.effective_user.id
-
-    # Check if there's an active audio join session
-    if context.user_data.get("join_audio_session"):
-        # Route to join audio handler
-        await handle_join_audio_file(update, context)
+    if await _route_incoming_audio(update, context):
         return
 
-    # Check if there's an active video-audio merge session
-    if context.user_data.get("merge_video_file_id"):
-        # Route to merge audio handler
-        await handle_merge_audio_received(update, context)
-        return
-
-    correlation_id = str(uuid.uuid4())[:8]
-    logger.info(f"[{correlation_id}] Audio file received from user {user_id}")
-
-    # Get audio from message
     audio = update.message.audio
     if not audio:
-        logger.warning(f"[{correlation_id}] No audio found in message from user {user_id}")
+        logger.warning(
+            f"No audio found in message from user {update.effective_user.id}"
+        )
         await update.message.reply_text("No encontré un archivo de audio en tu mensaje.")
         return
 
-    # Validate file size before downloading
-    if audio.file_size:
-        logger.debug(f"[{correlation_id}] Audio file size: {audio.file_size} bytes")
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
-        if not is_valid:
-            logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
-            await update.message.reply_text(error_msg)
-            return
-
-    # Store file info for callback handler
-    context.user_data["audio_menu_file_id"] = audio.file_id
-    context.user_data["audio_menu_correlation_id"] = correlation_id
-
-    # Show inline menu
-    reply_markup = _get_audio_menu_keyboard()
-    await update.message.reply_text(
-        "Audio recibido. Selecciona una acción:",
-        reply_markup=reply_markup
+    await _show_audio_menu_for_file(
+        update,
+        context,
+        audio.file_id,
+        audio.file_size,
+        source_label="Audio file",
     )
-    logger.info(f"[{correlation_id}] Audio menu displayed to user {user_id}")
+
+
+async def handle_audio_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle audio files sent as Telegram documents (e.g. MP3 attachments).
+
+    Reuses the same routing and menu flow as handle_audio_file for join sessions,
+    video-audio merge sessions, and the standard audio processing menu.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    """
+    document = update.message.document
+    if not document or not _is_audio_document(document):
+        return
+
+    if await _route_incoming_audio(update, context):
+        return
+
+    await _show_audio_menu_for_file(
+        update,
+        context,
+        document.file_id,
+        document.file_size,
+        source_label="Audio document",
+    )
 
 
 async def handle_merge_audio_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2120,9 +2194,9 @@ async def handle_merge_audio_received(update: Update, context: ContextTypes.DEFA
     correlation_id = context.user_data.get("merge_video_correlation_id", str(uuid.uuid4())[:8])
     logger.info(f"[{correlation_id}] Audio received for merge from user {user_id}")
 
-    # Get audio from message
-    audio = update.message.audio
-    if not audio:
+    # Get audio from message (native audio or document attachment)
+    audio_file_id, audio_file_size, _ = _get_message_audio_source(update.message)
+    if not audio_file_id:
         logger.warning(f"[{correlation_id}] No audio found in message from user {user_id}")
         await update.message.reply_text("No encontré un archivo de audio en tu mensaje.")
         # Clean up merge context
@@ -2131,8 +2205,8 @@ async def handle_merge_audio_received(update: Update, context: ContextTypes.DEFA
         return
 
     # Validate file size
-    if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+    if audio_file_size:
+        is_valid, error_msg = validate_file_size(audio_file_size, config.MAX_AUDIO_FILE_SIZE_MB)
         if not is_valid:
             logger.warning(f"[{correlation_id}] Audio file size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -2180,7 +2254,7 @@ async def handle_merge_audio_received(update: Update, context: ContextTypes.DEFA
             # Download audio
             logger.info(f"[{correlation_id}] Downloading audio for merge")
             try:
-                file = await audio.get_file()
+                file = await context.bot.get_file(audio_file_id)
                 await _download_with_retry(file, audio_path, correlation_id=correlation_id)
                 logger.info(f"[{correlation_id}] Audio downloaded to {audio_path}")
             except Exception as e:
@@ -4562,6 +4636,146 @@ async def handle_normalize_selection(update: Update, context: ContextTypes.DEFAU
         logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
 
 
+async def handle_audio_3d_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle stereo 3D intensity selection callback from inline keyboard."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    if not callback_data or not callback_data.startswith("audio_3d:"):
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 2:
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    intensity = parts[1]
+    intensity_labels = {
+        "suave": "Suave",
+        "medio": "Medio",
+        "intenso": "Intenso",
+    }
+
+    if intensity not in intensity_labels:
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    file_id = context.user_data.get("effect_audio_file_id")
+    correlation_id = context.user_data.get("effect_audio_correlation_id", str(uuid.uuid4())[:8])
+    stored_effect_type = context.user_data.get("effect_type")
+
+    if not file_id:
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    if stored_effect_type and stored_effect_type != "stereo_3d":
+        logger.warning(
+            f"[{correlation_id}] Mismatch: stored={stored_effect_type}, callback=stereo_3d"
+        )
+
+    intensity_label = intensity_labels[intensity]
+    logger.info(
+        f"[{correlation_id}] Stereo 3D intensity '{intensity}' selected by user {user_id}"
+    )
+
+    try:
+        await query.edit_message_text(f"Aplicando efecto 3D ({intensity_label})...")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"input_{user_id}_{correlation_id}.audio"
+            output_filename = f"stereo3d_{user_id}_{correlation_id}.mp3"
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                raise ValidationError(error_msg)
+
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                raise ValidationError(space_error)
+
+            logger.info(f"[{correlation_id}] Applying stereo 3D ({intensity}) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(input_path), str(output_path))
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.stereo_3d, intensity),
+                    timeout=config.PROCESSING_TIMEOUT,
+                )
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El efecto 3D tardó demasiado") from e
+
+            doc_filename = f"stereo_3d_{intensity}_{correlation_id}.mp3"
+            document_sent = False
+            with open(output_path, "rb") as audio_file:
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=audio_file,
+                    filename="stereo_3d.mp3",
+                    title=f"Audio con efecto 3D ({intensity_label})",
+                )
+                try:
+                    audio_file.seek(0)
+                    await context.bot.send_document(
+                        chat_id=update.effective_chat.id,
+                        document=audio_file,
+                        filename=doc_filename,
+                        caption=(
+                            f"Archivo MP3 con efecto 3D ({intensity_label}) "
+                            "para editores de video"
+                        ),
+                    )
+                    document_sent = True
+                except Exception as doc_error:
+                    logger.warning(
+                        f"[{correlation_id}] Audio sent but document delivery failed: {doc_error}"
+                    )
+
+            success_msg = f"¡Listo! Efecto 3D aplicado con intensidad {intensity_label}."
+            if not document_sent:
+                success_msg += (
+                    "\n\n(No pude enviar el archivo MP3 como documento; "
+                    "usa el audio de arriba.)"
+                )
+            await query.edit_message_text(success_msg)
+
+            context.user_data.pop("effect_audio_file_id", None)
+            context.user_data.pop("effect_audio_correlation_id", None)
+            context.user_data.pop("effect_type", None)
+
+        except (DownloadError, ValidationError, AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Stereo 3D processing error: {e}")
+            try:
+                await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying stereo 3D: {e}")
+            try:
+                await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+
 # =============================================================================
 # Audio Inline Menu Handler
 # =============================================================================
@@ -4587,6 +4801,9 @@ def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("Reducir Ruido", callback_data="audio_action:denoise"),
             InlineKeyboardButton("Comprimir", callback_data="audio_action:compress"),
             InlineKeyboardButton("Normalizar", callback_data="audio_action:normalize"),
+        ],
+        [
+            InlineKeyboardButton("Efecto 3D", callback_data="audio_action:stereo_3d"),
         ],
         [
             InlineKeyboardButton("Dividir Audio", callback_data="audio_action:split"),
@@ -4812,6 +5029,30 @@ async def handle_audio_menu_callback(update: Update, context: ContextTypes.DEFAU
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "Selecciona el perfil de normalización:",
+            reply_markup=reply_markup
+        )
+
+    elif action == "stereo_3d":
+        context.user_data["effect_audio_file_id"] = file_id
+        context.user_data["effect_audio_correlation_id"] = correlation_id
+        context.user_data["effect_type"] = "stereo_3d"
+        keyboard = [
+            [
+                InlineKeyboardButton("Suave", callback_data="audio_3d:suave"),
+                InlineKeyboardButton("Medio", callback_data="audio_3d:medio"),
+                InlineKeyboardButton("Intenso", callback_data="audio_3d:intenso"),
+            ],
+            [
+                InlineKeyboardButton("← Volver", callback_data="back:audio"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona la intensidad del efecto 3D:\n\n"
+            "• Suave - ampliación estéreo ligera\n"
+            "• Medio - efecto equilibrado\n"
+            "• Intenso - ampliación estéreo marcada",
             reply_markup=reply_markup
         )
 
@@ -6257,6 +6498,71 @@ async def _process_screenshots(update: Update, context: ContextTypes.DEFAULT_TYP
                 await query.message.reply_text(f"❌ Error: {error_text}")
 
 
+async def _send_images_in_albums(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    image_paths: list,
+    correlation_id: str,
+    caption_prefix: str = "Imagen",
+) -> None:
+    """Send images grouped in albums of max 10.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+        image_paths: List of paths to image files
+        correlation_id: Correlation ID for logging
+        caption_prefix: Prefix for album captions (e.g. "Imagen", "Captura")
+    """
+    from telegram import InputMediaPhoto
+
+    user_id = update.effective_user.id
+    total = len(image_paths)
+    album_size = min(config.MAX_IMAGE_BATCH_SIZE, 10)
+
+    logger.info(f"[{correlation_id}] Sending {total} images in albums to user {user_id}")
+
+    for i in range(0, total, album_size):
+        album_paths = image_paths[i:i + album_size]
+        album_num = (i // album_size) + 1
+        total_albums = (total + album_size - 1) // album_size
+
+        file_handles = []
+        try:
+            media_group = []
+            for j, path in enumerate(album_paths):
+                global_idx = i + j + 1
+                caption = f"{caption_prefix} {global_idx}/{total}" if j == 0 else None
+                fh = open(path, "rb")
+                file_handles.append(fh)
+                media_group.append(InputMediaPhoto(media=fh, caption=caption))
+
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.message.reply_media_group(media=media_group)
+            elif hasattr(update, 'message') and update.message:
+                await update.message.reply_media_group(media=media_group)
+
+            logger.info(
+                f"[{correlation_id}] Sent album {album_num}/{total_albums} "
+                f"({len(album_paths)} images)"
+            )
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Failed to send album {album_num}: {e}")
+            for path in album_paths:
+                try:
+                    with open(path, 'rb') as f:
+                        if hasattr(update, 'callback_query') and update.callback_query:
+                            await update.callback_query.message.reply_photo(photo=f)
+                        elif hasattr(update, 'message') and update.message:
+                            await update.message.reply_photo(photo=f)
+                except Exception as ex:
+                    logger.error(f"[{correlation_id}] Failed to send individual image: {ex}")
+        finally:
+            for fh in file_handles:
+                fh.close()
+
+
 async def _send_screenshots_in_albums(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -6271,45 +6577,9 @@ async def _send_screenshots_in_albums(
         screenshot_paths: List of paths to screenshot files
         correlation_id: Correlation ID for logging
     """
-    from telegram import InputMediaPhoto
-
-    user_id = update.effective_user.id
-    total = len(screenshot_paths)
-    album_size = 10
-
-    logger.info(f"[{correlation_id}] Sending {total} screenshots in albums to user {user_id}")
-
-    for i in range(0, total, album_size):
-        album_paths = screenshot_paths[i:i + album_size]
-        album_num = (i // album_size) + 1
-        total_albums = (total + album_size - 1) // album_size
-
-        media_group = []
-        for j, path in enumerate(album_paths):
-            global_idx = i + j + 1
-            caption = f"Captura {global_idx}/{total}" if j == 0 else None
-            media_group.append(InputMediaPhoto(media=open(path, 'rb'), caption=caption))
-
-        try:
-            if hasattr(update, 'callback_query') and update.callback_query:
-                await update.callback_query.message.reply_media_group(media=media_group)
-            elif hasattr(update, 'message') and update.message:
-                await update.message.reply_media_group(media=media_group)
-
-            logger.info(f"[{correlation_id}] Sent album {album_num}/{total_albums} ({len(album_paths)} screenshots)")
-
-        except Exception as e:
-            logger.error(f"[{correlation_id}] Failed to send album {album_num}: {e}")
-            # Try sending individually as fallback
-            for path in album_paths:
-                try:
-                    with open(path, 'rb') as f:
-                        if hasattr(update, 'callback_query') and update.callback_query:
-                            await update.callback_query.message.reply_photo(photo=f)
-                        elif hasattr(update, 'message') and update.message:
-                            await update.message.reply_photo(photo=f)
-                except Exception as ex:
-                    logger.error(f"[{correlation_id}] Failed to send individual screenshot: {ex}")
+    await _send_images_in_albums(
+        update, context, screenshot_paths, correlation_id, caption_prefix="Captura"
+    )
 
 
 async def _parse_screenshot_times(text: str) -> tuple[list[float], str]:
@@ -6513,20 +6783,32 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"User {user_id} navigated back to audio menu")
 
     elif menu_type == "image":
-        # Re-show image menu with stored file_id
+        file_ids = context.user_data.get("image_menu_file_ids")
         file_id = context.user_data.get("image_menu_file_id")
-        if not file_id:
+        if not file_ids and not file_id:
             await query.edit_message_text(
                 "Error: no se encontró la imagen. Por favor envía la imagen de nuevo."
             )
             logger.warning(f"Back to image menu failed: no file_id for user {user_id}")
             return
 
-        reply_markup = _get_image_menu_keyboard()
-        await query.edit_message_text(
-            "¿Qué quieres hacer con esta imagen?",
-            reply_markup=reply_markup
-        )
+        count = len(file_ids) if file_ids else 1
+        truncated = context.user_data.get("image_menu_truncated", False)
+        reply_markup = _get_image_menu_keyboard(count)
+        if count > 1:
+            menu_text = (
+                f"{count} imágenes recibidas.\n\n"
+                "Solo «Mejorar» procesa todas las imágenes del álbum. "
+                "Selecciona una acción:"
+            )
+        else:
+            menu_text = "Imagen recibida. Selecciona una acción:"
+        if truncated:
+            menu_text += (
+                f"\n\n⚠️ Solo se procesarán las primeras "
+                f"{config.MAX_IMAGE_BATCH_SIZE} imágenes."
+            )
+        await query.edit_message_text(menu_text, reply_markup=reply_markup)
         logger.info(f"User {user_id} navigated back to image menu")
 
     else:
@@ -8823,6 +9105,25 @@ def _get_postdownload_audio_more_keyboard(correlation_id: str) -> InlineKeyboard
             InlineKeyboardButton("Normalizar", callback_data=f"postdownload:normalize:{correlation_id}"),
         ],
         [
+            InlineKeyboardButton("Efecto 3D", callback_data=f"postdownload:stereo_3d:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_stereo_3d_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for stereo 3D intensity selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Suave", callback_data=f"postdownload:stereo_3d_intensity:{correlation_id}:suave"),
+            InlineKeyboardButton("Medio", callback_data=f"postdownload:stereo_3d_intensity:{correlation_id}:medio"),
+            InlineKeyboardButton("Intenso", callback_data=f"postdownload:stereo_3d_intensity:{correlation_id}:intenso"),
+        ],
+        [
             InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
             InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
         ],
@@ -9217,6 +9518,15 @@ async def handle_postdownload_audio_callback(update: Update, context: ContextTyp
         await _handle_postdownload_normalize(update, context, entry, correlation_id)
     elif action == "equalize":
         await _handle_postdownload_equalize(update, context, entry, correlation_id)
+    elif action == "stereo_3d":
+        reply_markup = _get_postdownload_stereo_3d_keyboard(correlation_id)
+        await query.edit_message_text(
+            "Selecciona la intensidad del efecto 3D:\n\n"
+            "• Suave - ampliación estéreo ligera\n"
+            "• Medio - efecto equilibrado\n"
+            "• Intenso - ampliación estéreo marcada",
+            reply_markup=reply_markup,
+        )
     elif action == "more":
         reply_markup = _get_postdownload_audio_more_keyboard(correlation_id)
         await query.edit_message_text("Más opciones de procesamiento de audio:", reply_markup=reply_markup)
@@ -9617,6 +9927,59 @@ async def _handle_postdownload_extract_audio(
             await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
 
 
+async def handle_postdownload_stereo_3d_intensity_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle post-download stereo 3D intensity selection callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse: postdownload:stereo_3d_intensity:CORRELATION_ID:INTENSITY
+    parts = callback_data.split(":")
+    if len(parts) != 4:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    correlation_id = parts[2]
+    intensity = parts[3].lower()
+    intensity_labels = {
+        "suave": "Suave",
+        "medio": "Medio",
+        "intenso": "Intenso",
+    }
+
+    if intensity not in intensity_labels:
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    logger.info(
+        f"[{correlation_id}] Post-download stereo 3D intensity '{intensity}' "
+        f"selected by user {user_id}"
+    )
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
+        )
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text("Error: El archivo ya no está disponible. Fue eliminado automáticamente.")
+        return
+
+    await _handle_postdownload_stereo_3d(
+        update, context, entry, correlation_id, intensity, intensity_labels[intensity]
+    )
+
+
 async def handle_postdownload_intensity_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle post-download intensity selection callbacks (bass/treble boost).
 
@@ -9707,6 +10070,81 @@ async def _handle_postdownload_bass_boost(
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error applying bass boost: {e}")
             await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def _handle_postdownload_stereo_3d(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    entry: Any,
+    correlation_id: str,
+    intensity: str,
+    intensity_label: str,
+) -> None:
+    """Apply stereo 3D effect to downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Aplicando efecto 3D ({intensity_label})...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"stereo3d_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(
+                f"[{correlation_id}] Applying stereo 3D ({intensity}) for user {user_id}"
+            )
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(file_path), str(output_path))
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.stereo_3d, intensity),
+                    timeout=config.PROCESSING_TIMEOUT,
+                )
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            doc_filename = f"stereo_3d_{intensity}_{correlation_id}.mp3"
+            document_sent = False
+            logger.info(f"[{correlation_id}] Sending stereo 3D audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=doc_filename,
+                    title=f"Audio con efecto 3D ({intensity_label})",
+                )
+                try:
+                    audio_file.seek(0)
+                    await query.message.reply_document(
+                        document=audio_file,
+                        filename=doc_filename,
+                        caption=(
+                            f"Archivo MP3 con efecto 3D ({intensity_label}) "
+                            "para editores de video"
+                        ),
+                    )
+                    document_sent = True
+                except Exception as doc_error:
+                    logger.warning(
+                        f"[{correlation_id}] Audio sent but document delivery failed: {doc_error}"
+                    )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            ready_msg = "¡Listo! ¿Quieres hacer algo más con este audio?"
+            if not document_sent:
+                ready_msg += (
+                    "\n\n(No pude enviar el archivo MP3 como documento; "
+                    "usa el audio de arriba.)"
+                )
+            await query.message.reply_text(ready_msg, reply_markup=reply_markup)
+            logger.info(f"[{correlation_id}] Stereo 3D audio sent successfully to user {user_id}")
+        except (AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Stereo 3D processing failed: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying stereo 3D: {e}")
+            await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
 
 
 async def _handle_postdownload_treble_boost(
@@ -9909,19 +10347,179 @@ async def _handle_postdownload_compress(
 # Image Processing Handlers
 # ──────────────────────────────────────────────
 
+IMAGE_BATCH_DEBOUNCE_SECONDS = 1.5
 
-def _get_image_menu_keyboard() -> InlineKeyboardMarkup:
+
+def _user_data_key(user_id: int, chat) -> int | tuple[int, int]:
+    """Return the PTB user_data key for a user/chat pair."""
+    if chat.type == ChatType.PRIVATE:
+        return user_id
+    return (user_id, chat.id)
+
+
+def _store_image_menu_context(
+    application,
+    user_id: int,
+    chat,
+    file_ids: list[str],
+    correlation_id: str,
+    truncated: bool = False,
+) -> None:
+    """Store image menu state for single or batch processing."""
+    user_data = application.user_data[_user_data_key(user_id, chat)]
+    user_data["image_menu_file_ids"] = file_ids
+    user_data["image_menu_file_id"] = file_ids[0]
+    user_data["image_menu_correlation_id"] = correlation_id
+    user_data["image_menu_truncated"] = truncated
+
+
+async def _send_image_menu_message(
+    application,
+    chat,
+    user_id: int,
+    file_ids: list[str],
+    correlation_id: str,
+    reply_to_message_id: int | None = None,
+    truncated: bool = False,
+) -> None:
+    """Send the image action menu for one or more images."""
+    _store_image_menu_context(
+        application, user_id, chat, file_ids, correlation_id, truncated=truncated
+    )
+
+    count = len(file_ids)
+    if count > 1:
+        text = (
+            f"{count} imágenes recibidas.\n\n"
+            "Solo «Mejorar» procesa todas las imágenes del álbum. "
+            "Selecciona una acción:"
+        )
+    else:
+        text = "Imagen recibida. Selecciona una acción:"
+
+    if truncated:
+        text += (
+            f"\n\n⚠️ Solo se procesarán las primeras "
+            f"{config.MAX_IMAGE_BATCH_SIZE} imágenes."
+        )
+
+    reply_markup = _get_image_menu_keyboard(count)
+    await application.bot.send_message(
+        chat_id=chat.id,
+        text=text,
+        reply_markup=reply_markup,
+        reply_to_message_id=reply_to_message_id,
+    )
+    logger.info(
+        f"[{correlation_id}] Image menu displayed to user {user_id} "
+        f"({count} image(s))"
+    )
+
+
+async def _schedule_image_batch_menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+) -> None:
+    """Accumulate album images and show a single menu after debounce."""
+    message = update.message
+    media_group_id = message.media_group_id
+    user_id = update.effective_user.id
+    chat = message.chat
+
+    if not media_group_id:
+        correlation_id = str(uuid.uuid4())[:8]
+        await _send_image_menu_message(
+            context.application,
+            chat,
+            user_id,
+            [file_id],
+            correlation_id,
+            reply_to_message_id=message.message_id,
+        )
+        return
+
+    sessions = context.application.bot_data.setdefault("image_batch_sessions", {})
+    session_key = f"{chat.id}:{media_group_id}"
+
+    session = sessions.get(session_key)
+    if session is None:
+        session = {
+            "file_ids": [],
+            "user_id": user_id,
+            "chat": chat,
+            "correlation_id": str(uuid.uuid4())[:8],
+            "last_message_id": message.message_id,
+            "debounce_task": None,
+            "truncated": False,
+        }
+        sessions[session_key] = session
+
+    debounce_task = session.get("debounce_task")
+    if debounce_task and not debounce_task.done():
+        debounce_task.cancel()
+
+    if len(session["file_ids"]) < config.MAX_IMAGE_BATCH_SIZE:
+        session["file_ids"].append(file_id)
+    else:
+        session["truncated"] = True
+    session["last_message_id"] = message.message_id
+    session["user_id"] = user_id
+
+    application = context.application
+
+    async def _debounced_show_menu() -> None:
+        current_task = asyncio.current_task()
+        cancelled = False
+        try:
+            await asyncio.sleep(IMAGE_BATCH_DEBOUNCE_SECONDS)
+            file_ids = list(session["file_ids"])
+            await _send_image_menu_message(
+                application,
+                session["chat"],
+                session["user_id"],
+                file_ids,
+                session["correlation_id"],
+                reply_to_message_id=session["last_message_id"],
+                truncated=session.get("truncated", False),
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            return
+        except Exception as e:
+            logger.error(
+                f"[{session['correlation_id']}] Failed to send image batch menu: {e}"
+            )
+        finally:
+            if not cancelled and session.get("debounce_task") is current_task:
+                sessions.pop(session_key, None)
+
+    task = asyncio.create_task(_debounced_show_menu())
+    session["debounce_task"] = task
+
+
+def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
     """Generate inline keyboard for image processing menu."""
-    keyboard = [
-        [
-            InlineKeyboardButton("Comprimir", callback_data="image_action:compress"),
-            InlineKeyboardButton("Convertir Formato", callback_data="image_action:convert"),
-        ],
-        [
-            InlineKeyboardButton("Redimensionar", callback_data="image_action:resize"),
-            InlineKeyboardButton("Info de Imagen", callback_data="image_action:info"),
-        ],
-    ]
+    if image_count > 1:
+        keyboard = [
+            [
+                InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+            ],
+        ]
+    else:
+        keyboard = [
+            [
+                InlineKeyboardButton("Comprimir", callback_data="image_action:compress"),
+                InlineKeyboardButton("Convertir Formato", callback_data="image_action:convert"),
+            ],
+            [
+                InlineKeyboardButton("Redimensionar", callback_data="image_action:resize"),
+                InlineKeyboardButton("Info de Imagen", callback_data="image_action:info"),
+            ],
+            [
+                InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+            ],
+        ]
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -9953,17 +10551,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text(error_msg)
             return
 
-    # Store file info for callback handler
-    context.user_data["image_menu_file_id"] = photo.file_id
-    context.user_data["image_menu_correlation_id"] = correlation_id
-
-    # Show inline menu
-    reply_markup = _get_image_menu_keyboard()
-    await update.message.reply_text(
-        "Imagen recibida. Selecciona una acción:",
-        reply_markup=reply_markup
-    )
-    logger.info(f"[{correlation_id}] Image menu displayed to user {user_id}")
+    await _schedule_image_batch_menu(update, context, photo.file_id)
 
 
 async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9990,17 +10578,7 @@ async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(error_msg)
             return
 
-    # Store file info
-    context.user_data["image_menu_file_id"] = document.file_id
-    context.user_data["image_menu_correlation_id"] = correlation_id
-
-    # Show inline menu
-    reply_markup = _get_image_menu_keyboard()
-    await update.message.reply_text(
-        "Imagen recibida. Selecciona una acción:",
-        reply_markup=reply_markup
-    )
-    logger.info(f"[{correlation_id}] Image document menu displayed to user {user_id}")
+    await _schedule_image_batch_menu(update, context, document.file_id)
 
 
 async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10031,12 +10609,20 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
     action = callback_data.split(":")[1]
 
     # Retrieve file_id from context
+    file_ids = context.user_data.get("image_menu_file_ids") or []
     file_id = context.user_data.get("image_menu_file_id")
     correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
 
     if not file_id:
         logger.error(f"[{correlation_id}] No file_id found in context for user {user_id}")
         await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
+        return
+
+    if len(file_ids) > 1 and action != "enhance":
+        await query.edit_message_text(
+            "Solo «Mejorar» está disponible para álbumes. "
+            "Envía una imagen a la vez para otras acciones."
+        )
         return
 
     logger.info(f"[{correlation_id}] Image menu action '{action}' selected by user {user_id}")
@@ -10113,6 +10699,35 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "Selecciona el porcentaje de redimensionamiento:",
+            reply_markup=reply_markup
+        )
+
+    elif action == "enhance":
+        keyboard = [
+            [
+                InlineKeyboardButton("Brillo", callback_data="image_enhance:brillo"),
+                InlineKeyboardButton("Colores", callback_data="image_enhance:colores"),
+            ],
+            [
+                InlineKeyboardButton("Nitidez", callback_data="image_enhance:nitidez"),
+            ],
+            [
+                InlineKeyboardButton("Equilibrado", callback_data="image_enhance:equilibrado"),
+                InlineKeyboardButton("Suave", callback_data="image_enhance:suave"),
+            ],
+            [
+                InlineKeyboardButton("← Volver", callback_data="back:image"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el perfil de mejora:\n\n"
+            "• Brillo - más luminosidad y contraste automático\n"
+            "• Colores - colores más vivos\n"
+            "• Nitidez - mayor definición\n"
+            "• Equilibrado - mejora general balanceada\n"
+            "• Suave - mejora sutil",
             reply_markup=reply_markup
         )
 
@@ -10489,6 +11104,145 @@ async def handle_image_resize_callback(update: Update, context: ContextTypes.DEF
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error resizing image: {e}")
             await query.edit_message_text("Ocurrió un error inesperado. Por favor intenta de nuevo.")
+
+
+async def handle_image_enhance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle image enhancement profile selection (supports batch albums)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    try:
+        profile = callback_data.split(":")[1]
+    except IndexError:
+        await query.edit_message_text("Error: perfil inválido.")
+        return
+
+    if profile not in ENHANCEMENT_PROFILES:
+        await query.edit_message_text(f"Perfil '{profile}' no soportado.")
+        return
+
+    file_ids = context.user_data.get("image_menu_file_ids")
+    if not file_ids:
+        single_id = context.user_data.get("image_menu_file_id")
+        file_ids = [single_id] if single_id else []
+
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_ids:
+        await query.edit_message_text("Error: no se encontraron imágenes. Intenta de nuevo.")
+        return
+
+    profile_label = ENHANCEMENT_PROFILES[profile]
+    count = len(file_ids)
+    batch_timeout = min(180, 30 + 15 * count)
+    batch_deadline = time.monotonic() + batch_timeout
+
+    required_space_mb = count * config.MAX_FILE_SIZE_MB * 2
+    has_space, space_error = check_disk_space(required_space_mb)
+    if not has_space:
+        await query.edit_message_text(space_error)
+        return
+
+    logger.info(
+        f"[{correlation_id}] Enhancing {count} image(s) with profile "
+        f"'{profile}' for user {user_id}"
+    )
+    await query.edit_message_text(
+        f"Mejorando {count} imagen(es) con perfil {profile_label}..."
+    )
+
+    with TempManager() as temp_mgr:
+        try:
+            enhanced_paths = []
+            loop = asyncio.get_event_loop()
+
+            for idx, file_id in enumerate(file_ids, start=1):
+                if count > 1:
+                    try:
+                        await query.edit_message_text(
+                            f"Mejorando imagen {idx}/{count} ({profile_label})..."
+                        )
+                    except Exception:
+                        pass
+
+                input_filename = f"image_enhance_input_{user_id}_{correlation_id}_{idx}.img"
+                output_filename = f"mejorada_{user_id}_{correlation_id}_{idx}.jpg"
+                input_path = temp_mgr.get_temp_path(input_filename)
+                output_path = temp_mgr.get_temp_path(output_filename)
+
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+                remaining_timeout = batch_deadline - time.monotonic()
+                if remaining_timeout <= 0:
+                    raise ProcessingTimeoutError(
+                        "La mejora tardó demasiado. Intenta con menos imágenes o más pequeñas."
+                    )
+                remaining_timeout = max(5, remaining_timeout)
+
+                success, error = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda inp=str(input_path), out=str(output_path), prof=profile: (
+                            ImageProcessor.enhance(inp, out, prof)
+                        ),
+                    ),
+                    timeout=remaining_timeout,
+                )
+
+                if not success:
+                    error_msg = error or "No pude mejorar la imagen"
+                    raise ImageEnhancementError(error_msg)
+
+                enhanced_paths.append(str(output_path))
+
+            caption = f"✅ Mejorada ({profile_label})"
+            if count > 1:
+                await _send_images_in_albums(
+                    update,
+                    context,
+                    enhanced_paths,
+                    correlation_id,
+                    caption_prefix=f"Mejorada ({profile_label})",
+                )
+            else:
+                with open(enhanced_paths[0], "rb") as img_file:
+                    await query.message.reply_document(
+                        document=img_file,
+                        filename=f"mejorada_{correlation_id}.jpg",
+                        caption=caption,
+                    )
+
+            await query.edit_message_text(
+                f"¡Listo! {count} imagen(es) mejorada(s) con perfil {profile_label}."
+            )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¿Quieres hacer algo más con estas imágenes?",
+                reply_markup=reply_markup,
+            )
+            logger.info(
+                f"[{correlation_id}] Image enhancement completed for user {user_id}"
+            )
+
+        except ImageEnhancementError as e:
+            logger.error(f"[{correlation_id}] Enhancement failed: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except ProcessingTimeoutError as e:
+            logger.error(f"[{correlation_id}] Enhancement timed out")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Enhancement timed out")
+            await query.edit_message_text(
+                "Error: La mejora tardó demasiado. Intenta con menos imágenes o más pequeñas."
+            )
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error enhancing images: {e}")
+            await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
 
 
 def _get_image_post_menu_keyboard(correlation_id: str) -> InlineKeyboardMarkup:

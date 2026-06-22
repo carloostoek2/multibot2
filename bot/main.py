@@ -35,7 +35,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from bot.handlers import (
     start, handle_video, handle_convert_command, handle_extract_audio_command,
     handle_split_command, handle_join_start, handle_join_done, handle_join_cancel,
-    handle_voice_message, handle_audio_file,
+    handle_voice_message, handle_audio_file, handle_audio_document,
     handle_split_audio_command, handle_join_audio_start, handle_join_audio_file,
     handle_join_audio_done, handle_join_audio_cancel,
     handle_convert_audio_command, handle_format_selection,
@@ -43,6 +43,7 @@ from bot.handlers import (
     handle_equalize_command, handle_equalizer_adjustment,
     handle_denoise_command, handle_compress_command, handle_effect_selection,
     handle_normalize_command, handle_normalize_selection,
+    handle_audio_3d_selection,
     handle_effects_command, handle_pipeline_builder,
     handle_audio_menu_callback, handle_audio_menu_format_selection,
     handle_video_menu_callback, handle_video_format_selection,
@@ -55,12 +56,13 @@ from bot.handlers import (
     handle_postdownload_callback, handle_postdownload_audio_callback,
     handle_postdownload_format_callback, handle_postdownload_intensity_callback,
     handle_postdownload_effect_strength_callback,
+    handle_postdownload_stereo_3d_intensity_callback,
     handle_recent_downloads, handle_reprocess_download,
     # Image handlers
     handle_photo, handle_image_document,
     handle_image_menu_callback,
     handle_image_compress_callback, handle_image_convert_callback,
-    handle_image_resize_callback,
+    handle_image_resize_callback, handle_image_enhance_callback,
     # YouTube menu handler
     handle_youtube_menu_callback,
 )
@@ -144,9 +146,10 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_postdownload_format_callback, pattern="^postdownload:(audio_format|video_format|extract_format):"))
     application.add_handler(CallbackQueryHandler(handle_postdownload_intensity_callback, pattern="^postdownload:(bass_intensity|treble_intensity):"))
     application.add_handler(CallbackQueryHandler(handle_postdownload_effect_strength_callback, pattern="^postdownload:(denoise_strength|compress_strength):"))
+    application.add_handler(CallbackQueryHandler(handle_postdownload_stereo_3d_intensity_callback, pattern="^postdownload:stereo_3d_intensity:"))
     # Main post-download handlers
     application.add_handler(CallbackQueryHandler(handle_postdownload_callback, pattern="^postdownload:(videonote|extract_audio|convert_video|recent|back_video):"))
-    application.add_handler(CallbackQueryHandler(handle_postdownload_audio_callback, pattern="^postdownload:(voicenote|convert_audio|bass|denoise|more|treble|compress|normalize|equalize|back_audio|clear_recent):"))
+    application.add_handler(CallbackQueryHandler(handle_postdownload_audio_callback, pattern="^postdownload:(voicenote|convert_audio|bass|denoise|more|treble|compress|normalize|equalize|stereo_3d|back_audio|clear_recent|nothing):"))
     # Reprocess handler for recent downloads
     application.add_handler(CallbackQueryHandler(handle_reprocess_download, pattern="^reprocess:"))
 
@@ -175,6 +178,9 @@ def main() -> None:
     # Callback handler for normalize selection
     application.add_handler(CallbackQueryHandler(handle_normalize_selection, pattern="^normalize:"))
 
+    # Callback handler for stereo 3D intensity selection
+    application.add_handler(CallbackQueryHandler(handle_audio_3d_selection, pattern="^audio_3d:"))
+
     # Audio effects pipeline command
     application.add_handler(CommandHandler("effects", handle_effects_command))
 
@@ -196,6 +202,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_image_compress_callback, pattern="^image_compress:"))
     application.add_handler(CallbackQueryHandler(handle_image_convert_callback, pattern="^image_convert:"))
     application.add_handler(CallbackQueryHandler(handle_image_resize_callback, pattern="^image_resize:"))
+    application.add_handler(CallbackQueryHandler(handle_image_enhance_callback, pattern="^image_enhance:"))
     application.add_handler(CallbackQueryHandler(handle_image_menu_callback, pattern="^image_action:"))
 
     # YouTube URL menu handler (must be before general download callbacks)
@@ -224,6 +231,18 @@ def main() -> None:
 
     # Add handler for image files sent as documents (original quality)
     application.add_handler(MessageHandler(filters.Document.IMAGE, handle_image_document))
+
+    # Add handler for audio files sent as documents (MP3/WAV/etc. attachments)
+    audio_document_filter = (
+        filters.Document.MimeType("audio/")
+        | filters.Document.FileExtension("mp3")
+        | filters.Document.FileExtension("wav")
+        | filters.Document.FileExtension("ogg")
+        | filters.Document.FileExtension("flac")
+        | filters.Document.FileExtension("m4a")
+        | filters.Document.FileExtension("aac")
+    )
+    application.add_handler(MessageHandler(audio_document_filter, handle_audio_document))
 
     # URL detection handler - detects URLs in regular text messages
     # Must be registered BEFORE handle_split_text_input to check for URLs first

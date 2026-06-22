@@ -32,6 +32,7 @@ class BotConfig:
     MIN_SEGMENT_SECONDS: int = 5
     JOIN_MAX_VIDEOS: int = 10
     JOIN_MIN_VIDEOS: int = 2
+    MAX_IMAGE_BATCH_SIZE: int = 10
 
     # Audio configuration
     MAX_VOICE_DURATION_MINUTES: int = 20
@@ -120,6 +121,7 @@ class BotConfig:
             ("MIN_SEGMENT_SECONDS", self.MIN_SEGMENT_SECONDS),
             ("JOIN_MAX_VIDEOS", self.JOIN_MAX_VIDEOS),
             ("JOIN_MIN_VIDEOS", self.JOIN_MIN_VIDEOS),
+            ("MAX_IMAGE_BATCH_SIZE", self.MAX_IMAGE_BATCH_SIZE),
             ("MAX_VOICE_DURATION_MINUTES", self.MAX_VOICE_DURATION_MINUTES),
             ("MAX_AUDIO_FILE_SIZE_MB", self.MAX_AUDIO_FILE_SIZE_MB),
         ]
@@ -319,6 +321,7 @@ def load_config() -> BotConfig:
         MIN_SEGMENT_SECONDS=_int_env("MIN_SEGMENT_SECONDS", 5),
         JOIN_MAX_VIDEOS=_int_env("JOIN_MAX_VIDEOS", 10),
         JOIN_MIN_VIDEOS=_int_env("JOIN_MIN_VIDEOS", 2),
+        MAX_IMAGE_BATCH_SIZE=_int_env("MAX_IMAGE_BATCH_SIZE", 10),
         MAX_VOICE_DURATION_MINUTES=_int_env("MAX_VOICE_DURATION_MINUTES", 20),
         MAX_AUDIO_FILE_SIZE_MB=_int_env("MAX_AUDIO_FILE_SIZE_MB", 20),
         VOICE_BITRATE=os.getenv("VOICE_BITRATE", "24k"),

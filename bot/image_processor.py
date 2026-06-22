@@ -8,7 +8,7 @@ import os
 from io import BytesIO
 from typing import Tuple, Optional, Dict, Any
 
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageOps, ImageStat
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,18 @@ DEFAULT_QUALITY = {
 
 # Max dimensions for Telegram
 MAX_DIMENSION = 2560  # Telegram squarifies photos > 2560px on one side
+
+# Mean luminance above this (0-255) triggers reduced brightness/contrast scaling
+BRIGHT_LUMINANCE_THRESHOLD = 200
+
+# Enhancement profile definitions (Pillow ImageEnhance / ImageOps)
+ENHANCEMENT_PROFILES = {
+    "brillo": "Brillo",
+    "colores": "Colores",
+    "nitidez": "Nitidez",
+    "equilibrado": "Equilibrado",
+    "suave": "Suave",
+}
 
 
 class ImageProcessingError(Exception):
@@ -68,6 +80,26 @@ class ImageProcessor:
     All operations work with file paths and return (success, result_or_error).
     Follows the same patterns as AudioProcessor and VideoProcessor modules.
     """
+
+    @staticmethod
+    def _mean_luminance(img: Image.Image) -> float:
+        """Return mean luminance (0-255) of an image."""
+        return ImageStat.Stat(img.convert("L")).mean[0]
+
+    @staticmethod
+    def _bright_image_scale(mean_luminance: float) -> float:
+        """Scale enhancement factors down for already-bright images."""
+        if mean_luminance <= BRIGHT_LUMINANCE_THRESHOLD:
+            return 1.0
+        excess = (mean_luminance - BRIGHT_LUMINANCE_THRESHOLD) / (
+            255 - BRIGHT_LUMINANCE_THRESHOLD
+        )
+        return max(0.35, 1.0 - excess * 0.65)
+
+    @staticmethod
+    def _scaled_enhance_factor(base_factor: float, scale: float) -> float:
+        """Apply bright-image scale to an enhancement multiplier."""
+        return 1.0 + (base_factor - 1.0) * scale
 
     @staticmethod
     def compress(
@@ -350,6 +382,113 @@ class ImageProcessor:
 
         return info
 
+    @staticmethod
+    def enhance(
+        input_path: str,
+        output_path: str,
+        profile: str,
+    ) -> Tuple[bool, Optional[str]]:
+        """Enhance an image using a predefined profile.
+
+        Profiles apply Pillow ImageEnhance and ImageOps adjustments:
+        - brillo: autocontrast(cutoff=1%) + brightness 1.08 + contrast 1.05
+        - colores: color 1.20 + contrast 1.10
+        - nitidez: sharpness 1.35 + contrast 1.05
+        - equilibrado: brightness 1.05, contrast 1.10, color 1.12, sharpness 1.15
+        - suave: brightness 1.03, color 1.06, sharpness 1.08
+
+        Args:
+            input_path: Path to input image
+            output_path: Path to save enhanced image
+            profile: Enhancement profile key
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        profile = profile.lower()
+        if profile not in ENHANCEMENT_PROFILES:
+            return (
+                False,
+                f"Perfil '{profile}' no soportado. "
+                f"Usa: {', '.join(ENHANCEMENT_PROFILES.keys())}",
+            )
+
+        logger.debug(f"Enhancing image: {input_path} (profile={profile})")
+
+        try:
+            with Image.open(input_path) as img:
+                mean_lum = ImageProcessor._mean_luminance(img)
+                bright_scale = ImageProcessor._bright_image_scale(mean_lum)
+                if bright_scale < 1.0:
+                    logger.debug(
+                        f"Bright image detected (mean luminance={mean_lum:.1f}); "
+                        f"scaling enhancements by {bright_scale:.2f}"
+                    )
+
+                if profile == "brillo":
+                    img = ImageOps.autocontrast(img, cutoff=1)
+                    img = ImageEnhance.Brightness(img).enhance(
+                        ImageProcessor._scaled_enhance_factor(1.08, bright_scale)
+                    )
+                    img = ImageEnhance.Contrast(img).enhance(
+                        ImageProcessor._scaled_enhance_factor(1.05, bright_scale)
+                    )
+                elif profile == "colores":
+                    img = ImageEnhance.Color(img).enhance(1.20)
+                    img = ImageEnhance.Contrast(img).enhance(1.10)
+                elif profile == "nitidez":
+                    img = ImageEnhance.Sharpness(img).enhance(1.35)
+                    img = ImageEnhance.Contrast(img).enhance(1.05)
+                elif profile == "equilibrado":
+                    img = ImageEnhance.Brightness(img).enhance(
+                        ImageProcessor._scaled_enhance_factor(1.05, bright_scale)
+                    )
+                    img = ImageEnhance.Contrast(img).enhance(
+                        ImageProcessor._scaled_enhance_factor(1.10, bright_scale)
+                    )
+                    img = ImageEnhance.Color(img).enhance(1.12)
+                    img = ImageEnhance.Sharpness(img).enhance(1.15)
+                elif profile == "suave":
+                    img = ImageEnhance.Brightness(img).enhance(1.03)
+                    img = ImageEnhance.Color(img).enhance(1.06)
+                    img = ImageEnhance.Sharpness(img).enhance(1.08)
+
+                out_ext = os.path.splitext(output_path)[1].lower()
+                save_format = img.format or "JPEG"
+
+                if out_ext in (".jpg", ".jpeg"):
+                    save_format = "JPEG"
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                elif out_ext == ".png":
+                    save_format = "PNG"
+                elif out_ext == ".webp":
+                    save_format = "WEBP"
+                    if img.mode == "P":
+                        img = img.convert("RGBA")
+
+                save_kwargs: Dict[str, Any] = {"format": save_format}
+                if save_format in ("JPEG", "WEBP"):
+                    save_kwargs["quality"] = 90
+                if save_format == "JPEG":
+                    save_kwargs["optimize"] = True
+
+                img.save(output_path, **save_kwargs)
+
+            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                logger.error(f"Enhancement produced empty file: {output_path}")
+                return False, "La mejora produjo un archivo vacío"
+
+            logger.info(
+                f"Image enhanced with profile '{profile}': {output_path} "
+                f"({os.path.getsize(output_path)} bytes)"
+            )
+            return True, None
+
+        except Exception as e:
+            logger.error(f"Image enhancement failed: {e}")
+            return False, str(e)
+
 
 __all__ = [
     "ImageProcessor",
@@ -358,4 +497,5 @@ __all__ = [
     "ImageConversionError",
     "ImageResizeError",
     "SUPPORTED_IMAGE_FORMATS",
+    "ENHANCEMENT_PROFILES",
 ]
