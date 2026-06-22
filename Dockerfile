@@ -14,14 +14,17 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Alpine-built binary needs musl to run on Debian
+# Alpine-built binary needs musl to run on Debian.
+# Isolate Alpine libs so the musl linker doesn't pick up glibc variants from /usr/lib/x86_64-linux-gnu/.
 COPY --from=telegram-api /usr/local/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
 COPY --from=telegram-api /lib/ld-musl-x86_64.so.1 /lib/ld-musl-x86_64.so.1
-COPY --from=telegram-api /usr/lib/libssl.so.3 /usr/lib/libssl.so.3
-COPY --from=telegram-api /usr/lib/libcrypto.so.3 /usr/lib/libcrypto.so.3
-COPY --from=telegram-api /usr/lib/libstdc++.so.6 /usr/lib/libstdc++.so.6
-COPY --from=telegram-api /usr/lib/libgcc_s.so.1 /usr/lib/libgcc_s.so.1
-COPY --from=telegram-api /lib/libz.so.1 /lib/libz.so.1
+RUN mkdir -p /usr/lib/telegram-bot-api
+COPY --from=telegram-api /lib/libc.musl-x86_64.so.1 /usr/lib/telegram-bot-api/libc.musl-x86_64.so.1
+COPY --from=telegram-api /usr/lib/libssl.so.3 /usr/lib/telegram-bot-api/libssl.so.3
+COPY --from=telegram-api /usr/lib/libcrypto.so.3 /usr/lib/telegram-bot-api/libcrypto.so.3
+COPY --from=telegram-api /usr/lib/libstdc++.so.6 /usr/lib/telegram-bot-api/libstdc++.so.6
+COPY --from=telegram-api /usr/lib/libgcc_s.so.1 /usr/lib/telegram-bot-api/libgcc_s.so.1
+COPY --from=telegram-api /lib/libz.so.1 /usr/lib/telegram-bot-api/libz.so.1
 
 # Install Deno (preferred JavaScript runtime for yt-dlp)
 RUN curl -fsSL https://deno.land/install.sh | sh
