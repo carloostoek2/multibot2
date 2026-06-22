@@ -24,7 +24,7 @@ COPY --from=telegram-api /usr/lib/libssl.so.3 /usr/lib/telegram-bot-api/libssl.s
 COPY --from=telegram-api /usr/lib/libcrypto.so.3 /usr/lib/telegram-bot-api/libcrypto.so.3
 COPY --from=telegram-api /usr/lib/libstdc++.so.6 /usr/lib/telegram-bot-api/libstdc++.so.6
 COPY --from=telegram-api /usr/lib/libgcc_s.so.1 /usr/lib/telegram-bot-api/libgcc_s.so.1
-COPY --from=telegram-api /lib/libz.so.1 /usr/lib/telegram-bot-api/libz.so.1
+COPY --from=telegram-api /usr/lib/libz.so.1 /usr/lib/telegram-bot-api/libz.so.1
 
 # Install Deno (preferred JavaScript runtime for yt-dlp)
 RUN curl -fsSL https://deno.land/install.sh | sh
