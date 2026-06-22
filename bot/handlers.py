@@ -270,7 +270,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     video = update.message.video
     if video.file_size:
         logger.debug(f"[{correlation_id}] Video file size: {video.file_size} bytes")
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -390,7 +390,7 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -536,7 +536,7 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -690,7 +690,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -960,7 +960,7 @@ async def handle_split_audio_command(update: Update, context: ContextTypes.DEFAU
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -1289,7 +1289,7 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -1741,7 +1741,7 @@ async def handle_join_audio_file(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if file_size:
-        is_valid, error_msg = validate_file_size(file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -2107,7 +2107,7 @@ async def _show_audio_menu_for_file(
 
     if file_size:
         logger.debug(f"[{correlation_id}] Audio file size: {file_size} bytes")
-        is_valid, error_msg = validate_file_size(file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(
                 f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}"
@@ -2207,7 +2207,7 @@ async def handle_merge_audio_received(update: Update, context: ContextTypes.DEFA
 
     # Validate file size
     if audio_file_size:
-        is_valid, error_msg = validate_file_size(audio_file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio_file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] Audio file size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -2894,7 +2894,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Validate file size before downloading
     if voice.file_size:
         logger.debug(f"[{correlation_id}] Voice file size: {voice.file_size} bytes")
-        is_valid, error_msg = validate_file_size(voice.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(voice.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3128,7 +3128,7 @@ async def handle_convert_audio_command(update: Update, context: ContextTypes.DEF
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3341,7 +3341,7 @@ async def handle_bass_boost_command(update: Update, context: ContextTypes.DEFAUL
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3404,7 +3404,7 @@ async def handle_treble_boost_command(update: Update, context: ContextTypes.DEFA
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3809,7 +3809,7 @@ async def handle_equalize_command(update: Update, context: ContextTypes.DEFAULT_
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -4102,7 +4102,7 @@ async def handle_denoise_command(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -4167,7 +4167,7 @@ async def handle_compress_command(update: Update, context: ContextTypes.DEFAULT_
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -4429,7 +4429,7 @@ async def handle_normalize_command(update: Update, context: ContextTypes.DEFAULT
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -5472,7 +5472,7 @@ async def handle_effects_command(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -10579,7 +10579,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # Validate file size
     if photo.file_size:
-        is_valid, error_msg = validate_file_size(photo.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(photo.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -10606,7 +10606,7 @@ async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Validate file size
     if document.file_size:
-        is_valid, error_msg = validate_file_size(document.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(document.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -11174,7 +11174,7 @@ async def handle_image_enhance_callback(update: Update, context: ContextTypes.DE
     batch_timeout = min(180, 30 + 15 * count)
     batch_deadline = time.monotonic() + batch_timeout
 
-    required_space_mb = count * config.MAX_FILE_SIZE_MB * 2
+    required_space_mb = count * config.max_incoming_file_size_mb * 2
     has_space, space_error = check_disk_space(required_space_mb)
     if not has_space:
         await query.edit_message_text(space_error)

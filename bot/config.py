@@ -344,6 +344,20 @@ class BotConfig:
         """Maximum upload size in bytes for the active Telegram API mode."""
         return self.TELEGRAM_MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
+    @property
+    def max_incoming_file_size_mb(self) -> int:
+        """Effective incoming file size limit for videos, images, and documents."""
+        if self.TELEGRAM_LOCAL_MODE:
+            return self.TELEGRAM_MAX_UPLOAD_SIZE_MB
+        return self.MAX_FILE_SIZE_MB
+
+    @property
+    def max_incoming_audio_file_size_mb(self) -> int:
+        """Effective incoming file size limit for audio and voice messages."""
+        if self.TELEGRAM_LOCAL_MODE:
+            return self.TELEGRAM_MAX_UPLOAD_SIZE_MB
+        return self.MAX_AUDIO_FILE_SIZE_MB
+
 
 def _bool_env(name: str, default: bool) -> bool:
     """Parse a boolean environment variable."""
@@ -408,14 +422,20 @@ def load_config() -> BotConfig:
         PROCESSING_TIMEOUT=_int_env("PROCESSING_TIMEOUT", 60),
         JOIN_TIMEOUT=_int_env("JOIN_TIMEOUT", 120),
         JOIN_SESSION_TIMEOUT=_int_env("JOIN_SESSION_TIMEOUT", 300),
-        MAX_FILE_SIZE_MB=_int_env("MAX_FILE_SIZE_MB", 20),
+        MAX_FILE_SIZE_MB=_int_env(
+            "MAX_FILE_SIZE_MB",
+            default_upload_mb if telegram_local_mode else 20,
+        ),
         MAX_SEGMENTS=_int_env("MAX_SEGMENTS", 10),
         MIN_SEGMENT_SECONDS=_int_env("MIN_SEGMENT_SECONDS", 5),
         JOIN_MAX_VIDEOS=_int_env("JOIN_MAX_VIDEOS", 10),
         JOIN_MIN_VIDEOS=_int_env("JOIN_MIN_VIDEOS", 2),
         MAX_IMAGE_BATCH_SIZE=_int_env("MAX_IMAGE_BATCH_SIZE", 10),
         MAX_VOICE_DURATION_MINUTES=_int_env("MAX_VOICE_DURATION_MINUTES", 20),
-        MAX_AUDIO_FILE_SIZE_MB=_int_env("MAX_AUDIO_FILE_SIZE_MB", 20),
+        MAX_AUDIO_FILE_SIZE_MB=_int_env(
+            "MAX_AUDIO_FILE_SIZE_MB",
+            default_upload_mb if telegram_local_mode else 20,
+        ),
         VOICE_BITRATE=os.getenv("VOICE_BITRATE", "24k"),
         MP3_BITRATE=os.getenv("MP3_BITRATE", "192k"),
         MAX_AUDIO_SEGMENTS=_int_env("MAX_AUDIO_SEGMENTS", 20),

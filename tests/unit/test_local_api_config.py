@@ -40,6 +40,25 @@ class TestLocalApiConfig:
         assert config.TELEGRAM_LOCAL_MODE is True
         assert config.TELEGRAM_MAX_UPLOAD_SIZE_MB == 2000
 
+    def test_local_mode_uses_upload_limit_for_incoming_files(self):
+        config = BotConfig(
+            BOT_TOKEN="test-token",
+            TELEGRAM_LOCAL_MODE=True,
+            TELEGRAM_API_BASE_URL="http://127.0.0.1:8081/bot",
+            TELEGRAM_MAX_UPLOAD_SIZE_MB=2000,
+            MAX_FILE_SIZE_MB=20,
+            MAX_AUDIO_FILE_SIZE_MB=20,
+            DOWNLOAD_MAX_SIZE_MB=2000,
+            DOWNLOAD_MAX_SIZE_GENERIC_MB=2000,
+        )
+        assert config.max_incoming_file_size_mb == 2000
+        assert config.max_incoming_audio_file_size_mb == 2000
+
+    def test_cloud_mode_keeps_legacy_incoming_limits(self):
+        config = BotConfig(BOT_TOKEN="test-token", MAX_FILE_SIZE_MB=20)
+        assert config.max_incoming_file_size_mb == 20
+        assert config.max_incoming_audio_file_size_mb == 20
+
     def test_cloud_mode_rejects_upload_over_50mb(self):
         with pytest.raises(ValueError, match="TELEGRAM_MAX_UPLOAD_SIZE_MB"):
             BotConfig(
