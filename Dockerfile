@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     nodejs \
     npm \
-    musl \
+    libstdc++6 \
     openssl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -21,6 +21,7 @@ COPY --from=telegram-api /usr/lib/libssl.so.3 /usr/lib/libssl.so.3
 COPY --from=telegram-api /usr/lib/libcrypto.so.3 /usr/lib/libcrypto.so.3
 COPY --from=telegram-api /usr/lib/libstdc++.so.6 /usr/lib/libstdc++.so.6
 COPY --from=telegram-api /usr/lib/libgcc_s.so.1 /usr/lib/libgcc_s.so.1
+COPY --from=telegram-api /lib/libz.so.1 /lib/libz.so.1
 
 # Install Deno (preferred JavaScript runtime for yt-dlp)
 RUN curl -fsSL https://deno.land/install.sh | sh
