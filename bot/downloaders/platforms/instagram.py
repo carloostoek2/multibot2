@@ -17,7 +17,9 @@ Example:
 """
 import asyncio
 import logging
+import random
 import re
+import time
 from enum import Enum, auto
 from typing import Any, Optional
 
@@ -29,6 +31,72 @@ from ..exceptions import DownloadFailedError, MetadataExtractionError
 from ..ytdlp_downloader import YtDlpDownloader
 
 logger = logging.getLogger(__name__)
+
+# Module-level tracker for inter-download delays to avoid Instagram automation detection.
+# Shared across all downloader instances so multiple users hitting the same bot IP
+# don't fire requests back-to-back.
+_last_instagram_download_end: float = 0.0
+_instagram_delay_lock = asyncio.Lock()
+
+
+def _get_instagram_delay_config() -> tuple[float, float]:
+    """Read inter-download delay range from config, with fallback defaults."""
+    try:
+        from bot.config import get_config
+        config = get_config()
+        min_d = float(getattr(config, "INSTAGRAM_INTER_DOWNLOAD_DELAY_MIN", 8))
+        max_d = float(getattr(config, "INSTAGRAM_INTER_DOWNLOAD_DELAY_MAX", 25))
+        return min_d, max_d
+    except Exception:
+        return 8.0, 25.0
+
+
+async def _apply_instagram_delay() -> float:
+    """Compute the inter-download delay (if any) since the last Instagram download completed.
+
+    Called at the START of each download. If the previous download finished
+    recently, returns the remaining portion of a random target delay so
+    Instagram sees human-paced request patterns.
+
+    The caller is responsible for sleeping the returned duration (after
+    showing any user notification). Note that going through
+    InstagramDownloader.download ensures the marker is set in its finally
+    block (regardless of delay).
+
+    The lock is held only briefly for the timestamp read/decision.
+
+    Returns:
+        Seconds the caller should sleep (0 if no delay needed).
+    """
+    global _last_instagram_download_end
+
+    min_delay, max_delay = _get_instagram_delay_config()
+    target_delay = random.uniform(min_delay, max_delay)
+
+    async with _instagram_delay_lock:
+        if _last_instagram_download_end > 0:
+            elapsed = time.monotonic() - _last_instagram_download_end
+            remaining = target_delay - elapsed
+            if remaining > 0:
+                logger.info(
+                    "Instagram inter-download delay: esperando %.1fs "
+                    "(target %.1fs, elapsed %.1fs desde la última descarga)",
+                    remaining, target_delay, elapsed,
+                )
+                return remaining
+
+    return 0.0
+
+
+async def _mark_instagram_download_complete() -> None:
+    """Record that an Instagram download just finished (success or failure).
+
+    Protected by the delay lock for safe concurrent updates to the shared
+    timestamp (prevents TOCTOU/lost updates with concurrent _apply readers).
+    """
+    global _last_instagram_download_end
+    async with _instagram_delay_lock:
+        _last_instagram_download_end = time.monotonic()
 
 
 class InstagramContentType(Enum):
@@ -416,6 +484,11 @@ class InstagramDownloader(YtDlpDownloader):
         When a post contains multiple images/videos, downloads all of them.
         Falls back to gallery-dl for image-only posts that yt-dlp cannot handle.
 
+        Callers (e.g. handlers) apply a random inter-download delay before
+        calling this to avoid Instagram automation detection when multiple
+        links are sent in succession. The completion marker is always set
+        in the finally block.
+
         Args:
             url: The Instagram URL to download from
             options: Download configuration options
@@ -432,11 +505,22 @@ class InstagramDownloader(YtDlpDownloader):
             FileTooLargeError: If any file exceeds size limits
             DownloadFailedError: If download fails
         """
-        from pathlib import Path
-        from ..types import DownloadResult
-
         # Validate URL
         self.validate_url(url)
+
+        try:
+            return await self._download_impl(url, options)
+        finally:
+            await _mark_instagram_download_complete()
+
+    async def _download_impl(
+        self,
+        url: str,
+        options: DownloadOptions,
+    ) -> Any:
+        """Inner implementation — download() wrapper ensures completion marker."""
+        from pathlib import Path
+        from ..types import DownloadResult
 
         # Generate correlation ID
         correlation_id = self._generate_correlation_id()

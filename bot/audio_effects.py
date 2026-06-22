@@ -47,6 +47,13 @@ class AudioEffects:
     MIN_TARGET_LUFS = -23.0
     MAX_TARGET_LUFS = -5.0
 
+    # Stereo 3D effect intensity presets (apulsator speed)
+    STEREO_3D_INTENSITIES = {
+        "suave": 0.15,
+        "medio": 0.33,
+        "intenso": 0.55,
+    }
+
     def __init__(self, input_path: str, output_path: str):
         """Initialize audio effects processor.
 
@@ -67,6 +74,38 @@ class AudioEffects:
             True if ffmpeg is available, False otherwise
         """
         return shutil.which("ffmpeg") is not None
+
+    @staticmethod
+    def _check_ffprobe() -> bool:
+        """Check if ffprobe is installed and available."""
+        return shutil.which("ffprobe") is not None
+
+    @staticmethod
+    def _get_audio_channels(input_path: Path) -> int:
+        """Detect channel count of the first audio stream via ffprobe."""
+        if not AudioEffects._check_ffprobe():
+            logger.warning("ffprobe not available, assuming mono for stereo_3d")
+            return 1
+
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=channels",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(input_path),
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return max(1, int(result.stdout.strip()))
+        except (subprocess.CalledProcessError, ValueError) as e:
+            logger.warning(f"Could not detect audio channels, assuming mono: {e}")
+            return 1
 
     def _validate_input(self) -> None:
         """Validate input file exists and ffmpeg is available.
@@ -378,6 +417,88 @@ class AudioEffects:
             ) from e
         except Exception as e:
             logger.error(f"Unexpected error during normalization: {e}")
+            self._cleanup_temp_files()
+            raise AudioEffectsError(f"Error inesperado: {str(e)}") from e
+
+    def stereo_3d(self, intensity: str = "medio") -> "AudioEffects":
+        """Apply stereo 3D widening effect using ffmpeg apulsator.
+
+        Detects channel layout via ffprobe: mono sources are upmixed to stereo
+        before apulsator; stereo sources keep both channels and only get apulsator.
+        Output is stereo MP3 at 192k bitrate.
+
+        Args:
+            intensity: Effect intensity - suave, medio, or intenso (default medio)
+
+        Returns:
+            Self to enable method chaining
+
+        Raises:
+            AudioEffectsError: If stereo 3D processing fails
+        """
+        self._validate_input()
+
+        intensity = intensity.lower()
+        if intensity not in self.STEREO_3D_INTENSITIES:
+            valid = ", ".join(self.STEREO_3D_INTENSITIES.keys())
+            raise AudioEffectsError(
+                f"Intensidad '{intensity}' no válida. Usa: {valid}"
+            )
+
+        speed = self.STEREO_3D_INTENSITIES[intensity]
+        logger.info(f"Applying stereo 3D effect: intensity={intensity}, speed={speed}")
+
+        input_path = self._get_input_for_effect()
+
+        if self._in_chain:
+            output_path = self._create_temp_output()
+        else:
+            output_path = self.output_path
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        channels = self._get_audio_channels(input_path)
+        if channels <= 1:
+            af_filter = (
+                f"pan=stereo|c0=c0|c1=c0,"
+                f"apulsator=mode=sine:amount=1:speed={speed}"
+            )
+            logger.debug("Mono source detected; applying upmix before apulsator")
+        else:
+            af_filter = f"apulsator=mode=sine:amount=1:speed={speed}"
+            logger.debug(f"Stereo source detected ({channels} ch); applying apulsator only")
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", str(input_path),
+            "-af", af_filter,
+            "-ac", "2",
+            "-c:a", "libmp3lame",
+            "-b:a", "192k",
+            str(output_path),
+        ]
+
+        try:
+            logger.debug(f"Running ffmpeg: {' '.join(cmd)}")
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            logger.info(f"Stereo 3D effect applied successfully: {output_path}")
+            self._in_chain = True
+            return self
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ffmpeg failed with code {e.returncode}")
+            logger.error(f"ffmpeg stderr: {e.stderr}")
+            self._cleanup_temp_files()
+            raise AudioEffectsError(
+                f"Error aplicando efecto 3D: {e.stderr[:100]}"
+            ) from e
+        except Exception as e:
+            logger.error(f"Unexpected error during stereo 3D: {e}")
             self._cleanup_temp_files()
             raise AudioEffectsError(f"Error inesperado: {str(e)}") from e
 
