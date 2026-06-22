@@ -1,3 +1,5 @@
+FROM aiogram/telegram-bot-api:latest AS telegram-api
+
 FROM python:3.11-slim
 
 # Install system dependencies (ffmpeg, curl/unzip for Deno, nodejs as fallback)
@@ -7,7 +9,12 @@ RUN apt-get update && apt-get install -y \
     unzip \
     nodejs \
     npm \
+    libstdc++6 \
+    openssl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=telegram-api /usr/local/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
 
 # Install Deno (preferred JavaScript runtime for yt-dlp)
 RUN curl -fsSL https://deno.land/install.sh | sh
@@ -30,12 +37,15 @@ RUN pip install --upgrade --force-reinstall \
 # Copy the rest of the application
 COPY . .
 
-# Create temp directory for file processing
-RUN mkdir -p /tmp/bot_temp
+# Create temp and local API directories
+RUN mkdir -p /tmp/bot_temp /var/lib/telegram-bot-api /tmp/telegram-bot-api
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV TEMP_DIR=/tmp/bot_temp
 
-# Run the bot (update yt-dlp first to ensure latest fixes)
-CMD yt-dlp --update-to nightly && python run.py
+COPY docker/railway-entrypoint.sh /docker/railway-entrypoint.sh
+RUN chmod +x /docker/railway-entrypoint.sh
+
+# Start local Bot API (when enabled) and the bot in the same container
+CMD ["/docker/railway-entrypoint.sh"]

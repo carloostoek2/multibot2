@@ -47,10 +47,12 @@ if [[ -n "$BOT_API_VOLUME_ID" ]]; then
   railway volume attach --volume "$BOT_API_VOLUME_ID" --yes || true
 fi
 
-echo "==> Setting ${BOT_SERVICE} local API variables"
+echo "==> Setting ${BOT_SERVICE} local API variables (API runs inside bot container)"
 railway variable set \
   TELEGRAM_LOCAL_MODE=true \
-  TELEGRAM_API_BASE_URL=http://telegram-bot-api.railway.internal:8081/bot \
+  TELEGRAM_API_BASE_URL=http://127.0.0.1:8081/bot \
+  TELEGRAM_API_ID="$API_ID" \
+  TELEGRAM_API_HASH="$API_HASH" \
   TELEGRAM_MAX_UPLOAD_SIZE_MB=2000 \
   MAX_FILE_SIZE_MB=2000 \
   MAX_AUDIO_FILE_SIZE_MB=2000 \
