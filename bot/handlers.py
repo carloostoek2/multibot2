@@ -7333,6 +7333,9 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
         update: Telegram update object
         context: Telegram context object
     """
+    if await _try_collect_caption_for_group_session(update, context):
+        return
+
     message_text = update.message.text
     user_id = update.effective_user.id
 
@@ -10923,6 +10926,14 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
 
 
 IMAGE_GROUP_DEBOUNCE_SECONDS = 1.5
+TELEGRAM_MAX_CAPTION_LENGTH = 1024
+
+
+def _truncate_telegram_caption(text: str) -> str:
+    """Truncate text to Telegram's media caption limit."""
+    if len(text) <= TELEGRAM_MAX_CAPTION_LENGTH:
+        return text
+    return text[: TELEGRAM_MAX_CAPTION_LENGTH - 3].rsplit(" ", 1)[0] + "..."
 
 
 def _get_image_group_keyboard(image_count: int) -> InlineKeyboardMarkup:
@@ -10958,6 +10969,7 @@ def _start_image_group_session(
     """Initialize an image group collection session."""
     session = {
         "file_ids": list(file_ids),
+        "caption": None,
         "correlation_id": correlation_id,
         "last_activity": asyncio.get_event_loop().time(),
         "debounce_task": None,
@@ -10972,6 +10984,7 @@ async def _send_album_from_file_ids(
     context: ContextTypes.DEFAULT_TYPE,
     file_ids: list[str],
     correlation_id: str,
+    caption: str | None = None,
 ) -> None:
     """Send images as one or more Telegram albums using stored file IDs."""
     from telegram import InputMediaPhoto
@@ -10983,13 +10996,17 @@ async def _send_album_from_file_ids(
 
     logger.info(
         f"[{correlation_id}] Sending {total} grouped images in albums to user {user_id}"
+        + (" with caption" if caption else "")
     )
 
     effective_message = update.callback_query.message if update.callback_query else update.message
 
     for i in range(0, total, album_size):
         batch = file_ids[i:i + album_size]
-        media_group = [InputMediaPhoto(media=file_id) for file_id in batch]
+        media_group = []
+        for j, file_id in enumerate(batch):
+            item_caption = caption if i == 0 and j == 0 and caption else None
+            media_group.append(InputMediaPhoto(media=file_id, caption=item_caption))
 
         if effective_message:
             await effective_message.reply_media_group(media=media_group)
@@ -10997,25 +11014,43 @@ async def _send_album_from_file_ids(
             await context.bot.send_media_group(chat_id=chat_id, media=media_group)
 
 
+def _format_image_group_inventory(
+    image_count: int,
+    has_caption: bool = False,
+) -> str:
+    """Describe current image group session contents."""
+    parts = [f"*{image_count}* imagen(es)"]
+    if has_caption:
+        parts.append("*caption*")
+    inventory = " y ".join(parts)
+    return f"Actualmente tienes: {inventory} (máximo {config.MAX_IMAGE_BATCH_SIZE})."
+
+
+def _format_image_group_footer(image_count: int) -> str:
+    """Return guidance text for incomplete image group sessions."""
+    if image_count < 2:
+        return "\n\nNecesitas al menos 2 imágenes para crear un álbum."
+    return ""
+
+
 async def _notify_image_group_progress(
     update: Update,
     added_count: int,
     total_count: int,
     truncated: bool = False,
+    has_caption: bool = False,
 ) -> None:
     """Send a status message during image group collection."""
     text = (
         f"✓ {added_count} imagen(es) agregada(s).\n\n"
-        f"Actualmente tienes: *{total_count}* imagen(es) "
-        f"(máximo {config.MAX_IMAGE_BATCH_SIZE})."
+        f"{_format_image_group_inventory(total_count, has_caption=has_caption)}"
     )
     if truncated:
         text += (
             f"\n\n⚠️ Se alcanzó el máximo de {config.MAX_IMAGE_BATCH_SIZE} imágenes. "
             "Las adicionales fueron ignoradas."
         )
-    if total_count < 2:
-        text += "\n\nNecesitas al menos 2 imágenes para crear un álbum."
+    text += _format_image_group_footer(total_count)
 
     await update.message.reply_text(
         text,
@@ -11059,6 +11094,7 @@ async def _add_images_to_group_session(
         added_count,
         len(session["file_ids"]),
         truncated=truncated,
+        has_caption=bool(session.get("caption")),
     )
 
 
@@ -11117,6 +11153,37 @@ async def _try_collect_image_for_group_session(
     return True
 
 
+async def _try_collect_caption_for_group_session(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> bool:
+    """Collect album caption text for an active group session. Returns True if handled."""
+    session = _get_image_group_session(context)
+    if not session:
+        return False
+
+    text = (update.message.text or "").strip()
+    if not text:
+        return False
+
+    session["caption"] = _truncate_telegram_caption(text)
+    session["last_activity"] = asyncio.get_event_loop().time()
+
+    image_count = len(session["file_ids"])
+    status_text = (
+        "✓ Caption guardado para el álbum.\n\n"
+        f"{_format_image_group_inventory(image_count, has_caption=True)}"
+    )
+    status_text += _format_image_group_footer(image_count)
+
+    await update.message.reply_text(
+        status_text,
+        parse_mode="Markdown",
+        reply_markup=_get_image_group_keyboard(image_count),
+    )
+    return True
+
+
 async def handle_image_group_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -11159,12 +11226,20 @@ async def handle_image_group_callback(
 
     await query.edit_message_text(f"Enviando álbum con {len(file_ids)} imágenes...")
 
+    caption = session.get("caption")
+
     try:
-        await _send_album_from_file_ids(update, context, file_ids, correlation_id)
-        await query.edit_message_text(f"✅ Álbum enviado con {len(file_ids)} imágenes.")
+        await _send_album_from_file_ids(
+            update, context, file_ids, correlation_id, caption=caption
+        )
+        success_text = f"✅ Álbum enviado con {len(file_ids)} imágenes."
+        if caption:
+            success_text += " Incluye caption."
+        await query.edit_message_text(success_text)
         logger.info(
             f"[{correlation_id}] Image group album sent to user {user_id} "
-            f"({len(file_ids)} images)"
+            f"({len(file_ids)} images"
+            f"{', with caption' if caption else ''})"
         )
     except Exception as e:
         logger.error(f"[{correlation_id}] Failed to send grouped album: {e}")
@@ -11292,7 +11367,8 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
         prompt = (
             f"📷 *Modo agrupación activado*\n\n"
             f"Tienes *{count}* imagen(es). Envía más imágenes para agrupar "
-            f"(máximo {config.MAX_IMAGE_BATCH_SIZE}).\n\n"
+            f"(máximo {config.MAX_IMAGE_BATCH_SIZE}).\n"
+            "Opcional: envía un texto y se usará como caption del álbum.\n\n"
             "Cuando termines, presiona *Listo* para recibirlas como álbum."
         )
         if count < 2:

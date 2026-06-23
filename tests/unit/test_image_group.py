@@ -6,12 +6,15 @@ import pytest
 
 from bot.config import config
 from bot.handlers import (
+    TELEGRAM_MAX_CAPTION_LENGTH,
     _get_image_group_keyboard,
     _send_album_from_file_ids,
     _start_image_group_session,
+    _try_collect_caption_for_group_session,
     _try_collect_image_for_group_session,
     handle_image_group_callback,
     handle_image_menu_callback,
+    handle_url_detection,
 )
 
 
@@ -35,6 +38,17 @@ def _photo_update(file_id="photo-1", media_group_id=None):
         media_group_id=media_group_id,
         reply_text=AsyncMock(),
         photo=[SimpleNamespace(file_id=file_id, file_size=1000)],
+    )
+    return update
+
+
+def _text_update(text="Mi caption del álbum"):
+    update = MagicMock()
+    update.effective_user = SimpleNamespace(id=42)
+    update.message = SimpleNamespace(
+        text=text,
+        entities=None,
+        reply_text=AsyncMock(),
     )
     return update
 
@@ -69,6 +83,68 @@ class TestImageGroupMenuAction:
         text = update.callback_query.edit_message_text.await_args[0][0]
         assert "Modo agrupación activado" in text
         assert "2" in text
+        assert "caption" in text.lower()
+
+
+class TestImageGroupCaptionCollection:
+    @pytest.mark.asyncio
+    async def test_collects_caption_in_active_session(self, mock_context):
+        update = _text_update("Texto para el álbum")
+        _start_image_group_session(mock_context, ["photo-1"], "corr-caption")
+
+        handled = await _try_collect_caption_for_group_session(update, mock_context)
+
+        assert handled is True
+        assert mock_context.user_data["image_group_session"]["caption"] == (
+            "Texto para el álbum"
+        )
+        text = update.message.reply_text.await_args[0][0]
+        assert "Caption guardado" in text
+        assert "caption" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_replaces_existing_caption(self, mock_context):
+        update = _text_update("Nuevo caption")
+        session = _start_image_group_session(mock_context, ["photo-1"], "corr-replace")
+        session["caption"] = "Caption anterior"
+
+        handled = await _try_collect_caption_for_group_session(update, mock_context)
+
+        assert handled is True
+        assert mock_context.user_data["image_group_session"]["caption"] == "Nuevo caption"
+
+    @pytest.mark.asyncio
+    async def test_returns_false_without_active_session(self, mock_context):
+        update = _text_update()
+
+        handled = await _try_collect_caption_for_group_session(update, mock_context)
+
+        assert handled is False
+
+    @pytest.mark.asyncio
+    async def test_url_detection_collects_caption_instead_of_download(self, mock_context):
+        update = _text_update("https://example.com/video")
+        _start_image_group_session(mock_context, ["photo-1", "photo-2"], "corr-url")
+
+        with patch("bot.handlers.url_detector.extract_urls") as extract_urls:
+            await handle_url_detection(update, mock_context)
+
+        extract_urls.assert_not_called()
+        assert mock_context.user_data["image_group_session"]["caption"] == (
+            "https://example.com/video"
+        )
+
+    @pytest.mark.asyncio
+    async def test_truncates_long_caption_on_collection(self, mock_context):
+        long_text = "x" * (TELEGRAM_MAX_CAPTION_LENGTH + 50)
+        update = _text_update(long_text)
+        _start_image_group_session(mock_context, ["photo-1", "photo-2"], "corr-long")
+
+        await _try_collect_caption_for_group_session(update, mock_context)
+
+        caption = mock_context.user_data["image_group_session"]["caption"]
+        assert len(caption) <= TELEGRAM_MAX_CAPTION_LENGTH
+        assert caption.endswith("...")
 
 
 class TestImageGroupCollection:
@@ -112,7 +188,11 @@ class TestImageGroupDone:
             await handle_image_group_callback(update, mock_context)
 
         send_album.assert_awaited_once_with(
-            update, mock_context, ["f1", "f2", "f3"], "corr-done"
+            update,
+            mock_context,
+            ["f1", "f2", "f3"],
+            "corr-done",
+            caption=None,
         )
         assert "image_group_session" not in mock_context.user_data
         final_text = update.callback_query.edit_message_text.await_args_list[-1][0][0]
@@ -133,6 +213,28 @@ class TestImageGroupDone:
         assert mock_context.user_data["image_group_session"]["file_ids"] == ["f1"]
 
     @pytest.mark.asyncio
+    async def test_done_sends_album_with_saved_caption(self, mock_context):
+        update = _callback_update("image_group_action:done")
+        update.callback_query.edit_message_text = AsyncMock()
+        session = _start_image_group_session(mock_context, ["f1", "f2"], "corr-caption-done")
+        session["caption"] = "Mi descripción"
+
+        with patch(
+            "bot.handlers._send_album_from_file_ids", new_callable=AsyncMock
+        ) as send_album:
+            await handle_image_group_callback(update, mock_context)
+
+        send_album.assert_awaited_once_with(
+            update,
+            mock_context,
+            ["f1", "f2"],
+            "corr-caption-done",
+            caption="Mi descripción",
+        )
+        final_text = update.callback_query.edit_message_text.await_args_list[-1][0][0]
+        assert "Incluye caption" in final_text
+
+    @pytest.mark.asyncio
     async def test_cancel_clears_session(self, mock_context):
         update = _callback_update("image_group_action:cancel")
         update.callback_query.edit_message_text = AsyncMock()
@@ -145,6 +247,20 @@ class TestImageGroupDone:
 
 
 class TestSendAlbumFromFileIds:
+    @pytest.mark.asyncio
+    async def test_applies_caption_to_first_image_only(self, mock_context):
+        update = _callback_update()
+        file_ids = ["id-1", "id-2", "id-3"]
+
+        await _send_album_from_file_ids(
+            update, mock_context, file_ids, "corr-caption", caption="Hola álbum"
+        )
+
+        media = update.callback_query.message.reply_media_group.await_args.kwargs["media"]
+        assert media[0].caption == "Hola álbum"
+        assert media[1].caption is None
+        assert media[2].caption is None
+
     @pytest.mark.asyncio
     async def test_sends_media_group_with_file_ids(self, mock_context):
         update = _callback_update()
