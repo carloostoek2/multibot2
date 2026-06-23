@@ -4793,6 +4793,146 @@ async def handle_audio_3d_selection(update: Update, context: ContextTypes.DEFAUL
 # =============================================================================
 
 
+async def handle_audio_pitch_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle pitch shift intensity selection callback from inline keyboard."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    if not callback_data or not callback_data.startswith("audio_pitch:"):
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 2:
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    intensity = parts[1]
+    intensity_labels = {
+        "grave": "Grave",
+        "agudo": "Agudo",
+        "muy_agudo": "Muy agudo",
+    }
+
+    if intensity not in intensity_labels:
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    file_id = context.user_data.get("effect_audio_file_id")
+    correlation_id = context.user_data.get("effect_audio_correlation_id", str(uuid.uuid4())[:8])
+    stored_effect_type = context.user_data.get("effect_type")
+
+    if not file_id:
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    if stored_effect_type and stored_effect_type != "pitch_shift":
+        logger.warning(
+            f"[{correlation_id}] Mismatch: stored={stored_effect_type}, callback=pitch_shift"
+        )
+
+    intensity_label = intensity_labels[intensity]
+    logger.info(
+        f"[{correlation_id}] Pitch shift intensity '{intensity}' selected by user {user_id}"
+    )
+
+    try:
+        await query.edit_message_text(f"Aplicando cambio de tono ({intensity_label})...")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"input_{user_id}_{correlation_id}.audio"
+            output_filename = f"pitch_{user_id}_{correlation_id}.mp3"
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                raise ValidationError(error_msg)
+
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                raise ValidationError(space_error)
+
+            logger.info(f"[{correlation_id}] Applying pitch shift ({intensity}) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(input_path), str(output_path))
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.pitch_shift, intensity),
+                    timeout=config.PROCESSING_TIMEOUT,
+                )
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El cambio de tono tardó demasiado") from e
+
+            doc_filename = f"pitch_shift_{intensity}_{correlation_id}.mp3"
+            document_sent = False
+            with open(output_path, "rb") as audio_file:
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=audio_file,
+                    filename="pitch_shift.mp3",
+                    title=f"Audio con cambio de tono ({intensity_label})",
+                )
+                try:
+                    audio_file.seek(0)
+                    await context.bot.send_document(
+                        chat_id=update.effective_chat.id,
+                        document=audio_file,
+                        filename=doc_filename,
+                        caption=(
+                            f"Archivo MP3 con cambio de tono ({intensity_label}) "
+                            "para editores de video"
+                        ),
+                    )
+                    document_sent = True
+                except Exception as doc_error:
+                    logger.warning(
+                        f"[{correlation_id}] Audio sent but document delivery failed: {doc_error}"
+                    )
+
+            success_msg = f"¡Listo! Cambio de tono aplicado con intensidad {intensity_label}."
+            if not document_sent:
+                success_msg += (
+                    "\n\n(No pude enviar el archivo MP3 como documento; "
+                    "usa el audio de arriba.)"
+                )
+            await query.edit_message_text(success_msg)
+
+            context.user_data.pop("effect_audio_file_id", None)
+            context.user_data.pop("effect_audio_correlation_id", None)
+            context.user_data.pop("effect_type", None)
+
+        except (DownloadError, ValidationError, AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Pitch shift processing error: {e}")
+            try:
+                await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying pitch shift: {e}")
+            try:
+                await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+
 def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
     """Generate inline keyboard for audio menu options.
 
@@ -4816,6 +4956,7 @@ def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("Efecto 3D", callback_data="audio_action:stereo_3d"),
+            InlineKeyboardButton("Cambiar Pitch", callback_data="audio_action:pitch_shift"),
         ],
         [
             InlineKeyboardButton("Dividir Audio", callback_data="audio_action:split"),
@@ -5065,6 +5206,30 @@ async def handle_audio_menu_callback(update: Update, context: ContextTypes.DEFAU
             "• Suave - ampliación estéreo ligera\n"
             "• Medio - efecto equilibrado\n"
             "• Intenso - ampliación estéreo marcada",
+            reply_markup=reply_markup
+        )
+
+    elif action == "pitch_shift":
+        context.user_data["effect_audio_file_id"] = file_id
+        context.user_data["effect_audio_correlation_id"] = correlation_id
+        context.user_data["effect_type"] = "pitch_shift"
+        keyboard = [
+            [
+                InlineKeyboardButton("Grave", callback_data="audio_pitch:grave"),
+                InlineKeyboardButton("Agudo", callback_data="audio_pitch:agudo"),
+                InlineKeyboardButton("Muy Agudo", callback_data="audio_pitch:muy_agudo"),
+            ],
+            [
+                InlineKeyboardButton("<- Volver", callback_data="back:audio"),
+                InlineKeyboardButton("Cancelar", callback_data="cancel"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el cambio de tono:\n\n"
+            "• Grave - tono más grave (-3.5 semitonos)\n"
+            "• Agudo - tono más agudo (+3.5 semitonos)\n"
+            "• Muy Agudo - tono muy agudo (+6.5 semitonos)",
             reply_markup=reply_markup
         )
 
@@ -9151,6 +9316,23 @@ def _get_postdownload_audio_more_keyboard(correlation_id: str) -> InlineKeyboard
         ],
         [
             InlineKeyboardButton("Efecto 3D", callback_data=f"postdownload:stereo_3d:{correlation_id}"),
+            InlineKeyboardButton("Cambiar Pitch", callback_data=f"postdownload:pitch_shift:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_pitch_shift_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for pitch shift intensity selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Grave", callback_data=f"postdownload:pitch_shift_intensity:{correlation_id}:grave"),
+            InlineKeyboardButton("Agudo", callback_data=f"postdownload:pitch_shift_intensity:{correlation_id}:agudo"),
+            InlineKeyboardButton("Muy Agudo", callback_data=f"postdownload:pitch_shift_intensity:{correlation_id}:muy_agudo"),
         ],
         [
             InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
@@ -9570,6 +9752,15 @@ async def handle_postdownload_audio_callback(update: Update, context: ContextTyp
             "• Suave - ampliación estéreo ligera\n"
             "• Medio - efecto equilibrado\n"
             "• Intenso - ampliación estéreo marcada",
+            reply_markup=reply_markup,
+        )
+    elif action == "pitch_shift":
+        reply_markup = _get_postdownload_pitch_shift_keyboard(correlation_id)
+        await query.edit_message_text(
+            "Selecciona el cambio de tono:\n\n"
+            "• Grave - tono más grave (-3.5 semitonos)\n"
+            "• Agudo - tono más agudo (+3.5 semitonos)\n"
+            "• Muy Agudo - tono muy agudo (+6.5 semitonos)",
             reply_markup=reply_markup,
         )
     elif action == "more":
@@ -10189,6 +10380,135 @@ async def _handle_postdownload_stereo_3d(
             await query.edit_message_text(f"Error: {get_user_error_message(e)}")
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error applying stereo 3D: {e}")
+            await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+
+
+async def handle_postdownload_pitch_shift_intensity_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle post-download pitch shift intensity selection callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse: postdownload:pitch_shift_intensity:CORRELATION_ID:INTENSITY
+    parts = callback_data.split(":")
+    if len(parts) != 4:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    correlation_id = parts[2]
+    intensity = parts[3].lower()
+    intensity_labels = {
+        "grave": "Grave",
+        "agudo": "Agudo",
+        "muy_agudo": "Muy agudo",
+    }
+
+    if intensity not in intensity_labels:
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    logger.info(
+        f"[{correlation_id}] Post-download pitch shift intensity '{intensity}' "
+        f"selected by user {user_id}"
+    )
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
+        )
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text("Error: El archivo ya no está disponible. Fue eliminado automáticamente.")
+        return
+
+    await _handle_postdownload_pitch_shift(
+        update, context, entry, correlation_id, intensity, intensity_labels[intensity]
+    )
+
+
+async def _handle_postdownload_pitch_shift(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    entry: Any,
+    correlation_id: str,
+    intensity: str,
+    intensity_label: str,
+) -> None:
+    """Apply pitch shift effect to downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Aplicando cambio de tono ({intensity_label})...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"pitch_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(
+                f"[{correlation_id}] Applying pitch shift ({intensity}) for user {user_id}"
+            )
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(file_path), str(output_path))
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.pitch_shift, intensity),
+                    timeout=config.PROCESSING_TIMEOUT,
+                )
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            doc_filename = f"pitch_shift_{intensity}_{correlation_id}.mp3"
+            document_sent = False
+            logger.info(f"[{correlation_id}] Sending pitch shift audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=doc_filename,
+                    title=f"Audio con cambio de tono ({intensity_label})",
+                )
+                try:
+                    audio_file.seek(0)
+                    await query.message.reply_document(
+                        document=audio_file,
+                        filename=doc_filename,
+                        caption=(
+                            f"Archivo MP3 con cambio de tono ({intensity_label}) "
+                            "para editores de video"
+                        ),
+                    )
+                    document_sent = True
+                except Exception as doc_error:
+                    logger.warning(
+                        f"[{correlation_id}] Audio sent but document delivery failed: {doc_error}"
+                    )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            ready_msg = "¡Listo! ¿Quieres hacer algo más con este audio?"
+            if not document_sent:
+                ready_msg += (
+                    "\n\n(No pude enviar el archivo MP3 como documento; "
+                    "usa el audio de arriba.)"
+                )
+            await query.message.reply_text(ready_msg, reply_markup=reply_markup)
+            logger.info(f"[{correlation_id}] Pitch shift audio sent successfully to user {user_id}")
+
+        except (AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Pitch shift processing failed: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying pitch shift: {e}")
             await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
 
 

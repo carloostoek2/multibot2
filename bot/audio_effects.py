@@ -54,6 +54,13 @@ class AudioEffects:
         "intenso": 0.55,
     }
 
+    # Pitch shift presets (semitones)
+    PITCH_SHIFT_PRESETS = {
+        "grave": -3.5,
+        "agudo": 3.5,
+        "muy_agudo": 6.5,
+    }
+
     def __init__(self, input_path: str, output_path: str):
         """Initialize audio effects processor.
 
@@ -499,6 +506,77 @@ class AudioEffects:
             ) from e
         except Exception as e:
             logger.error(f"Unexpected error during stereo 3D: {e}")
+            self._cleanup_temp_files()
+            raise AudioEffectsError(f"Error inesperado: {str(e)}") from e
+
+    def pitch_shift(self, intensity: str = "agudo") -> "AudioEffects":
+        """Apply pitch shift using asetrate + atempo filters.
+
+        Uses ffmpeg asetrate to change sample rate (shifting pitch)
+        and atempo to restore original duration.
+        ratio = 2^(semitones/12)
+
+        Args:
+            intensity: Effect preset - grave, agudo, or muy_agudo (default agudo)
+
+        Returns:
+            Self to enable method chaining
+
+        Raises:
+            AudioEffectsError: If pitch shift processing fails
+        """
+        self._validate_input()
+
+        intensity = intensity.lower()
+        if intensity not in self.PITCH_SHIFT_PRESETS:
+            valid = ", ".join(self.PITCH_SHIFT_PRESETS.keys())
+            raise AudioEffectsError(
+                f"Intensidad '{intensity}' no válida. Usa: {valid}"
+            )
+
+        semitones = self.PITCH_SHIFT_PRESETS[intensity]
+        ratio = 2 ** (semitones / 12.0)
+        logger.info(
+            f"Applying pitch shift: intensity={intensity}, "
+            f"semitones={semitones}, ratio={ratio:.4f}"
+        )
+
+        input_path = self._get_input_for_effect()
+
+        if self._in_chain:
+            output_path = self._create_temp_output()
+        else:
+            output_path = self.output_path
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        af_filter = f"asetrate=44100*{ratio},atempo={ratio}"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", str(input_path),
+            "-af", af_filter,
+            "-c:a", "libmp3lame",
+            "-b:a", "192k",
+            str(output_path),
+        ]
+
+        try:
+            logger.debug(f"Running ffmpeg: {' '.join(cmd)}")
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            logger.info(f"Pitch shift applied successfully: {output_path}")
+            self._in_chain = True
+            return self
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ffmpeg failed with code {e.returncode}")
+            logger.error(f"ffmpeg stderr: {e.stderr}")
+            self._cleanup_temp_files()
+            raise AudioEffectsError(
+                f"Error aplicando cambio de tono: {e.stderr[:100]}"
+            ) from e
+        except Exception as e:
+            logger.error(f"Unexpected error during pitch shift: {e}")
             self._cleanup_temp_files()
             raise AudioEffectsError(f"Error inesperado: {str(e)}") from e
 

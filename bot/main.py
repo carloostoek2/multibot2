@@ -45,7 +45,7 @@ from bot.handlers import (
     handle_equalize_command, handle_equalizer_adjustment,
     handle_denoise_command, handle_compress_command, handle_effect_selection,
     handle_normalize_command, handle_normalize_selection,
-    handle_audio_3d_selection,
+    handle_audio_3d_selection, handle_audio_pitch_selection,
     handle_effects_command, handle_pipeline_builder,
     handle_audio_menu_callback, handle_audio_menu_format_selection,
     handle_video_menu_callback, handle_video_format_selection,
@@ -58,7 +58,7 @@ from bot.handlers import (
     handle_postdownload_callback, handle_postdownload_audio_callback,
     handle_postdownload_format_callback, handle_postdownload_intensity_callback,
     handle_postdownload_effect_strength_callback,
-    handle_postdownload_stereo_3d_intensity_callback,
+    handle_postdownload_stereo_3d_intensity_callback, handle_postdownload_pitch_shift_intensity_callback,
     handle_recent_downloads, handle_reprocess_download,
     # Image handlers
     handle_photo, handle_image_document,
@@ -149,9 +149,10 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_postdownload_intensity_callback, pattern="^postdownload:(bass_intensity|treble_intensity):"))
     application.add_handler(CallbackQueryHandler(handle_postdownload_effect_strength_callback, pattern="^postdownload:(denoise_strength|compress_strength):"))
     application.add_handler(CallbackQueryHandler(handle_postdownload_stereo_3d_intensity_callback, pattern="^postdownload:stereo_3d_intensity:"))
+    application.add_handler(CallbackQueryHandler(handle_postdownload_pitch_shift_intensity_callback, pattern="^postdownload:pitch_shift_intensity:"))
     # Main post-download handlers
     application.add_handler(CallbackQueryHandler(handle_postdownload_callback, pattern="^postdownload:(videonote|extract_audio|convert_video|recent|back_video):"))
-    application.add_handler(CallbackQueryHandler(handle_postdownload_audio_callback, pattern="^postdownload:(voicenote|convert_audio|bass|denoise|more|treble|compress|normalize|equalize|stereo_3d|back_audio|clear_recent|nothing):"))
+    application.add_handler(CallbackQueryHandler(handle_postdownload_audio_callback, pattern="^postdownload:(voicenote|convert_audio|bass|denoise|more|treble|compress|normalize|equalize|stereo_3d|pitch_shift|back_audio|clear_recent|nothing):"))
     # Reprocess handler for recent downloads
     application.add_handler(CallbackQueryHandler(handle_reprocess_download, pattern="^reprocess:"))
 
@@ -182,6 +183,7 @@ def main() -> None:
 
     # Callback handler for stereo 3D intensity selection
     application.add_handler(CallbackQueryHandler(handle_audio_3d_selection, pattern="^audio_3d:"))
+    application.add_handler(CallbackQueryHandler(handle_audio_pitch_selection, pattern="^audio_pitch:"))
 
     # Audio effects pipeline command
     application.add_handler(CommandHandler("effects", handle_effects_command))
