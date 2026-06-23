@@ -13,6 +13,7 @@ from bot.handlers import (
     _try_collect_caption_for_group_session,
     _try_collect_image_for_group_session,
     handle_image_group_callback,
+    handle_image_group_s_caption_command,
     handle_image_menu_callback,
     handle_url_detection,
 )
@@ -133,6 +134,26 @@ class TestImageGroupCaptionCollection:
         assert mock_context.user_data["image_group_session"]["caption"] == (
             "https://example.com/video"
         )
+
+    @pytest.mark.asyncio
+    async def test_s_command_stores_full_text_including_prefix(self, mock_context):
+        caption = "/s integra el perrito corriendo en el parque"
+        update = _text_update(caption)
+        _start_image_group_session(mock_context, ["photo-1", "photo-2"], "corr-s-cmd")
+
+        await handle_image_group_s_caption_command(update, mock_context)
+
+        assert mock_context.user_data["image_group_session"]["caption"] == caption
+        text = update.message.reply_text.await_args[0][0]
+        assert "Caption guardado" in text
+
+    @pytest.mark.asyncio
+    async def test_s_command_ignored_without_active_session(self, mock_context):
+        update = _text_update("/s integra el perrito corriendo en el parque")
+
+        await handle_image_group_s_caption_command(update, mock_context)
+
+        update.message.reply_text.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_truncates_long_caption_on_collection(self, mock_context):

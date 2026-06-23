@@ -11184,6 +11184,20 @@ async def _try_collect_caption_for_group_session(
     return True
 
 
+async def handle_image_group_s_caption_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handle /s captions during image group sessions.
+
+    Telegram treats messages starting with / as commands, so they bypass the
+    regular text handler. When grouping images, /s ... is stored verbatim
+    (command + caption) for use on the generated album.
+    """
+    if not await _try_collect_caption_for_group_session(update, context):
+        return
+
+
 async def handle_image_group_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -11368,7 +11382,7 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
             f"📷 *Modo agrupación activado*\n\n"
             f"Tienes *{count}* imagen(es). Envía más imágenes para agrupar "
             f"(máximo {config.MAX_IMAGE_BATCH_SIZE}).\n"
-            "Opcional: envía un texto y se usará como caption del álbum.\n\n"
+            "Opcional: envía un texto (o `/s ...`) y se usará como caption del álbum.\n\n"
             "Cuando termines, presiona *Listo* para recibirlas como álbum."
         )
         if count < 2:
