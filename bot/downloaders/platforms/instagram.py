@@ -325,8 +325,8 @@ class InstagramDownloader(YtDlpDownloader):
                 "no_warnings": True,
                 # Allow extracting info for carousels and images
                 "extract_flat": False,
-                # Use 'best' format to allow both videos and images
-                "format": "best",
+                # Use 'best/bestimage' to handle both videos and image-only posts
+                "format": "best/bestimage",
                 # Anti-bot headers
                 "http_headers": {
                     "User-Agent": (

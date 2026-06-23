@@ -244,9 +244,15 @@ class GalleryDlDownloader(BaseDownloader):
                             logger.info(f"[{correlation_id}] Downloaded: {filepath}")
 
                 if not downloaded_files:
+                    msg = "No files were downloaded"
+                    if "instagram.com" in url.lower():
+                        msg = (
+                            "Instagram rechazó la descarga (redirigió al login). "
+                            "Las cookies pueden estar vencidas."
+                        )
                     raise DownloadFailedError(
                         attempts_made=1,
-                        message="No files were downloaded",
+                        message=msg,
                         url=url,
                         correlation_id=correlation_id,
                     )
