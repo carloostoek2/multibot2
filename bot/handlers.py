@@ -39,6 +39,7 @@ from bot.error_handler import (
     ImageConversionError,
     ImageResizeError,
     ImageEnhancementError,
+    ImageNoiseError,
     handle_processing_error,
     get_user_error_message,
     DEFAULT_ERROR_MESSAGE,
@@ -59,7 +60,12 @@ from bot.audio_format_converter import AudioFormatConverter, detect_audio_format
 from bot.audio_enhancer import AudioEnhancer
 from bot.audio_effects import AudioEffects
 from bot.screenshot_processor import ScreenshotProcessor
-from bot.image_processor import ImageProcessor, SUPPORTED_IMAGE_FORMATS, ENHANCEMENT_PROFILES
+from bot.image_processor import (
+    ImageProcessor,
+    SUPPORTED_IMAGE_FORMATS,
+    ENHANCEMENT_PROFILES,
+    NOISE_STRENGTH_LEVELS,
+)
 
 # Import downloaders for URL handling
 from bot.downloaders import (
@@ -332,7 +338,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "💡 También puedes usar los menús inline:\n"
         "- Envía un video → Menú con opciones (Nota de Video, Extraer Audio, Merge con Audio, etc.)\n"
         "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)\n"
-        "- Envía una foto o imagen → Menú con opciones (Comprimir, Convertir, Redimensionar, Info)\n"
+        "- Envía una foto o imagen → Menú con opciones (Comprimir, Convertir, Redimensionar, Naturalizar, Info)\n"
         "- Envía un enlace de video → Menú de descarga con opciones combinadas"
     )
 
@@ -6975,7 +6981,7 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if count > 1:
             menu_text = (
                 f"{count} imágenes recibidas.\n\n"
-                "«Mejorar» y «Agrupar» procesan todas las imágenes del álbum. "
+                "«Mejorar», «Naturalizar» y «Agrupar» procesan todas las imágenes del álbum. "
                 "Selecciona una acción:"
             )
         else:
@@ -10756,7 +10762,7 @@ async def _send_image_menu_message(
     if count > 1:
         text = (
             f"{count} imágenes recibidas.\n\n"
-            "«Mejorar» y «Agrupar» procesan todas las imágenes del álbum. "
+            "«Mejorar», «Naturalizar» y «Agrupar» procesan todas las imágenes del álbum. "
             "Selecciona una acción:"
         )
     else:
@@ -10863,12 +10869,35 @@ async def _schedule_image_batch_menu(
     session["debounce_task"] = task
 
 
+def _get_image_noise_keyboard() -> InlineKeyboardMarkup:
+    """Inline keyboard for subtle noise intensity selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("1 · Muy sutil", callback_data="image_noise:1"),
+            InlineKeyboardButton("2 · Sutil", callback_data="image_noise:2"),
+            InlineKeyboardButton("3 · Normal", callback_data="image_noise:3"),
+        ],
+        [
+            InlineKeyboardButton("4 · Notable", callback_data="image_noise:4"),
+            InlineKeyboardButton("5 · Marcado", callback_data="image_noise:5"),
+        ],
+        [
+            InlineKeyboardButton("← Volver", callback_data="back:image"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
     """Generate inline keyboard for image processing menu."""
     if image_count > 1:
         keyboard = [
             [
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+                InlineKeyboardButton("Naturalizar", callback_data="image_action:noise"),
+            ],
+            [
                 InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
@@ -10884,6 +10913,9 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+                InlineKeyboardButton("Naturalizar", callback_data="image_action:noise"),
+            ],
+            [
                 InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
@@ -11244,9 +11276,9 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
         return
 
-    if len(file_ids) > 1 and action not in ("enhance", "group"):
+    if len(file_ids) > 1 and action not in ("enhance", "group", "noise"):
         await query.edit_message_text(
-            "Solo «Mejorar» y «Agrupar» están disponibles para álbumes. "
+            "Solo «Mejorar», «Naturalizar» y «Agrupar» están disponibles para álbumes. "
             "Envía una imagen a la vez para otras acciones."
         )
         return
@@ -11373,6 +11405,17 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
             "• Nitidez - mayor definición\n"
             "• Equilibrado - mejora general balanceada\n"
             "• Suave - mejora sutil",
+            reply_markup=reply_markup
+        )
+
+    elif action == "noise":
+        reply_markup = _get_image_noise_keyboard()
+        await query.edit_message_text(
+            "Selecciona la intensidad del ruido sutil:\n\n"
+            "Añade textura fina para reducir el aspecto artificial de imágenes generadas con IA.\n"
+            "• 1-2 - casi imperceptible (recomendado para empezar)\n"
+            "• 3 - balance natural\n"
+            "• 4-5 - más textura, sin estilo vintage",
             reply_markup=reply_markup
         )
 
@@ -11887,6 +11930,145 @@ async def handle_image_enhance_callback(update: Update, context: ContextTypes.DE
             )
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error enhancing images: {e}")
+            await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+
+
+async def handle_image_noise_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle subtle noise intensity selection (supports batch albums)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    try:
+        strength = int(callback_data.split(":")[1])
+    except (IndexError, ValueError):
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    if strength not in NOISE_STRENGTH_LEVELS:
+        await query.edit_message_text(f"Intensidad '{strength}' no soportada.")
+        return
+
+    file_ids = context.user_data.get("image_menu_file_ids")
+    if not file_ids:
+        single_id = context.user_data.get("image_menu_file_id")
+        file_ids = [single_id] if single_id else []
+
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_ids:
+        await query.edit_message_text("Error: no se encontraron imágenes. Intenta de nuevo.")
+        return
+
+    strength_label = NOISE_STRENGTH_LEVELS[strength]["label"]
+    count = len(file_ids)
+    batch_timeout = min(180, 30 + 15 * count)
+    batch_deadline = time.monotonic() + batch_timeout
+
+    required_space_mb = count * config.max_incoming_file_size_mb * 2
+    has_space, space_error = check_disk_space(required_space_mb)
+    if not has_space:
+        await query.edit_message_text(space_error)
+        return
+
+    logger.info(
+        f"[{correlation_id}] Applying subtle noise to {count} image(s) "
+        f"(strength={strength}) for user {user_id}"
+    )
+    await query.edit_message_text(
+        f"Naturalizando {count} imagen(es) ({strength_label})..."
+    )
+
+    with TempManager() as temp_mgr:
+        try:
+            processed_paths = []
+            loop = asyncio.get_event_loop()
+
+            for idx, file_id in enumerate(file_ids, start=1):
+                if count > 1:
+                    try:
+                        await query.edit_message_text(
+                            f"Naturalizando imagen {idx}/{count} ({strength_label})..."
+                        )
+                    except Exception:
+                        pass
+
+                input_filename = f"image_noise_input_{user_id}_{correlation_id}_{idx}.img"
+                output_filename = f"naturalizada_{user_id}_{correlation_id}_{idx}.jpg"
+                input_path = temp_mgr.get_temp_path(input_filename)
+                output_path = temp_mgr.get_temp_path(output_filename)
+
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+                remaining_timeout = batch_deadline - time.monotonic()
+                if remaining_timeout <= 0:
+                    raise ProcessingTimeoutError(
+                        "El procesamiento tardó demasiado. Intenta con menos imágenes o más pequeñas."
+                    )
+                remaining_timeout = max(5, remaining_timeout)
+
+                success, error = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda inp=str(input_path), out=str(output_path), lvl=strength: (
+                            ImageProcessor.add_noise(inp, out, lvl)
+                        ),
+                    ),
+                    timeout=remaining_timeout,
+                )
+
+                if not success:
+                    error_msg = error or "No pude aplicar el ruido sutil"
+                    raise ImageNoiseError(error_msg)
+
+                processed_paths.append(str(output_path))
+
+            caption = f"✅ Naturalizada ({strength_label})"
+            if count > 1:
+                await _send_images_in_albums(
+                    update,
+                    context,
+                    processed_paths,
+                    correlation_id,
+                    caption_prefix=f"Naturalizada ({strength_label})",
+                )
+            else:
+                with open(processed_paths[0], "rb") as img_file:
+                    await query.message.reply_document(
+                        document=img_file,
+                        filename=f"naturalizada_{correlation_id}.jpg",
+                        caption=caption,
+                    )
+
+            await query.edit_message_text(
+                f"¡Listo! {count} imagen(es) naturalizada(s) con intensidad {strength_label}."
+            )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¿Quieres hacer algo más con estas imágenes?",
+                reply_markup=reply_markup,
+            )
+            logger.info(
+                f"[{correlation_id}] Subtle noise applied for user {user_id}"
+            )
+
+        except ImageNoiseError as e:
+            logger.error(f"[{correlation_id}] Noise effect failed: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except ProcessingTimeoutError as e:
+            logger.error(f"[{correlation_id}] Noise effect timed out")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Noise effect timed out")
+            await query.edit_message_text(
+                "Error: El procesamiento tardó demasiado. Intenta con menos imágenes o más pequeñas."
+            )
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying noise: {e}")
             await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
 
 

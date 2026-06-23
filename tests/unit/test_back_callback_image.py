@@ -25,7 +25,7 @@ def mock_context():
 
 class TestHandleBackCallbackImage:
     @pytest.mark.asyncio
-    async def test_batch_menu_shows_mejorar_and_agrupar(self, mock_context):
+    async def test_batch_menu_shows_mejorar_naturalizar_and_agrupar(self, mock_context):
         update = _back_update()
         mock_context.user_data["image_menu_file_ids"] = ["f1", "f2", "f3"]
         mock_context.user_data["image_menu_file_id"] = "f1"
@@ -34,10 +34,10 @@ class TestHandleBackCallbackImage:
 
         text, kwargs = update.callback_query.edit_message_text.await_args
         assert "3 imágenes recibidas" in text[0]
-        assert "«Mejorar» y «Agrupar»" in text[0]
+        assert "«Mejorar», «Naturalizar» y «Agrupar»" in text[0]
         keyboard = kwargs["reply_markup"].inline_keyboard
         labels = [btn.text for row in keyboard for btn in row]
-        assert labels == ["Mejorar", "Agrupar"]
+        assert labels == ["Mejorar", "Naturalizar", "Agrupar"]
 
     @pytest.mark.asyncio
     async def test_batch_menu_includes_truncation_warning_when_stored(self, mock_context):
@@ -63,3 +63,4 @@ class TestHandleBackCallbackImage:
         labels = [btn.text for row in kwargs["reply_markup"].inline_keyboard for btn in row]
         assert "Comprimir" in labels
         assert "Mejorar" in labels
+        assert "Naturalizar" in labels
