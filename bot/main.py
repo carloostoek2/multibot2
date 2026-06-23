@@ -62,7 +62,7 @@ from bot.handlers import (
     handle_recent_downloads, handle_reprocess_download,
     # Image handlers
     handle_photo, handle_image_document,
-    handle_image_menu_callback,
+    handle_image_menu_callback, handle_image_group_callback,
     handle_image_compress_callback, handle_image_convert_callback,
     handle_image_resize_callback, handle_image_enhance_callback,
     # YouTube menu handler
@@ -208,6 +208,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_image_resize_callback, pattern="^image_resize:"))
     application.add_handler(CallbackQueryHandler(handle_image_enhance_callback, pattern="^image_enhance:"))
     application.add_handler(CallbackQueryHandler(handle_image_menu_callback, pattern="^image_action:"))
+    application.add_handler(CallbackQueryHandler(handle_image_group_callback, pattern="^image_group_action:"))
 
     # YouTube URL menu handler (must be before general download callbacks)
     application.add_handler(CallbackQueryHandler(handle_youtube_menu_callback, pattern="^youtube:"))

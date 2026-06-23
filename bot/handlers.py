@@ -6975,7 +6975,7 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if count > 1:
             menu_text = (
                 f"{count} imágenes recibidas.\n\n"
-                "Solo «Mejorar» procesa todas las imágenes del álbum. "
+                "«Mejorar» y «Agrupar» procesan todas las imágenes del álbum. "
                 "Selecciona una acción:"
             )
         else:
@@ -10756,7 +10756,7 @@ async def _send_image_menu_message(
     if count > 1:
         text = (
             f"{count} imágenes recibidas.\n\n"
-            "Solo «Mejorar» procesa todas las imágenes del álbum. "
+            "«Mejorar» y «Agrupar» procesan todas las imágenes del álbum. "
             "Selecciona una acción:"
         )
     else:
@@ -10869,6 +10869,7 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
         keyboard = [
             [
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+                InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
     else:
@@ -10883,9 +10884,263 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+                InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
     return InlineKeyboardMarkup(keyboard)
+
+
+IMAGE_GROUP_DEBOUNCE_SECONDS = 1.5
+
+
+def _get_image_group_keyboard(image_count: int) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for image group collection session."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Listo", callback_data="image_group_action:done"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="image_group_action:cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_image_group_session(context: ContextTypes.DEFAULT_TYPE) -> dict | None:
+    """Return the active image group session if it exists and is not expired."""
+    session = context.user_data.get("image_group_session")
+    if not session:
+        return None
+
+    current_time = asyncio.get_event_loop().time()
+    if current_time - session["last_activity"] > config.JOIN_SESSION_TIMEOUT:
+        context.user_data.pop("image_group_session", None)
+        return None
+
+    return session
+
+
+def _start_image_group_session(
+    context: ContextTypes.DEFAULT_TYPE,
+    file_ids: list[str],
+    correlation_id: str,
+) -> dict:
+    """Initialize an image group collection session."""
+    session = {
+        "file_ids": list(file_ids),
+        "correlation_id": correlation_id,
+        "last_activity": asyncio.get_event_loop().time(),
+        "debounce_task": None,
+        "pending_album_ids": [],
+    }
+    context.user_data["image_group_session"] = session
+    return session
+
+
+async def _send_album_from_file_ids(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_ids: list[str],
+    correlation_id: str,
+) -> None:
+    """Send images as one or more Telegram albums using stored file IDs."""
+    from telegram import InputMediaPhoto
+
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    album_size = min(config.MAX_IMAGE_BATCH_SIZE, 10)
+    total = len(file_ids)
+
+    logger.info(
+        f"[{correlation_id}] Sending {total} grouped images in albums to user {user_id}"
+    )
+
+    effective_message = update.callback_query.message if update.callback_query else update.message
+
+    for i in range(0, total, album_size):
+        batch = file_ids[i:i + album_size]
+        media_group = [InputMediaPhoto(media=file_id) for file_id in batch]
+
+        if effective_message:
+            await effective_message.reply_media_group(media=media_group)
+        else:
+            await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+
+
+async def _notify_image_group_progress(
+    update: Update,
+    added_count: int,
+    total_count: int,
+    truncated: bool = False,
+) -> None:
+    """Send a status message during image group collection."""
+    text = (
+        f"✓ {added_count} imagen(es) agregada(s).\n\n"
+        f"Actualmente tienes: *{total_count}* imagen(es) "
+        f"(máximo {config.MAX_IMAGE_BATCH_SIZE})."
+    )
+    if truncated:
+        text += (
+            f"\n\n⚠️ Se alcanzó el máximo de {config.MAX_IMAGE_BATCH_SIZE} imágenes. "
+            "Las adicionales fueron ignoradas."
+        )
+    if total_count < 2:
+        text += "\n\nNecesitas al menos 2 imágenes para crear un álbum."
+
+    await update.message.reply_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=_get_image_group_keyboard(total_count),
+    )
+
+
+async def _add_images_to_group_session(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    new_file_ids: list[str],
+) -> None:
+    """Append images to the active group session and notify the user."""
+    session = _get_image_group_session(context)
+    if not session:
+        return
+
+    added_count = 0
+    truncated = False
+    for file_id in new_file_ids:
+        if len(session["file_ids"]) >= config.MAX_IMAGE_BATCH_SIZE:
+            truncated = True
+            break
+        session["file_ids"].append(file_id)
+        added_count += 1
+
+    session["last_activity"] = asyncio.get_event_loop().time()
+
+    if added_count == 0 and truncated:
+        await update.message.reply_text(
+            f"⚠️ Ya tienes el máximo de {config.MAX_IMAGE_BATCH_SIZE} imágenes.\n"
+            "Presiona *Listo* para recibir el álbum o *Cancelar* para salir.",
+            parse_mode="Markdown",
+            reply_markup=_get_image_group_keyboard(len(session["file_ids"])),
+        )
+        return
+
+    await _notify_image_group_progress(
+        update,
+        added_count,
+        len(session["file_ids"]),
+        truncated=truncated,
+    )
+
+
+async def _schedule_image_group_batch(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+) -> None:
+    """Accumulate album images into an active group session after debounce."""
+    session = _get_image_group_session(context)
+    if not session:
+        return
+
+    session["pending_album_ids"].append(file_id)
+    session["last_activity"] = asyncio.get_event_loop().time()
+
+    debounce_task = session.get("debounce_task")
+    if debounce_task and not debounce_task.done():
+        debounce_task.cancel()
+
+    async def _debounced_add() -> None:
+        current_task = asyncio.current_task()
+        cancelled = False
+        try:
+            await asyncio.sleep(IMAGE_GROUP_DEBOUNCE_SECONDS)
+            pending_ids = list(session["pending_album_ids"])
+            session["pending_album_ids"] = []
+            await _add_images_to_group_session(update, context, pending_ids)
+        except asyncio.CancelledError:
+            cancelled = True
+            return
+        finally:
+            if not cancelled and session.get("debounce_task") is current_task:
+                session["debounce_task"] = None
+
+    task = asyncio.create_task(_debounced_add())
+    session["debounce_task"] = task
+
+
+async def _try_collect_image_for_group_session(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+) -> bool:
+    """Collect an image for an active group session. Returns True if handled."""
+    session = _get_image_group_session(context)
+    if not session:
+        return False
+
+    message = update.message
+    if message.media_group_id:
+        await _schedule_image_group_batch(update, context, file_id)
+        return True
+
+    await _add_images_to_group_session(update, context, [file_id])
+    return True
+
+
+async def handle_image_group_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handle done/cancel actions for image group collection sessions."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+    if not callback_data or not callback_data.startswith("image_group_action:"):
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    action = callback_data.split(":")[1]
+    session = _get_image_group_session(context)
+    if not session:
+        await query.edit_message_text("No hay una sesión de agrupación activa.")
+        return
+
+    correlation_id = session.get("correlation_id", str(uuid.uuid4())[:8])
+
+    if action == "cancel":
+        context.user_data.pop("image_group_session", None)
+        await query.edit_message_text("Agrupación cancelada.")
+        logger.info(f"[{correlation_id}] Image group session cancelled by user {user_id}")
+        return
+
+    if action != "done":
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    file_ids = session["file_ids"]
+    if len(file_ids) < 2:
+        await query.answer(
+            "Necesitas al menos 2 imágenes para crear un álbum.",
+            show_alert=True,
+        )
+        return
+
+    await query.edit_message_text(f"Enviando álbum con {len(file_ids)} imágenes...")
+
+    try:
+        await _send_album_from_file_ids(update, context, file_ids, correlation_id)
+        await query.edit_message_text(f"✅ Álbum enviado con {len(file_ids)} imágenes.")
+        logger.info(
+            f"[{correlation_id}] Image group album sent to user {user_id} "
+            f"({len(file_ids)} images)"
+        )
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to send grouped album: {e}")
+        await query.edit_message_text(
+            "No pude enviar el álbum. Intenta de nuevo con imágenes más pequeñas."
+        )
+    finally:
+        context.user_data.pop("image_group_session", None)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10916,6 +11171,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await update.message.reply_text(error_msg)
             return
 
+    if await _try_collect_image_for_group_session(update, context, photo.file_id):
+        return
+
     await _schedule_image_batch_menu(update, context, photo.file_id)
 
 
@@ -10942,6 +11200,9 @@ async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TY
             logger.warning(f"[{correlation_id}] File size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
             return
+
+    if await _try_collect_image_for_group_session(update, context, document.file_id):
+        return
 
     await _schedule_image_batch_menu(update, context, document.file_id)
 
@@ -10983,14 +11244,33 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
         return
 
-    if len(file_ids) > 1 and action != "enhance":
+    if len(file_ids) > 1 and action not in ("enhance", "group"):
         await query.edit_message_text(
-            "Solo «Mejorar» está disponible para álbumes. "
+            "Solo «Mejorar» y «Agrupar» están disponibles para álbumes. "
             "Envía una imagen a la vez para otras acciones."
         )
         return
 
     logger.info(f"[{correlation_id}] Image menu action '{action}' selected by user {user_id}")
+
+    if action == "group":
+        group_file_ids = list(file_ids) if file_ids else [file_id]
+        _start_image_group_session(context, group_file_ids, correlation_id)
+        count = len(group_file_ids)
+        prompt = (
+            f"📷 *Modo agrupación activado*\n\n"
+            f"Tienes *{count}* imagen(es). Envía más imágenes para agrupar "
+            f"(máximo {config.MAX_IMAGE_BATCH_SIZE}).\n\n"
+            "Cuando termines, presiona *Listo* para recibirlas como álbum."
+        )
+        if count < 2:
+            prompt += "\n\nNecesitas al menos 2 imágenes para crear un álbum."
+        await query.edit_message_text(
+            prompt,
+            parse_mode="Markdown",
+            reply_markup=_get_image_group_keyboard(count),
+        )
+        return
 
     if action == "compress":
         # Show compression quality selection
