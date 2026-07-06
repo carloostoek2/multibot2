@@ -27,6 +27,13 @@ def create_application() -> Application:
     """
     builder = ApplicationBuilder().token(config.BOT_TOKEN)
 
+    builder = (
+        builder.connect_timeout(config.TELEGRAM_API_TIMEOUT)
+        .read_timeout(config.TELEGRAM_API_TIMEOUT)
+        .write_timeout(config.TELEGRAM_API_TIMEOUT)
+        .pool_timeout(config.TELEGRAM_API_TIMEOUT)
+    )
+
     if config.TELEGRAM_LOCAL_MODE:
         file_base_url = config.TELEGRAM_API_FILE_BASE_URL or derive_file_base_url(
             config.TELEGRAM_API_BASE_URL
@@ -35,10 +42,6 @@ def create_application() -> Application:
             builder.base_url(config.TELEGRAM_API_BASE_URL)
             .base_file_url(file_base_url)
             .local_mode(True)
-            .connect_timeout(config.TELEGRAM_API_TIMEOUT)
-            .read_timeout(config.TELEGRAM_API_TIMEOUT)
-            .write_timeout(config.TELEGRAM_API_TIMEOUT)
-            .pool_timeout(config.TELEGRAM_API_TIMEOUT)
         )
         logger.info(
             "Local Bot API enabled: base_url=%s, file_base_url=%s, max_upload=%dMB, timeout=%ss",
@@ -49,8 +52,9 @@ def create_application() -> Application:
         )
     else:
         logger.info(
-            "Using Telegram cloud API (max upload: %dMB)",
+            "Using Telegram cloud API (max upload: %dMB, timeout=%ss)",
             config.TELEGRAM_MAX_UPLOAD_SIZE_MB,
+            config.TELEGRAM_API_TIMEOUT,
         )
 
     return builder.build()

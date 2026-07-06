@@ -28,9 +28,13 @@ class TestTelegramClient:
     """Validate Application builder configuration."""
 
     @patch("bot.telegram_client.ApplicationBuilder")
-    def test_cloud_mode_uses_token_only(self, mock_builder_cls):
+    def test_cloud_mode_configures_timeouts(self, mock_builder_cls):
         mock_builder = MagicMock()
         mock_builder.token.return_value = mock_builder
+        mock_builder.connect_timeout.return_value = mock_builder
+        mock_builder.read_timeout.return_value = mock_builder
+        mock_builder.write_timeout.return_value = mock_builder
+        mock_builder.pool_timeout.return_value = mock_builder
         mock_builder.build.return_value = MagicMock()
         mock_builder_cls.return_value = mock_builder
 
@@ -40,6 +44,10 @@ class TestTelegramClient:
         mock_builder.token.assert_called_once_with("test-token")
         mock_builder.base_url.assert_not_called()
         mock_builder.local_mode.assert_not_called()
+        mock_builder.connect_timeout.assert_called_once_with(45.0)
+        mock_builder.read_timeout.assert_called_once_with(45.0)
+        mock_builder.write_timeout.assert_called_once_with(45.0)
+        mock_builder.pool_timeout.assert_called_once_with(45.0)
 
     @patch("bot.telegram_client.ApplicationBuilder")
     def test_local_mode_configures_base_url_and_timeouts(self, mock_builder_cls):

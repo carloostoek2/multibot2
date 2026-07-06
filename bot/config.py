@@ -31,7 +31,7 @@ class BotConfig:
     TELEGRAM_LOCAL_MODE: bool = False
     TELEGRAM_API_BASE_URL: Optional[str] = None
     TELEGRAM_API_FILE_BASE_URL: Optional[str] = None
-    TELEGRAM_API_TIMEOUT: float = 30.0
+    TELEGRAM_API_TIMEOUT: float = 120.0
     TELEGRAM_MAX_UPLOAD_SIZE_MB: int = TELEGRAM_CLOUD_MAX_UPLOAD_MB
 
     # Timeouts (seconds)
