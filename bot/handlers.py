@@ -4,8 +4,9 @@ import logging
 import os
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ChatType
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -38,6 +39,7 @@ from bot.error_handler import (
     ImageConversionError,
     ImageResizeError,
     ImageEnhancementError,
+    ImageNoiseError,
     handle_processing_error,
     get_user_error_message,
     DEFAULT_ERROR_MESSAGE,
@@ -58,7 +60,12 @@ from bot.audio_format_converter import AudioFormatConverter, detect_audio_format
 from bot.audio_enhancer import AudioEnhancer
 from bot.audio_effects import AudioEffects
 from bot.screenshot_processor import ScreenshotProcessor
-from bot.image_processor import ImageProcessor, SUPPORTED_IMAGE_FORMATS, ENHANCEMENT_PROFILES
+from bot.image_processor import (
+    ImageProcessor,
+    SUPPORTED_IMAGE_FORMATS,
+    ENHANCEMENT_PROFILES,
+    NOISE_STRENGTH_LEVELS,
+)
 
 # Import downloaders for URL handling
 from bot.downloaders import (
@@ -120,6 +127,9 @@ def _get_message_audio_source(message) -> tuple[str | None, int | None, str | No
 async def _download_with_retry(file, destination_path: str, max_retries: int = 3, correlation_id: str = None) -> bool:
     """Download file with retry logic for transient failures.
 
+    With local Bot API, copies from a shared filesystem when available and
+    otherwise downloads via the configured local file endpoint.
+
     Args:
         file: Telegram file object to download
         destination_path: Path to save the file
@@ -132,11 +142,19 @@ async def _download_with_retry(file, destination_path: str, max_retries: int = 3
     Raises:
         NetworkError, TimedOut: If all retries exhausted
     """
+    import shutil
+
     cid = correlation_id or "no-cid"
+
+    if file.file_path and os.path.isfile(file.file_path):
+        shutil.copy2(file.file_path, destination_path)
+        logger.info(f"[{cid}] File copied from shared path to {destination_path}")
+        return True
+
     for attempt in range(max_retries):
         try:
             await file.download_to_drive(destination_path)
-            logger.info(f"[{cid}] Video downloaded to {destination_path}")
+            logger.info(f"[{cid}] File downloaded to {destination_path}")
             return True
         except (NetworkError, TimedOut) as e:
             if attempt < max_retries - 1:
@@ -269,7 +287,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     video = update.message.video
     if video.file_size:
         logger.debug(f"[{correlation_id}] Video file size: {video.file_size} bytes")
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -320,7 +338,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "💡 También puedes usar los menús inline:\n"
         "- Envía un video → Menú con opciones (Nota de Video, Extraer Audio, Merge con Audio, etc.)\n"
         "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)\n"
-        "- Envía una foto o imagen → Menú con opciones (Comprimir, Convertir, Redimensionar, Info)\n"
+        "- Envía una foto o imagen → Menú con opciones (Comprimir, Convertir, Redimensionar, Naturalizar, Info)\n"
         "- Envía un enlace de video → Menú de descarga con opciones combinadas"
     )
 
@@ -389,7 +407,7 @@ async def handle_convert_command(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -535,7 +553,7 @@ async def handle_extract_audio_command(update: Update, context: ContextTypes.DEF
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -689,7 +707,7 @@ async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -959,7 +977,7 @@ async def handle_split_audio_command(update: Update, context: ContextTypes.DEFAU
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -1288,7 +1306,7 @@ async def handle_join_video(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     # Validate file size before downloading
     if video.file_size:
-        is_valid, error_msg = validate_file_size(video.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(video.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -1740,7 +1758,7 @@ async def handle_join_audio_file(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if file_size:
-        is_valid, error_msg = validate_file_size(file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -2106,7 +2124,7 @@ async def _show_audio_menu_for_file(
 
     if file_size:
         logger.debug(f"[{correlation_id}] Audio file size: {file_size} bytes")
-        is_valid, error_msg = validate_file_size(file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(
                 f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}"
@@ -2206,7 +2224,7 @@ async def handle_merge_audio_received(update: Update, context: ContextTypes.DEFA
 
     # Validate file size
     if audio_file_size:
-        is_valid, error_msg = validate_file_size(audio_file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio_file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] Audio file size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -2893,7 +2911,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Validate file size before downloading
     if voice.file_size:
         logger.debug(f"[{correlation_id}] Voice file size: {voice.file_size} bytes")
-        is_valid, error_msg = validate_file_size(voice.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(voice.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3127,7 +3145,7 @@ async def handle_convert_audio_command(update: Update, context: ContextTypes.DEF
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3340,7 +3358,7 @@ async def handle_bass_boost_command(update: Update, context: ContextTypes.DEFAUL
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3403,7 +3421,7 @@ async def handle_treble_boost_command(update: Update, context: ContextTypes.DEFA
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -3808,7 +3826,7 @@ async def handle_equalize_command(update: Update, context: ContextTypes.DEFAULT_
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -4101,7 +4119,7 @@ async def handle_denoise_command(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -4166,7 +4184,7 @@ async def handle_compress_command(update: Update, context: ContextTypes.DEFAULT_
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -4428,7 +4446,7 @@ async def handle_normalize_command(update: Update, context: ContextTypes.DEFAULT
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -4781,6 +4799,146 @@ async def handle_audio_3d_selection(update: Update, context: ContextTypes.DEFAUL
 # =============================================================================
 
 
+async def handle_audio_pitch_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle pitch shift intensity selection callback from inline keyboard."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    if not callback_data or not callback_data.startswith("audio_pitch:"):
+        logger.warning(f"Invalid callback data received: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    parts = callback_data.split(":")
+    if len(parts) != 2:
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    intensity = parts[1]
+    intensity_labels = {
+        "grave": "Grave",
+        "agudo": "Agudo",
+        "muy_agudo": "Muy agudo",
+    }
+
+    if intensity not in intensity_labels:
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    file_id = context.user_data.get("effect_audio_file_id")
+    correlation_id = context.user_data.get("effect_audio_correlation_id", str(uuid.uuid4())[:8])
+    stored_effect_type = context.user_data.get("effect_type")
+
+    if not file_id:
+        await query.edit_message_text("Error: no se encontró el archivo de audio. Intenta de nuevo.")
+        return
+
+    if stored_effect_type and stored_effect_type != "pitch_shift":
+        logger.warning(
+            f"[{correlation_id}] Mismatch: stored={stored_effect_type}, callback=pitch_shift"
+        )
+
+    intensity_label = intensity_labels[intensity]
+    logger.info(
+        f"[{correlation_id}] Pitch shift intensity '{intensity}' selected by user {user_id}"
+    )
+
+    try:
+        await query.edit_message_text(f"Aplicando cambio de tono ({intensity_label})...")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Could not update message: {e}")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_filename = f"input_{user_id}_{correlation_id}.audio"
+            output_filename = f"pitch_{user_id}_{correlation_id}.mp3"
+            input_path = temp_mgr.get_temp_path(input_filename)
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(f"[{correlation_id}] Downloading audio from user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download audio: {e}")
+                raise DownloadError("No pude descargar el audio") from e
+
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                raise ValidationError(error_msg)
+
+            audio_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
+            required_space = estimate_required_space(int(audio_size_mb))
+            has_space, space_error = check_disk_space(required_space)
+            if not has_space:
+                raise ValidationError(space_error)
+
+            logger.info(f"[{correlation_id}] Applying pitch shift ({intensity}) for user {user_id}")
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(input_path), str(output_path))
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.pitch_shift, intensity),
+                    timeout=config.PROCESSING_TIMEOUT,
+                )
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El cambio de tono tardó demasiado") from e
+
+            doc_filename = f"pitch_shift_{intensity}_{correlation_id}.mp3"
+            document_sent = False
+            with open(output_path, "rb") as audio_file:
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=audio_file,
+                    filename="pitch_shift.mp3",
+                    title=f"Audio con cambio de tono ({intensity_label})",
+                )
+                try:
+                    audio_file.seek(0)
+                    await context.bot.send_document(
+                        chat_id=update.effective_chat.id,
+                        document=audio_file,
+                        filename=doc_filename,
+                        caption=(
+                            f"Archivo MP3 con cambio de tono ({intensity_label}) "
+                            "para editores de video"
+                        ),
+                    )
+                    document_sent = True
+                except Exception as doc_error:
+                    logger.warning(
+                        f"[{correlation_id}] Audio sent but document delivery failed: {doc_error}"
+                    )
+
+            success_msg = f"¡Listo! Cambio de tono aplicado con intensidad {intensity_label}."
+            if not document_sent:
+                success_msg += (
+                    "\n\n(No pude enviar el archivo MP3 como documento; "
+                    "usa el audio de arriba.)"
+                )
+            await query.edit_message_text(success_msg)
+
+            context.user_data.pop("effect_audio_file_id", None)
+            context.user_data.pop("effect_audio_correlation_id", None)
+            context.user_data.pop("effect_type", None)
+
+        except (DownloadError, ValidationError, AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Pitch shift processing error: {e}")
+            try:
+                await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying pitch shift: {e}")
+            try:
+                await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+            except Exception as edit_error:
+                logger.warning(f"[{correlation_id}] Could not update error message: {edit_error}")
+
+
 def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
     """Generate inline keyboard for audio menu options.
 
@@ -4804,6 +4962,7 @@ def _get_audio_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("Efecto 3D", callback_data="audio_action:stereo_3d"),
+            InlineKeyboardButton("Cambiar Pitch", callback_data="audio_action:pitch_shift"),
         ],
         [
             InlineKeyboardButton("Dividir Audio", callback_data="audio_action:split"),
@@ -5053,6 +5212,30 @@ async def handle_audio_menu_callback(update: Update, context: ContextTypes.DEFAU
             "• Suave - ampliación estéreo ligera\n"
             "• Medio - efecto equilibrado\n"
             "• Intenso - ampliación estéreo marcada",
+            reply_markup=reply_markup
+        )
+
+    elif action == "pitch_shift":
+        context.user_data["effect_audio_file_id"] = file_id
+        context.user_data["effect_audio_correlation_id"] = correlation_id
+        context.user_data["effect_type"] = "pitch_shift"
+        keyboard = [
+            [
+                InlineKeyboardButton("Grave", callback_data="audio_pitch:grave"),
+                InlineKeyboardButton("Agudo", callback_data="audio_pitch:agudo"),
+                InlineKeyboardButton("Muy Agudo", callback_data="audio_pitch:muy_agudo"),
+            ],
+            [
+                InlineKeyboardButton("<- Volver", callback_data="back:audio"),
+                InlineKeyboardButton("Cancelar", callback_data="cancel"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Selecciona el cambio de tono:\n\n"
+            "• Grave - tono más grave (-3.5 semitonos)\n"
+            "• Agudo - tono más agudo (+3.5 semitonos)\n"
+            "• Muy Agudo - tono muy agudo (+6.5 semitonos)",
             reply_markup=reply_markup
         )
 
@@ -5471,7 +5654,7 @@ async def handle_effects_command(update: Update, context: ContextTypes.DEFAULT_T
 
     # Validate file size before downloading
     if audio.file_size:
-        is_valid, error_msg = validate_file_size(audio.file_size, config.MAX_AUDIO_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(audio.file_size, config.max_incoming_audio_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed for user {user_id}: {error_msg}")
             await update.message.reply_text(error_msg)
@@ -6798,7 +6981,7 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if count > 1:
             menu_text = (
                 f"{count} imágenes recibidas.\n\n"
-                "Solo «Mejorar» procesa todas las imágenes del álbum. "
+                "«Mejorar», «Naturalizar» y «Agrupar» procesan todas las imágenes del álbum. "
                 "Selecciona una acción:"
             )
         else:
@@ -6822,8 +7005,33 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 # Import PlatformRouter for metadata extraction
 from bot.downloaders.platform_router import PlatformRouter
 
-# Constants
-TELEGRAM_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# Telegram upload limit (50MB cloud, up to 2000MB with local Bot API)
+TELEGRAM_MAX_FILE_SIZE = config.telegram_max_upload_bytes
+
+
+@contextmanager
+def _open_file_for_send(file_path: str) -> Iterator[Any]:
+    """Yield an open file handle for Telegram uploads.
+
+    Local Bot API raises the upload limit to 2000MB via multipart uploads.
+    File paths are only used when bot and API share the same filesystem.
+    """
+    abs_path = os.path.abspath(file_path)
+    file_handle = open(abs_path, "rb")
+    try:
+        yield file_handle
+    finally:
+        file_handle.close()
+
+
+def _get_download_max_filesize_mb() -> int:
+    """Return the configured download size limit in megabytes."""
+    return config.DOWNLOAD_MAX_SIZE_MB
+
+
+def _media_input(file_path: str) -> Any:
+    """Return an open file handle for Telegram media uploads."""
+    return open(os.path.abspath(file_path), "rb")
 
 
 def _detect_platform_for_display(url: str) -> str:
@@ -6959,7 +7167,8 @@ def _get_error_message_for_exception(e: Exception, url: str, correlation_id: str
     # File too large for Telegram
     if "file is too big" in error_msg or "too large" in error_msg or "entity too large" in error_msg:
         logger.warning(f"[{correlation_id}] File too large for Telegram: {e}")
-        return "El archivo excede el límite de Telegram (50MB)."
+        max_mb = config.TELEGRAM_MAX_UPLOAD_SIZE_MB
+        return f"El archivo excede el límite de Telegram ({max_mb}MB)."
 
     # Generic download errors
     if "404" in error_msg or "not found" in error_msg:
@@ -7124,6 +7333,9 @@ async def handle_url_detection(update: Update, context: ContextTypes.DEFAULT_TYP
         update: Telegram update object
         context: Telegram context object
     """
+    if await _try_collect_caption_for_group_session(update, context):
+        return
+
     message_text = update.message.text
     user_id = update.effective_user.id
 
@@ -7666,11 +7878,10 @@ async def _start_download(
 
         # Download with progress callback integration
         # IMPORTANT: cleanup_on_success=False so file remains for sending
-        # max_filesize_mb=500 allows downloads up to 500MB (auto-split handles >50MB)
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
             'cleanup_on_success': False,
-            'max_filesize_mb': 500,
+            'max_filesize_mb': _get_download_max_filesize_mb(),
         }
 
         # Capture pre-delay text to avoid "Analizando" -> "Descargando" jump on restore (Issue 11)
@@ -8045,6 +8256,8 @@ def _build_caption_from_metadata(metadata: dict, default_title: str = "Descarga"
 def _split_file_if_needed(file_path: str, output_dir: str, correlation_id: str) -> list[str]:
     """Check file size and split if exceeds Telegram limit.
 
+    With local Bot API enabled, files up to 2000MB are sent without splitting.
+
     Args:
         file_path: Path to the file to check
         output_dir: Directory for output segments
@@ -8058,17 +8271,24 @@ def _split_file_if_needed(file_path: str, output_dir: str, correlation_id: str) 
     file_size = os.path.getsize(file_path)
     logger.info(f"[{correlation_id}] File size: {file_size / (1024 * 1024):.1f} MB")
 
-    if file_size <= TELEGRAM_MAX_FILE_SIZE:
+    max_file_size = config.telegram_max_upload_bytes
+    if file_size <= max_file_size:
         logger.info(f"[{correlation_id}] File within Telegram limit, no splitting needed")
         return [file_path]
 
-    # File exceeds Telegram limit - need to split
-    file_size_mb = file_size / (1024 * 1024)
-    max_size_mb = TELEGRAM_MAX_FILE_SIZE / (1024 * 1024)
+    if config.TELEGRAM_LOCAL_MODE:
+        logger.info(
+            f"[{correlation_id}] Local Bot API enabled — sending file without splitting "
+            f"({file_size / (1024 * 1024):.1f} MB)"
+        )
+        return [file_path]
+
+    # File exceeds cloud Telegram limit - need to split
+    max_size_mb = max_file_size / (1024 * 1024)
     logger.info(f"[{correlation_id}] File exceeds {max_size_mb:.0f}MB limit, splitting required")
 
     # Calculate number of parts needed (add 1 to ensure each part is under limit)
-    num_parts = int((file_size / TELEGRAM_MAX_FILE_SIZE) + 1)
+    num_parts = int((file_size / max_file_size) + 1)
     # Limit to prevent too many parts
     num_parts = min(10, max(1, num_parts))
 
@@ -8166,19 +8386,19 @@ async def _send_downloaded_file_with_menu(
                 try:
                     if file_ext in image_extensions:
                         media_group.append(InputMediaPhoto(
-                            media=open(file_path, 'rb'),
+                            media=_media_input(file_path),
                             caption=caption if i == 0 else None
                         ))
                     elif file_ext in video_extensions:
                         media_group.append(InputMediaVideo(
-                            media=open(file_path, 'rb'),
+                            media=_media_input(file_path),
                             caption=caption if i == 0 else None,
                             supports_streaming=True
                         ))
                     else:
                         # Audio or unknown - add as photo for now (fallback)
                         media_group.append(InputMediaPhoto(
-                            media=open(file_path, 'rb'),
+                            media=_media_input(file_path),
                             caption=caption if i == 0 else None
                         ))
                 except Exception as file_err:
@@ -8206,13 +8426,13 @@ async def _send_downloaded_file_with_menu(
 
                     try:
                         if file_ext in image_extensions:
-                            with open(file_path, 'rb') as photo_file:
+                            with _open_file_for_send(file_path) as photo_file:
                                 await message.reply_photo(
                                     photo=photo_file,
                                     caption=item_caption
                                 )
                         elif file_ext in video_extensions:
-                            with open(file_path, 'rb') as video_file:
+                            with _open_file_for_send(file_path) as video_file:
                                 sent_msg = await message.reply_video(
                                     video=video_file,
                                     caption=item_caption,
@@ -8220,7 +8440,7 @@ async def _send_downloaded_file_with_menu(
                                 )
                             has_video_menu = True
                         elif file_ext in audio_extensions:
-                            with open(file_path, 'rb') as audio_file:
+                            with _open_file_for_send(file_path) as audio_file:
                                 await message.reply_audio(
                                     audio=audio_file,
                                     caption=item_caption,
@@ -8229,7 +8449,7 @@ async def _send_downloaded_file_with_menu(
                                 )
                         else:
                             # Fallback: send as document
-                            with open(file_path, 'rb') as doc_file:
+                            with _open_file_for_send(file_path) as doc_file:
                                 await message.reply_document(
                                     document=doc_file,
                                     caption=item_caption
@@ -8271,7 +8491,7 @@ async def _send_downloaded_file_with_menu(
 
                 if format_type == 'audio' or file_ext in audio_extensions:
                     # Send as audio
-                    with open(part_path, 'rb') as audio_file:
+                    with _open_file_for_send(part_path) as audio_file:
                         await message.reply_audio(
                             audio=audio_file,
                             caption=part_caption,
@@ -8280,14 +8500,14 @@ async def _send_downloaded_file_with_menu(
                         )
                 elif file_ext in image_extensions:
                     # Send as photo
-                    with open(part_path, 'rb') as photo_file:
+                    with _open_file_for_send(part_path) as photo_file:
                         await message.reply_photo(
                             photo=photo_file,
                             caption=part_caption
                         )
                 else:
                     # Send as video
-                    with open(part_path, 'rb') as video_file:
+                    with _open_file_for_send(part_path) as video_file:
                         sent_message = await message.reply_video(
                             video=video_file,
                             caption=part_caption,
@@ -8448,11 +8668,10 @@ async def _start_combined_download(
 
         # Download with progress callback integration
         # IMPORTANT: cleanup_on_success=False so file remains for sending
-        # max_filesize_mb=500 allows downloads up to 500MB (auto-split handles >50MB)
         config_overrides = {
             'extract_audio': (format_type == 'audio'),
             'cleanup_on_success': False,
-            'max_filesize_mb': 500,
+            'max_filesize_mb': _get_download_max_filesize_mb(),
         }
 
         # Apply Instagram inter-download delay before starting (notify user during wait)
@@ -9106,6 +9325,23 @@ def _get_postdownload_audio_more_keyboard(correlation_id: str) -> InlineKeyboard
         ],
         [
             InlineKeyboardButton("Efecto 3D", callback_data=f"postdownload:stereo_3d:{correlation_id}"),
+            InlineKeyboardButton("Cambiar Pitch", callback_data=f"postdownload:pitch_shift:{correlation_id}"),
+        ],
+        [
+            InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
+            InlineKeyboardButton("Nada", callback_data=f"postdownload:nothing:{correlation_id}"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_postdownload_pitch_shift_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for pitch shift intensity selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Grave", callback_data=f"postdownload:pitch_shift_intensity:{correlation_id}:grave"),
+            InlineKeyboardButton("Agudo", callback_data=f"postdownload:pitch_shift_intensity:{correlation_id}:agudo"),
+            InlineKeyboardButton("Muy Agudo", callback_data=f"postdownload:pitch_shift_intensity:{correlation_id}:muy_agudo"),
         ],
         [
             InlineKeyboardButton("Volver", callback_data=f"postdownload:back_audio:{correlation_id}"),
@@ -9525,6 +9761,15 @@ async def handle_postdownload_audio_callback(update: Update, context: ContextTyp
             "• Suave - ampliación estéreo ligera\n"
             "• Medio - efecto equilibrado\n"
             "• Intenso - ampliación estéreo marcada",
+            reply_markup=reply_markup,
+        )
+    elif action == "pitch_shift":
+        reply_markup = _get_postdownload_pitch_shift_keyboard(correlation_id)
+        await query.edit_message_text(
+            "Selecciona el cambio de tono:\n\n"
+            "• Grave - tono más grave (-3.5 semitonos)\n"
+            "• Agudo - tono más agudo (+3.5 semitonos)\n"
+            "• Muy Agudo - tono muy agudo (+6.5 semitonos)",
             reply_markup=reply_markup,
         )
     elif action == "more":
@@ -10147,6 +10392,135 @@ async def _handle_postdownload_stereo_3d(
             await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
 
 
+async def handle_postdownload_pitch_shift_intensity_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle post-download pitch shift intensity selection callbacks."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    # Parse: postdownload:pitch_shift_intensity:CORRELATION_ID:INTENSITY
+    parts = callback_data.split(":")
+    if len(parts) != 4:
+        logger.warning(f"Invalid callback data format: {callback_data}")
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    correlation_id = parts[2]
+    intensity = parts[3].lower()
+    intensity_labels = {
+        "grave": "Grave",
+        "agudo": "Agudo",
+        "muy_agudo": "Muy agudo",
+    }
+
+    if intensity not in intensity_labels:
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    logger.info(
+        f"[{correlation_id}] Post-download pitch shift intensity '{intensity}' "
+        f"selected by user {user_id}"
+    )
+
+    from bot.downloaders import get_user_download_session
+    session = get_user_download_session(context)
+    entry = session.get(correlation_id)
+
+    if not entry:
+        await query.edit_message_text(
+            "Error: No se encontró la información de la descarga. El archivo puede haber sido eliminado."
+        )
+        return
+
+    if not os.path.exists(entry.file_path):
+        await query.edit_message_text("Error: El archivo ya no está disponible. Fue eliminado automáticamente.")
+        return
+
+    await _handle_postdownload_pitch_shift(
+        update, context, entry, correlation_id, intensity, intensity_labels[intensity]
+    )
+
+
+async def _handle_postdownload_pitch_shift(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    entry: Any,
+    correlation_id: str,
+    intensity: str,
+    intensity_label: str,
+) -> None:
+    """Apply pitch shift effect to downloaded audio."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    file_path = entry.file_path
+
+    await query.edit_message_text(f"Aplicando cambio de tono ({intensity_label})...")
+
+    with TempManager() as temp_mgr:
+        try:
+            output_filename = f"pitch_{user_id}_{correlation_id}.mp3"
+            output_path = temp_mgr.get_temp_path(output_filename)
+
+            logger.info(
+                f"[{correlation_id}] Applying pitch shift ({intensity}) for user {user_id}"
+            )
+            try:
+                loop = asyncio.get_event_loop()
+                effects = AudioEffects(str(file_path), str(output_path))
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, effects.pitch_shift, intensity),
+                    timeout=config.PROCESSING_TIMEOUT,
+                )
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("El procesamiento tardó demasiado") from e
+
+            doc_filename = f"pitch_shift_{intensity}_{correlation_id}.mp3"
+            document_sent = False
+            logger.info(f"[{correlation_id}] Sending pitch shift audio to user {user_id}")
+            with open(output_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    filename=doc_filename,
+                    title=f"Audio con cambio de tono ({intensity_label})",
+                )
+                try:
+                    audio_file.seek(0)
+                    await query.message.reply_document(
+                        document=audio_file,
+                        filename=doc_filename,
+                        caption=(
+                            f"Archivo MP3 con cambio de tono ({intensity_label}) "
+                            "para editores de video"
+                        ),
+                    )
+                    document_sent = True
+                except Exception as doc_error:
+                    logger.warning(
+                        f"[{correlation_id}] Audio sent but document delivery failed: {doc_error}"
+                    )
+
+            reply_markup = _get_postdownload_audio_keyboard(correlation_id)
+            ready_msg = "¡Listo! ¿Quieres hacer algo más con este audio?"
+            if not document_sent:
+                ready_msg += (
+                    "\n\n(No pude enviar el archivo MP3 como documento; "
+                    "usa el audio de arriba.)"
+                )
+            await query.message.reply_text(ready_msg, reply_markup=reply_markup)
+            logger.info(f"[{correlation_id}] Pitch shift audio sent successfully to user {user_id}")
+
+        except (AudioEffectsError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Pitch shift processing failed: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying pitch shift: {e}")
+            await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+
+
 async def _handle_postdownload_treble_boost(
     update: Update, context: ContextTypes.DEFAULT_TYPE, entry: Any, correlation_id: str, intensity: int
 ) -> None:
@@ -10391,7 +10765,7 @@ async def _send_image_menu_message(
     if count > 1:
         text = (
             f"{count} imágenes recibidas.\n\n"
-            "Solo «Mejorar» procesa todas las imágenes del álbum. "
+            "«Mejorar», «Naturalizar» y «Agrupar» procesan todas las imágenes del álbum. "
             "Selecciona una acción:"
         )
     else:
@@ -10498,12 +10872,36 @@ async def _schedule_image_batch_menu(
     session["debounce_task"] = task
 
 
+def _get_image_noise_keyboard() -> InlineKeyboardMarkup:
+    """Inline keyboard for subtle noise intensity selection."""
+    keyboard = [
+        [
+            InlineKeyboardButton("1 · Muy sutil", callback_data="image_noise:1"),
+            InlineKeyboardButton("2 · Sutil", callback_data="image_noise:2"),
+            InlineKeyboardButton("3 · Normal", callback_data="image_noise:3"),
+        ],
+        [
+            InlineKeyboardButton("4 · Notable", callback_data="image_noise:4"),
+            InlineKeyboardButton("5 · Marcado", callback_data="image_noise:5"),
+        ],
+        [
+            InlineKeyboardButton("← Volver", callback_data="back:image"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
     """Generate inline keyboard for image processing menu."""
     if image_count > 1:
         keyboard = [
             [
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+                InlineKeyboardButton("Naturalizar", callback_data="image_action:noise"),
+            ],
+            [
+                InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
     else:
@@ -10518,9 +10916,352 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
+                InlineKeyboardButton("Naturalizar", callback_data="image_action:noise"),
+            ],
+            [
+                InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
     return InlineKeyboardMarkup(keyboard)
+
+
+IMAGE_GROUP_DEBOUNCE_SECONDS = 1.5
+TELEGRAM_MAX_CAPTION_LENGTH = 1024
+
+
+def _truncate_telegram_caption(text: str) -> str:
+    """Truncate text to Telegram's media caption limit."""
+    if len(text) <= TELEGRAM_MAX_CAPTION_LENGTH:
+        return text
+    return text[: TELEGRAM_MAX_CAPTION_LENGTH - 3].rsplit(" ", 1)[0] + "..."
+
+
+def _get_image_group_keyboard(image_count: int) -> InlineKeyboardMarkup:
+    """Generate inline keyboard for image group collection session."""
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Listo", callback_data="image_group_action:done"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="image_group_action:cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _get_image_group_session(context: ContextTypes.DEFAULT_TYPE) -> dict | None:
+    """Return the active image group session if it exists and is not expired."""
+    session = context.user_data.get("image_group_session")
+    if not session:
+        return None
+
+    current_time = asyncio.get_event_loop().time()
+    if current_time - session["last_activity"] > config.JOIN_SESSION_TIMEOUT:
+        context.user_data.pop("image_group_session", None)
+        return None
+
+    return session
+
+
+def _start_image_group_session(
+    context: ContextTypes.DEFAULT_TYPE,
+    file_ids: list[str],
+    correlation_id: str,
+) -> dict:
+    """Initialize an image group collection session."""
+    session = {
+        "file_ids": list(file_ids),
+        "caption": None,
+        "correlation_id": correlation_id,
+        "last_activity": asyncio.get_event_loop().time(),
+        "debounce_task": None,
+        "pending_album_ids": [],
+    }
+    context.user_data["image_group_session"] = session
+    return session
+
+
+async def _send_album_from_file_ids(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_ids: list[str],
+    correlation_id: str,
+    caption: str | None = None,
+) -> None:
+    """Send images as one or more Telegram albums using stored file IDs."""
+    from telegram import InputMediaPhoto
+
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    album_size = min(config.MAX_IMAGE_BATCH_SIZE, 10)
+    total = len(file_ids)
+
+    logger.info(
+        f"[{correlation_id}] Sending {total} grouped images in albums to user {user_id}"
+        + (" with caption" if caption else "")
+    )
+
+    effective_message = update.callback_query.message if update.callback_query else update.message
+
+    for i in range(0, total, album_size):
+        batch = file_ids[i:i + album_size]
+        media_group = []
+        for j, file_id in enumerate(batch):
+            item_caption = caption if i == 0 and j == 0 and caption else None
+            media_group.append(InputMediaPhoto(media=file_id, caption=item_caption))
+
+        if effective_message:
+            await effective_message.reply_media_group(media=media_group)
+        else:
+            await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+
+
+def _format_image_group_inventory(
+    image_count: int,
+    has_caption: bool = False,
+) -> str:
+    """Describe current image group session contents."""
+    parts = [f"*{image_count}* imagen(es)"]
+    if has_caption:
+        parts.append("*caption*")
+    inventory = " y ".join(parts)
+    return f"Actualmente tienes: {inventory} (máximo {config.MAX_IMAGE_BATCH_SIZE})."
+
+
+def _format_image_group_footer(image_count: int) -> str:
+    """Return guidance text for incomplete image group sessions."""
+    if image_count < 2:
+        return "\n\nNecesitas al menos 2 imágenes para crear un álbum."
+    return ""
+
+
+async def _notify_image_group_progress(
+    update: Update,
+    added_count: int,
+    total_count: int,
+    truncated: bool = False,
+    has_caption: bool = False,
+) -> None:
+    """Send a status message during image group collection."""
+    text = (
+        f"✓ {added_count} imagen(es) agregada(s).\n\n"
+        f"{_format_image_group_inventory(total_count, has_caption=has_caption)}"
+    )
+    if truncated:
+        text += (
+            f"\n\n⚠️ Se alcanzó el máximo de {config.MAX_IMAGE_BATCH_SIZE} imágenes. "
+            "Las adicionales fueron ignoradas."
+        )
+    text += _format_image_group_footer(total_count)
+
+    await update.message.reply_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=_get_image_group_keyboard(total_count),
+    )
+
+
+async def _add_images_to_group_session(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    new_file_ids: list[str],
+) -> None:
+    """Append images to the active group session and notify the user."""
+    session = _get_image_group_session(context)
+    if not session:
+        return
+
+    added_count = 0
+    truncated = False
+    for file_id in new_file_ids:
+        if len(session["file_ids"]) >= config.MAX_IMAGE_BATCH_SIZE:
+            truncated = True
+            break
+        session["file_ids"].append(file_id)
+        added_count += 1
+
+    session["last_activity"] = asyncio.get_event_loop().time()
+
+    if added_count == 0 and truncated:
+        await update.message.reply_text(
+            f"⚠️ Ya tienes el máximo de {config.MAX_IMAGE_BATCH_SIZE} imágenes.\n"
+            "Presiona *Listo* para recibir el álbum o *Cancelar* para salir.",
+            parse_mode="Markdown",
+            reply_markup=_get_image_group_keyboard(len(session["file_ids"])),
+        )
+        return
+
+    await _notify_image_group_progress(
+        update,
+        added_count,
+        len(session["file_ids"]),
+        truncated=truncated,
+        has_caption=bool(session.get("caption")),
+    )
+
+
+async def _schedule_image_group_batch(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+) -> None:
+    """Accumulate album images into an active group session after debounce."""
+    session = _get_image_group_session(context)
+    if not session:
+        return
+
+    session["pending_album_ids"].append(file_id)
+    session["last_activity"] = asyncio.get_event_loop().time()
+
+    debounce_task = session.get("debounce_task")
+    if debounce_task and not debounce_task.done():
+        debounce_task.cancel()
+
+    async def _debounced_add() -> None:
+        current_task = asyncio.current_task()
+        cancelled = False
+        try:
+            await asyncio.sleep(IMAGE_GROUP_DEBOUNCE_SECONDS)
+            pending_ids = list(session["pending_album_ids"])
+            session["pending_album_ids"] = []
+            await _add_images_to_group_session(update, context, pending_ids)
+        except asyncio.CancelledError:
+            cancelled = True
+            return
+        finally:
+            if not cancelled and session.get("debounce_task") is current_task:
+                session["debounce_task"] = None
+
+    task = asyncio.create_task(_debounced_add())
+    session["debounce_task"] = task
+
+
+async def _try_collect_image_for_group_session(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    file_id: str,
+) -> bool:
+    """Collect an image for an active group session. Returns True if handled."""
+    session = _get_image_group_session(context)
+    if not session:
+        return False
+
+    message = update.message
+    if message.media_group_id:
+        await _schedule_image_group_batch(update, context, file_id)
+        return True
+
+    await _add_images_to_group_session(update, context, [file_id])
+    return True
+
+
+async def _try_collect_caption_for_group_session(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> bool:
+    """Collect album caption text for an active group session. Returns True if handled."""
+    session = _get_image_group_session(context)
+    if not session:
+        return False
+
+    text = (update.message.text or "").strip()
+    if not text:
+        return False
+
+    session["caption"] = _truncate_telegram_caption(text)
+    session["last_activity"] = asyncio.get_event_loop().time()
+
+    image_count = len(session["file_ids"])
+    status_text = (
+        "✓ Caption guardado para el álbum.\n\n"
+        f"{_format_image_group_inventory(image_count, has_caption=True)}"
+    )
+    status_text += _format_image_group_footer(image_count)
+
+    await update.message.reply_text(
+        status_text,
+        parse_mode="Markdown",
+        reply_markup=_get_image_group_keyboard(image_count),
+    )
+    return True
+
+
+async def handle_image_group_s_caption_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handle /s captions during image group sessions.
+
+    Telegram treats messages starting with / as commands, so they bypass the
+    regular text handler. When grouping images, /s ... is stored verbatim
+    (command + caption) for use on the generated album.
+    """
+    if not await _try_collect_caption_for_group_session(update, context):
+        return
+
+
+async def handle_image_group_callback(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handle done/cancel actions for image group collection sessions."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+    if not callback_data or not callback_data.startswith("image_group_action:"):
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    action = callback_data.split(":")[1]
+    session = _get_image_group_session(context)
+    if not session:
+        await query.edit_message_text("No hay una sesión de agrupación activa.")
+        return
+
+    correlation_id = session.get("correlation_id", str(uuid.uuid4())[:8])
+
+    if action == "cancel":
+        context.user_data.pop("image_group_session", None)
+        await query.edit_message_text("Agrupación cancelada.")
+        logger.info(f"[{correlation_id}] Image group session cancelled by user {user_id}")
+        return
+
+    if action != "done":
+        await query.edit_message_text("Error: selección inválida.")
+        return
+
+    file_ids = session["file_ids"]
+    if len(file_ids) < 2:
+        await query.answer(
+            "Necesitas al menos 2 imágenes para crear un álbum.",
+            show_alert=True,
+        )
+        return
+
+    await query.edit_message_text(f"Enviando álbum con {len(file_ids)} imágenes...")
+
+    caption = session.get("caption")
+
+    try:
+        await _send_album_from_file_ids(
+            update, context, file_ids, correlation_id, caption=caption
+        )
+        success_text = f"✅ Álbum enviado con {len(file_ids)} imágenes."
+        if caption:
+            success_text += " Incluye caption."
+        await query.edit_message_text(success_text)
+        logger.info(
+            f"[{correlation_id}] Image group album sent to user {user_id} "
+            f"({len(file_ids)} images"
+            f"{', with caption' if caption else ''})"
+        )
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to send grouped album: {e}")
+        await query.edit_message_text(
+            "No pude enviar el álbum. Intenta de nuevo con imágenes más pequeñas."
+        )
+    finally:
+        context.user_data.pop("image_group_session", None)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10545,11 +11286,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # Validate file size
     if photo.file_size:
-        is_valid, error_msg = validate_file_size(photo.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(photo.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
             return
+
+    if await _try_collect_image_for_group_session(update, context, photo.file_id):
+        return
 
     await _schedule_image_batch_menu(update, context, photo.file_id)
 
@@ -10572,11 +11316,14 @@ async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Validate file size
     if document.file_size:
-        is_valid, error_msg = validate_file_size(document.file_size, config.MAX_FILE_SIZE_MB)
+        is_valid, error_msg = validate_file_size(document.file_size, config.max_incoming_file_size_mb)
         if not is_valid:
             logger.warning(f"[{correlation_id}] File size validation failed: {error_msg}")
             await update.message.reply_text(error_msg)
             return
+
+    if await _try_collect_image_for_group_session(update, context, document.file_id):
+        return
 
     await _schedule_image_batch_menu(update, context, document.file_id)
 
@@ -10618,14 +11365,34 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
         return
 
-    if len(file_ids) > 1 and action != "enhance":
+    if len(file_ids) > 1 and action not in ("enhance", "group", "noise"):
         await query.edit_message_text(
-            "Solo «Mejorar» está disponible para álbumes. "
+            "Solo «Mejorar», «Naturalizar» y «Agrupar» están disponibles para álbumes. "
             "Envía una imagen a la vez para otras acciones."
         )
         return
 
     logger.info(f"[{correlation_id}] Image menu action '{action}' selected by user {user_id}")
+
+    if action == "group":
+        group_file_ids = list(file_ids) if file_ids else [file_id]
+        _start_image_group_session(context, group_file_ids, correlation_id)
+        count = len(group_file_ids)
+        prompt = (
+            f"📷 *Modo agrupación activado*\n\n"
+            f"Tienes *{count}* imagen(es). Envía más imágenes para agrupar "
+            f"(máximo {config.MAX_IMAGE_BATCH_SIZE}).\n"
+            "Opcional: envía un texto (o `/s ...`) y se usará como caption del álbum.\n\n"
+            "Cuando termines, presiona *Listo* para recibirlas como álbum."
+        )
+        if count < 2:
+            prompt += "\n\nNecesitas al menos 2 imágenes para crear un álbum."
+        await query.edit_message_text(
+            prompt,
+            parse_mode="Markdown",
+            reply_markup=_get_image_group_keyboard(count),
+        )
+        return
 
     if action == "compress":
         # Show compression quality selection
@@ -10728,6 +11495,17 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
             "• Nitidez - mayor definición\n"
             "• Equilibrado - mejora general balanceada\n"
             "• Suave - mejora sutil",
+            reply_markup=reply_markup
+        )
+
+    elif action == "noise":
+        reply_markup = _get_image_noise_keyboard()
+        await query.edit_message_text(
+            "Selecciona la intensidad del ruido sutil:\n\n"
+            "Añade textura fina para reducir el aspecto artificial de imágenes generadas con IA.\n"
+            "• 1-2 - casi imperceptible (recomendado para empezar)\n"
+            "• 3 - balance natural\n"
+            "• 4-5 - más textura, sin estilo vintage",
             reply_markup=reply_markup
         )
 
@@ -11140,7 +11918,7 @@ async def handle_image_enhance_callback(update: Update, context: ContextTypes.DE
     batch_timeout = min(180, 30 + 15 * count)
     batch_deadline = time.monotonic() + batch_timeout
 
-    required_space_mb = count * config.MAX_FILE_SIZE_MB * 2
+    required_space_mb = count * config.max_incoming_file_size_mb * 2
     has_space, space_error = check_disk_space(required_space_mb)
     if not has_space:
         await query.edit_message_text(space_error)
@@ -11242,6 +12020,145 @@ async def handle_image_enhance_callback(update: Update, context: ContextTypes.DE
             )
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error enhancing images: {e}")
+            await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+
+
+async def handle_image_noise_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle subtle noise intensity selection (supports batch albums)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data
+
+    try:
+        strength = int(callback_data.split(":")[1])
+    except (IndexError, ValueError):
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    if strength not in NOISE_STRENGTH_LEVELS:
+        await query.edit_message_text(f"Intensidad '{strength}' no soportada.")
+        return
+
+    file_ids = context.user_data.get("image_menu_file_ids")
+    if not file_ids:
+        single_id = context.user_data.get("image_menu_file_id")
+        file_ids = [single_id] if single_id else []
+
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_ids:
+        await query.edit_message_text("Error: no se encontraron imágenes. Intenta de nuevo.")
+        return
+
+    strength_label = NOISE_STRENGTH_LEVELS[strength]["label"]
+    count = len(file_ids)
+    batch_timeout = min(180, 30 + 15 * count)
+    batch_deadline = time.monotonic() + batch_timeout
+
+    required_space_mb = count * config.max_incoming_file_size_mb * 2
+    has_space, space_error = check_disk_space(required_space_mb)
+    if not has_space:
+        await query.edit_message_text(space_error)
+        return
+
+    logger.info(
+        f"[{correlation_id}] Applying subtle noise to {count} image(s) "
+        f"(strength={strength}) for user {user_id}"
+    )
+    await query.edit_message_text(
+        f"Naturalizando {count} imagen(es) ({strength_label})..."
+    )
+
+    with TempManager() as temp_mgr:
+        try:
+            processed_paths = []
+            loop = asyncio.get_event_loop()
+
+            for idx, file_id in enumerate(file_ids, start=1):
+                if count > 1:
+                    try:
+                        await query.edit_message_text(
+                            f"Naturalizando imagen {idx}/{count} ({strength_label})..."
+                        )
+                    except Exception:
+                        pass
+
+                input_filename = f"image_noise_input_{user_id}_{correlation_id}_{idx}.img"
+                output_filename = f"naturalizada_{user_id}_{correlation_id}_{idx}.jpg"
+                input_path = temp_mgr.get_temp_path(input_filename)
+                output_path = temp_mgr.get_temp_path(output_filename)
+
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+                remaining_timeout = batch_deadline - time.monotonic()
+                if remaining_timeout <= 0:
+                    raise ProcessingTimeoutError(
+                        "El procesamiento tardó demasiado. Intenta con menos imágenes o más pequeñas."
+                    )
+                remaining_timeout = max(5, remaining_timeout)
+
+                success, error = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda inp=str(input_path), out=str(output_path), lvl=strength: (
+                            ImageProcessor.add_noise(inp, out, lvl)
+                        ),
+                    ),
+                    timeout=remaining_timeout,
+                )
+
+                if not success:
+                    error_msg = error or "No pude aplicar el ruido sutil"
+                    raise ImageNoiseError(error_msg)
+
+                processed_paths.append(str(output_path))
+
+            caption = f"✅ Naturalizada ({strength_label})"
+            if count > 1:
+                await _send_images_in_albums(
+                    update,
+                    context,
+                    processed_paths,
+                    correlation_id,
+                    caption_prefix=f"Naturalizada ({strength_label})",
+                )
+            else:
+                with open(processed_paths[0], "rb") as img_file:
+                    await query.message.reply_document(
+                        document=img_file,
+                        filename=f"naturalizada_{correlation_id}.jpg",
+                        caption=caption,
+                    )
+
+            await query.edit_message_text(
+                f"¡Listo! {count} imagen(es) naturalizada(s) con intensidad {strength_label}."
+            )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¿Quieres hacer algo más con estas imágenes?",
+                reply_markup=reply_markup,
+            )
+            logger.info(
+                f"[{correlation_id}] Subtle noise applied for user {user_id}"
+            )
+
+        except ImageNoiseError as e:
+            logger.error(f"[{correlation_id}] Noise effect failed: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except ProcessingTimeoutError as e:
+            logger.error(f"[{correlation_id}] Noise effect timed out")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Noise effect timed out")
+            await query.edit_message_text(
+                "Error: El procesamiento tardó demasiado. Intenta con menos imágenes o más pequeñas."
+            )
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying noise: {e}")
             await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
 
 

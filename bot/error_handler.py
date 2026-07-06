@@ -191,6 +191,14 @@ class ImageEnhancementError(ImageProcessingError):
         super().__init__(self.message)
 
 
+class ImageNoiseError(ImageProcessingError):
+    """Exception raised when subtle noise application fails."""
+
+    def __init__(self, message: str = "No pude aplicar el ruido sutil a la imagen"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # User-friendly error messages in Spanish
 ERROR_MESSAGES = {
     DownloadError: "No pude descargar el video. Intenta con otro archivo.",
@@ -213,6 +221,7 @@ ERROR_MESSAGES = {
     ImageConversionError: "No pude convertir el formato de la imagen. Verifica que el formato sea válido.",
     ImageResizeError: "No pude redimensionar la imagen. Verifica las dimensiones ingresadas.",
     ImageEnhancementError: "No pude mejorar la imagen. Verifica que sea un archivo válido.",
+    ImageNoiseError: "No pude aplicar el ruido sutil. Verifica que sea un archivo válido.",
     VideoProcessingError: "Ocurrió un error al procesar el video. Por favor intenta de nuevo.",
     ValidationError: "El archivo no es válido. Verifica que sea un video correcto.",
     # Telegram API errors

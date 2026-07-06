@@ -3,7 +3,12 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+
 from dotenv import load_dotenv
+
+# Telegram Bot API limits
+TELEGRAM_CLOUD_MAX_UPLOAD_MB = 50
+TELEGRAM_LOCAL_MAX_UPLOAD_MB = 2000
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,6 +25,14 @@ class BotConfig:
 
     # Required
     BOT_TOKEN: str
+
+    # Local Bot API Server (https://github.com/tdlib/telegram-bot-api)
+    # Enables uploads/downloads beyond the 50MB cloud limit (up to 2000MB).
+    TELEGRAM_LOCAL_MODE: bool = False
+    TELEGRAM_API_BASE_URL: Optional[str] = None
+    TELEGRAM_API_FILE_BASE_URL: Optional[str] = None
+    TELEGRAM_API_TIMEOUT: float = 30.0
+    TELEGRAM_MAX_UPLOAD_SIZE_MB: int = TELEGRAM_CLOUD_MAX_UPLOAD_MB
 
     # Timeouts (seconds)
     PROCESSING_TIMEOUT: int = 60
@@ -50,9 +63,9 @@ class BotConfig:
     JOIN_AUDIO_TIMEOUT: int = 120
 
     # Download configuration (per QF-01, QF-02, QF-03, QF-05, DM-01, EH-03)
-    # File size limits (Telegram bot upload limit is 50MB)
-    DOWNLOAD_MAX_SIZE_MB: int = 50
-    DOWNLOAD_MAX_SIZE_GENERIC_MB: int = 50
+    # Cloud API: 50MB. Local Bot API: up to 2000MB.
+    DOWNLOAD_MAX_SIZE_MB: int = TELEGRAM_CLOUD_MAX_UPLOAD_MB
+    DOWNLOAD_MAX_SIZE_GENERIC_MB: int = TELEGRAM_CLOUD_MAX_UPLOAD_MB
 
     # Timeout settings (seconds)
     DOWNLOAD_TIMEOUT: int = 300  # 5 minutes for downloads
@@ -102,6 +115,47 @@ class BotConfig:
         # Validate BOT_TOKEN
         if not self.BOT_TOKEN or not self.BOT_TOKEN.strip():
             errors.append("BOT_TOKEN is required and cannot be empty")
+
+        # Validate Local Bot API configuration
+        if self.TELEGRAM_LOCAL_MODE:
+            if not self.TELEGRAM_API_BASE_URL or not self.TELEGRAM_API_BASE_URL.strip():
+                errors.append(
+                    "TELEGRAM_API_BASE_URL is required when TELEGRAM_LOCAL_MODE is enabled "
+                    "(e.g. http://127.0.0.1:8081/bot)"
+                )
+            elif not (
+                self.TELEGRAM_API_BASE_URL.startswith("http://")
+                or self.TELEGRAM_API_BASE_URL.startswith("https://")
+            ):
+                errors.append(
+                    "TELEGRAM_API_BASE_URL must start with http:// or https:// "
+                    f"(got: {self.TELEGRAM_API_BASE_URL!r})"
+                )
+
+        if not isinstance(self.TELEGRAM_API_TIMEOUT, (int, float)) or self.TELEGRAM_API_TIMEOUT <= 0:
+            errors.append(
+                f"TELEGRAM_API_TIMEOUT must be a positive number (got: {self.TELEGRAM_API_TIMEOUT})"
+            )
+
+        max_upload_limit = (
+            TELEGRAM_LOCAL_MAX_UPLOAD_MB
+            if self.TELEGRAM_LOCAL_MODE
+            else TELEGRAM_CLOUD_MAX_UPLOAD_MB
+        )
+        if (
+            not isinstance(self.TELEGRAM_MAX_UPLOAD_SIZE_MB, int)
+            or self.TELEGRAM_MAX_UPLOAD_SIZE_MB <= 0
+        ):
+            errors.append(
+                "TELEGRAM_MAX_UPLOAD_SIZE_MB must be a positive integer "
+                f"(got: {self.TELEGRAM_MAX_UPLOAD_SIZE_MB})"
+            )
+        elif self.TELEGRAM_MAX_UPLOAD_SIZE_MB > max_upload_limit:
+            errors.append(
+                f"TELEGRAM_MAX_UPLOAD_SIZE_MB must be {max_upload_limit} or less "
+                f"({'local' if self.TELEGRAM_LOCAL_MODE else 'cloud'} API limit) "
+                f"(got: {self.TELEGRAM_MAX_UPLOAD_SIZE_MB})"
+            )
 
         # Validate timeout fields are positive
         timeout_fields = [
@@ -184,24 +238,24 @@ class BotConfig:
             if not isinstance(value, int) or value <= 0:
                 errors.append(f"{name} must be a positive integer (got: {value})")
 
-        # Validate download size limits (Telegram limit is 50MB for bots)
-        if not isinstance(self.DOWNLOAD_MAX_SIZE_MB, int) or self.DOWNLOAD_MAX_SIZE_MB <= 0:
-            errors.append(
-                f"DOWNLOAD_MAX_SIZE_MB must be a positive integer (got: {self.DOWNLOAD_MAX_SIZE_MB})"
-            )
-        if self.DOWNLOAD_MAX_SIZE_MB > 50:
-            errors.append(
-                f"DOWNLOAD_MAX_SIZE_MB must be 50 or less (Telegram limit) (got: {self.DOWNLOAD_MAX_SIZE_MB})"
-            )
-
-        if not isinstance(self.DOWNLOAD_MAX_SIZE_GENERIC_MB, int) or self.DOWNLOAD_MAX_SIZE_GENERIC_MB <= 0:
-            errors.append(
-                f"DOWNLOAD_MAX_SIZE_GENERIC_MB must be a positive integer (got: {self.DOWNLOAD_MAX_SIZE_GENERIC_MB})"
-            )
-        if self.DOWNLOAD_MAX_SIZE_GENERIC_MB > 50:
-            errors.append(
-                f"DOWNLOAD_MAX_SIZE_GENERIC_MB must be 50 or less (Telegram limit) (got: {self.DOWNLOAD_MAX_SIZE_GENERIC_MB})"
-            )
+        # Validate download size limits against active Telegram API mode
+        download_max_limit = (
+            TELEGRAM_LOCAL_MAX_UPLOAD_MB
+            if self.TELEGRAM_LOCAL_MODE
+            else 500  # Cloud mode allows larger downloads with auto-split at 50MB
+        )
+        for field_name, value in (
+            ("DOWNLOAD_MAX_SIZE_MB", self.DOWNLOAD_MAX_SIZE_MB),
+            ("DOWNLOAD_MAX_SIZE_GENERIC_MB", self.DOWNLOAD_MAX_SIZE_GENERIC_MB),
+        ):
+            if not isinstance(value, int) or value <= 0:
+                errors.append(f"{field_name} must be a positive integer (got: {value})")
+            elif value > download_max_limit:
+                errors.append(
+                    f"{field_name} must be {download_max_limit} or less "
+                    f"({'local' if self.TELEGRAM_LOCAL_MODE else 'cloud with auto-split'} limit) "
+                    f"(got: {value})"
+                )
 
         # Validate concurrent download limit
         if not isinstance(self.DOWNLOAD_MAX_CONCURRENT, int) or self.DOWNLOAD_MAX_CONCURRENT < 1:
@@ -286,6 +340,33 @@ class BotConfig:
         # No cookies available
         logger.info("[COOKIES] No valid cookies configuration found")
 
+    @property
+    def telegram_max_upload_bytes(self) -> int:
+        """Maximum upload size in bytes for the active Telegram API mode."""
+        return self.TELEGRAM_MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+    @property
+    def max_incoming_file_size_mb(self) -> int:
+        """Effective incoming file size limit for videos, images, and documents."""
+        if self.TELEGRAM_LOCAL_MODE:
+            return self.TELEGRAM_MAX_UPLOAD_SIZE_MB
+        return self.MAX_FILE_SIZE_MB
+
+    @property
+    def max_incoming_audio_file_size_mb(self) -> int:
+        """Effective incoming file size limit for audio and voice messages."""
+        if self.TELEGRAM_LOCAL_MODE:
+            return self.TELEGRAM_MAX_UPLOAD_SIZE_MB
+        return self.MAX_AUDIO_FILE_SIZE_MB
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def load_config() -> BotConfig:
     """Load configuration from environment variables.
@@ -311,19 +392,52 @@ def load_config() -> BotConfig:
                 f"{name} must be a valid integer (got: {value!r})"
             )
 
+    telegram_local_mode = _bool_env("TELEGRAM_LOCAL_MODE", False)
+    default_upload_mb = (
+        TELEGRAM_LOCAL_MAX_UPLOAD_MB if telegram_local_mode else TELEGRAM_CLOUD_MAX_UPLOAD_MB
+    )
+    # Cloud mode: allow larger downloads with auto-split at 50MB upload limit.
+    default_download_mb = (
+        TELEGRAM_LOCAL_MAX_UPLOAD_MB if telegram_local_mode else 500
+    )
+
+    telegram_api_timeout = os.getenv("TELEGRAM_API_TIMEOUT")
+    if telegram_api_timeout is None:
+        parsed_timeout = 30.0
+    else:
+        try:
+            parsed_timeout = float(telegram_api_timeout)
+        except ValueError:
+            raise ValueError(
+                f"TELEGRAM_API_TIMEOUT must be a valid number (got: {telegram_api_timeout!r})"
+            )
+
     return BotConfig(
         BOT_TOKEN=os.getenv("BOT_TOKEN", ""),
+        TELEGRAM_LOCAL_MODE=telegram_local_mode,
+        TELEGRAM_API_BASE_URL=os.getenv("TELEGRAM_API_BASE_URL") or None,
+        TELEGRAM_API_FILE_BASE_URL=os.getenv("TELEGRAM_API_FILE_BASE_URL") or None,
+        TELEGRAM_API_TIMEOUT=parsed_timeout,
+        TELEGRAM_MAX_UPLOAD_SIZE_MB=_int_env(
+            "TELEGRAM_MAX_UPLOAD_SIZE_MB", default_upload_mb
+        ),
         PROCESSING_TIMEOUT=_int_env("PROCESSING_TIMEOUT", 60),
         JOIN_TIMEOUT=_int_env("JOIN_TIMEOUT", 120),
         JOIN_SESSION_TIMEOUT=_int_env("JOIN_SESSION_TIMEOUT", 300),
-        MAX_FILE_SIZE_MB=_int_env("MAX_FILE_SIZE_MB", 20),
+        MAX_FILE_SIZE_MB=_int_env(
+            "MAX_FILE_SIZE_MB",
+            default_upload_mb if telegram_local_mode else 20,
+        ),
         MAX_SEGMENTS=_int_env("MAX_SEGMENTS", 10),
         MIN_SEGMENT_SECONDS=_int_env("MIN_SEGMENT_SECONDS", 5),
         JOIN_MAX_VIDEOS=_int_env("JOIN_MAX_VIDEOS", 10),
         JOIN_MIN_VIDEOS=_int_env("JOIN_MIN_VIDEOS", 2),
         MAX_IMAGE_BATCH_SIZE=_int_env("MAX_IMAGE_BATCH_SIZE", 10),
         MAX_VOICE_DURATION_MINUTES=_int_env("MAX_VOICE_DURATION_MINUTES", 20),
-        MAX_AUDIO_FILE_SIZE_MB=_int_env("MAX_AUDIO_FILE_SIZE_MB", 20),
+        MAX_AUDIO_FILE_SIZE_MB=_int_env(
+            "MAX_AUDIO_FILE_SIZE_MB",
+            default_upload_mb if telegram_local_mode else 20,
+        ),
         VOICE_BITRATE=os.getenv("VOICE_BITRATE", "24k"),
         MP3_BITRATE=os.getenv("MP3_BITRATE", "192k"),
         MAX_AUDIO_SEGMENTS=_int_env("MAX_AUDIO_SEGMENTS", 20),
@@ -332,8 +446,10 @@ def load_config() -> BotConfig:
         JOIN_MIN_AUDIO_FILES=_int_env("JOIN_MIN_AUDIO_FILES", 2),
         JOIN_AUDIO_TIMEOUT=_int_env("JOIN_AUDIO_TIMEOUT", 120),
         # Download configuration
-        DOWNLOAD_MAX_SIZE_MB=_int_env("DOWNLOAD_MAX_SIZE_MB", 50),
-        DOWNLOAD_MAX_SIZE_GENERIC_MB=_int_env("DOWNLOAD_MAX_SIZE_GENERIC_MB", 50),
+        DOWNLOAD_MAX_SIZE_MB=_int_env("DOWNLOAD_MAX_SIZE_MB", default_download_mb),
+        DOWNLOAD_MAX_SIZE_GENERIC_MB=_int_env(
+            "DOWNLOAD_MAX_SIZE_GENERIC_MB", default_download_mb
+        ),
         DOWNLOAD_TIMEOUT=_int_env("DOWNLOAD_TIMEOUT", 300),
         DOWNLOAD_METADATA_TIMEOUT=_int_env("DOWNLOAD_METADATA_TIMEOUT", 30),
         DOWNLOAD_VIDEO_FORMAT=os.getenv("DOWNLOAD_VIDEO_FORMAT", "best"),

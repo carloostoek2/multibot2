@@ -1,4 +1,5 @@
-"""Unit tests for AudioEffects.stereo_3d with mocked ffmpeg/ffprobe."""
+"""Unit tests for AudioEffects.pitch_shift with mocked ffmpeg."""
+import math
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,37 +16,52 @@ def input_file(tmp_path):
     return path
 
 
-class TestAudioEffectsStereo3d:
+class TestAudioEffectsPitchShift:
     @patch("bot.audio_effects.subprocess.run")
     @patch("bot.audio_effects.AudioEffects._check_ffmpeg", return_value=True)
-    @patch("bot.audio_effects.AudioEffects._get_audio_channels", return_value=1)
-    def test_mono_source_uses_upmix_filter(self, _channels, _ffmpeg, mock_run, input_file, tmp_path):
+    def test_valid_intensity_agudo_uses_correct_ratio(self, _ffmpeg, mock_run, input_file, tmp_path):
         output_path = tmp_path / "output.mp3"
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         effects = AudioEffects(str(input_file), str(output_path))
-        result = effects.stereo_3d("medio")
+        result = effects.pitch_shift("agudo")
 
         assert result is effects
         cmd = mock_run.call_args[0][0]
-        assert "pan=stereo|c0=c0|c1=c0" in cmd[cmd.index("-af") + 1]
-        assert "-q:a" not in cmd
-        assert "-b:a" in cmd
+        af_filter = cmd[cmd.index("-af") + 1]
+        ratio = 2 ** (3.5 / 12.0)
+        expected = f"asetrate=44100*{ratio},atempo={ratio}"
+        assert af_filter == expected
 
     @patch("bot.audio_effects.subprocess.run")
     @patch("bot.audio_effects.AudioEffects._check_ffmpeg", return_value=True)
-    @patch("bot.audio_effects.AudioEffects._get_audio_channels", return_value=2)
-    def test_stereo_source_skips_upmix(self, _channels, _ffmpeg, mock_run, input_file, tmp_path):
+    def test_valid_intensity_grave_uses_correct_ratio(self, _ffmpeg, mock_run, input_file, tmp_path):
         output_path = tmp_path / "output.mp3"
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         effects = AudioEffects(str(input_file), str(output_path))
-        effects.stereo_3d("suave")
+        effects.pitch_shift("grave")
 
         cmd = mock_run.call_args[0][0]
         af_filter = cmd[cmd.index("-af") + 1]
-        assert "pan=stereo" not in af_filter
-        assert "apulsator=mode=sine:amount=1:hz=0.15" in af_filter
+        ratio = 2 ** (-3.5 / 12.0)
+        expected = f"asetrate=44100*{ratio},atempo={ratio}"
+        assert af_filter == expected
+
+    @patch("bot.audio_effects.subprocess.run")
+    @patch("bot.audio_effects.AudioEffects._check_ffmpeg", return_value=True)
+    def test_valid_intensity_muy_agudo_uses_correct_ratio(self, _ffmpeg, mock_run, input_file, tmp_path):
+        output_path = tmp_path / "output.mp3"
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        effects = AudioEffects(str(input_file), str(output_path))
+        effects.pitch_shift("muy_agudo")
+
+        cmd = mock_run.call_args[0][0]
+        af_filter = cmd[cmd.index("-af") + 1]
+        ratio = 2 ** (6.5 / 12.0)
+        expected = f"asetrate=44100*{ratio},atempo={ratio}"
+        assert af_filter == expected
 
     @patch("bot.audio_effects.AudioEffects._check_ffmpeg", return_value=True)
     def test_invalid_intensity_raises(self, _ffmpeg, input_file, tmp_path):
@@ -53,20 +69,12 @@ class TestAudioEffectsStereo3d:
         effects = AudioEffects(str(input_file), str(output_path))
 
         with pytest.raises(AudioEffectsError, match="Intensidad"):
-            effects.stereo_3d("extremo")
-
-    @patch("bot.audio_effects.shutil.which", return_value="/usr/bin/ffprobe")
-    @patch("bot.audio_effects.subprocess.run")
-    def test_get_audio_channels_parses_ffprobe_output(self, mock_run, _which):
-        mock_run.return_value = MagicMock(stdout="2\n", returncode=0)
-        channels = AudioEffects._get_audio_channels(Path("/tmp/test.mp3"))
-        assert channels == 2
+            effects.pitch_shift("extremo")
 
     @patch("bot.audio_effects.subprocess.run")
     @patch("bot.audio_effects.AudioEffects._check_ffmpeg", return_value=True)
-    @patch("bot.audio_effects.AudioEffects._get_audio_channels", return_value=2)
-    def test_stereo_3d_called_process_error_raises_audio_effects_error(
-        self, _channels, _ffmpeg, mock_run, input_file, tmp_path
+    def test_called_process_error_raises_audio_effects_error(
+        self, _ffmpeg, mock_run, input_file, tmp_path
     ):
         import subprocess
 
@@ -76,5 +84,5 @@ class TestAudioEffectsStereo3d:
         )
 
         effects = AudioEffects(str(input_file), str(output_path))
-        with pytest.raises(AudioEffectsError, match="Error aplicando efecto 3D"):
-            effects.stereo_3d("medio")
+        with pytest.raises(AudioEffectsError, match="Error aplicando cambio de tono"):
+            effects.pitch_shift("agudo")

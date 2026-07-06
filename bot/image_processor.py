@@ -41,6 +41,15 @@ ENHANCEMENT_PROFILES = {
     "suave": "Suave",
 }
 
+# Subtle noise levels for reducing AI-generated smoothness (monochromatic grain)
+NOISE_STRENGTH_LEVELS = {
+    1: {"label": "Muy sutil", "amplitude": 2.0},
+    2: {"label": "Sutil", "amplitude": 3.5},
+    3: {"label": "Normal", "amplitude": 5.5},
+    4: {"label": "Notable", "amplitude": 8.0},
+    5: {"label": "Marcado", "amplitude": 11.0},
+}
+
 
 class ImageProcessingError(Exception):
     """Base exception for image processing errors."""
@@ -100,6 +109,37 @@ class ImageProcessor:
     def _scaled_enhance_factor(base_factor: float, scale: float) -> float:
         """Apply bright-image scale to an enhancement multiplier."""
         return 1.0 + (base_factor - 1.0) * scale
+
+    @staticmethod
+    def _noise_amplitude(strength: int) -> float:
+        """Return monochromatic noise amplitude for a strength level (1-5)."""
+        level = NOISE_STRENGTH_LEVELS.get(strength)
+        if level is None:
+            raise ValueError(f"Invalid noise strength: {strength}")
+        return level["amplitude"]
+
+    @staticmethod
+    def _apply_monochromatic_noise(img: Image.Image, amplitude: float) -> Image.Image:
+        """Blend fine monochromatic noise into an RGB image.
+
+        Uses luminance-only offsets so color stays natural while breaking
+        overly smooth AI-generated surfaces.
+        """
+        rgb = img.convert("RGB")
+        width, height = rgb.size
+        noise = Image.effect_noise((width, height), 128)
+        noise_bytes = noise.tobytes()
+        rgb_bytes = bytearray(rgb.tobytes())
+        scale = amplitude / 128.0
+
+        for pixel_idx in range(width * height):
+            offset = (noise_bytes[pixel_idx] - 128) * scale
+            base = pixel_idx * 3
+            for channel in range(3):
+                value = int(rgb_bytes[base + channel] + offset)
+                rgb_bytes[base + channel] = max(0, min(255, value))
+
+        return Image.frombytes("RGB", (width, height), bytes(rgb_bytes))
 
     @staticmethod
     def compress(
@@ -489,6 +529,76 @@ class ImageProcessor:
             logger.error(f"Image enhancement failed: {e}")
             return False, str(e)
 
+    @staticmethod
+    def add_noise(
+        input_path: str,
+        output_path: str,
+        strength: int = 2,
+    ) -> Tuple[bool, Optional[str]]:
+        """Add subtle monochromatic noise to reduce AI-generated smoothness.
+
+        Args:
+            input_path: Path to input image
+            output_path: Path to save processed image
+            strength: Noise intensity from 1 (very subtle) to 5
+
+        Returns:
+            Tuple of (success, error_message)
+        """
+        try:
+            strength = int(strength)
+        except (TypeError, ValueError):
+            return False, "La intensidad de ruido debe ser un número entre 1 y 5"
+
+        if strength not in NOISE_STRENGTH_LEVELS:
+            return (
+                False,
+                f"Intensidad '{strength}' no soportada. Usa un valor del 1 al 5.",
+            )
+
+        amplitude = ImageProcessor._noise_amplitude(strength)
+        logger.debug(
+            f"Adding subtle noise: {input_path} (strength={strength}, amplitude={amplitude})"
+        )
+
+        try:
+            with Image.open(input_path) as img:
+                processed = ImageProcessor._apply_monochromatic_noise(img, amplitude)
+
+                out_ext = os.path.splitext(output_path)[1].lower()
+                save_format = img.format or "JPEG"
+
+                if out_ext in (".jpg", ".jpeg"):
+                    save_format = "JPEG"
+                elif out_ext == ".png":
+                    save_format = "PNG"
+                    if processed.mode != "RGBA":
+                        processed = processed.convert("RGBA")
+                elif out_ext == ".webp":
+                    save_format = "WEBP"
+
+                save_kwargs: Dict[str, Any] = {"format": save_format}
+                if save_format in ("JPEG", "WEBP"):
+                    save_kwargs["quality"] = 92
+                if save_format == "JPEG":
+                    save_kwargs["optimize"] = True
+
+                processed.save(output_path, **save_kwargs)
+
+            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                logger.error(f"Noise effect produced empty file: {output_path}")
+                return False, "El efecto de ruido produjo un archivo vacío"
+
+            logger.info(
+                f"Subtle noise applied (strength={strength}): {output_path} "
+                f"({os.path.getsize(output_path)} bytes)"
+            )
+            return True, None
+
+        except Exception as e:
+            logger.error(f"Image noise effect failed: {e}")
+            return False, str(e)
+
 
 __all__ = [
     "ImageProcessor",
@@ -498,4 +608,5 @@ __all__ = [
     "ImageResizeError",
     "SUPPORTED_IMAGE_FORMATS",
     "ENHANCEMENT_PROFILES",
+    "NOISE_STRENGTH_LEVELS",
 ]
