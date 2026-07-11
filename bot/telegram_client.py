@@ -8,6 +8,13 @@ from bot.config import config
 logger = logging.getLogger(__name__)
 
 
+async def _log_connected_bot(application: Application) -> None:
+    """Log the bot identity after connecting to Telegram."""
+    me = await application.bot.get_me()
+    username = f"@{me.username}" if me.username else "(sin username)"
+    logger.info("Connected to Telegram bot: %s (%s, id=%s)", me.first_name, username, me.id)
+
+
 def derive_file_base_url(api_base_url: str) -> str:
     """Derive the Bot API file URL from the bot API base URL."""
     base = api_base_url.rstrip("/")
@@ -64,7 +71,7 @@ def create_application() -> Application:
             media_timeout,
         )
 
-    return builder.build()
+    return builder.post_init(_log_connected_bot).build()
 
 
 __all__ = ["create_application", "derive_file_base_url"]
