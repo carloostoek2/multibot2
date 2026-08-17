@@ -11280,6 +11280,46 @@ async def handle_image_group_s_caption_command(
         return
 
 
+async def handle_image_group_start_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Start an image group session in waiting state via /agr.
+
+    Unlike the "Agrupar" menu action, this does not require a first image:
+    the user sends /agr and then forwards all images to group them.
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] /agr command received from user {user_id}")
+
+    existing = _get_image_group_session(context)
+    if existing:
+        count = len(existing["file_ids"])
+        await update.message.reply_text(
+            f"Ya tienes el modo de agrupación activo con *{count}* imagen(es).\n"
+            "Envía más imágenes o presiona *Listo* para recibir el álbum.",
+            parse_mode="Markdown",
+            reply_markup=_get_image_group_keyboard(count),
+        )
+        return
+
+    _start_image_group_session(context, [], correlation_id)
+    prompt = (
+        "📷 *Modo agrupación activado* (estado de espera)\n\n"
+        "Envía las imágenes que quieras agrupar "
+        f"(máximo {config.MAX_IMAGE_BATCH_SIZE}).\n"
+        "Puedes enviarlas todas juntas o una por una.\n"
+        "Opcional: envía un texto (o `/s ...`) y se usará como caption del álbum.\n\n"
+        "Cuando termines, presiona *Listo* para recibirlas como álbum."
+    )
+    await update.message.reply_text(
+        prompt,
+        parse_mode="Markdown",
+        reply_markup=_get_image_group_keyboard(0),
+    )
+
+
 async def handle_image_group_callback(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,

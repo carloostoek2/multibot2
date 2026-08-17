@@ -14,6 +14,7 @@ from bot.handlers import (
     _try_collect_image_for_group_session,
     handle_image_group_callback,
     handle_image_group_s_caption_command,
+    handle_image_group_start_command,
     handle_image_menu_callback,
     handle_url_detection,
 )
@@ -312,3 +313,36 @@ class TestSendAlbumFromFileIds:
         )
         assert len(first_batch) == config.MAX_IMAGE_BATCH_SIZE
         assert len(second_batch) == 2
+
+
+class TestImageGroupStartCommand:
+    def _command_update(self):
+        update = MagicMock()
+        update.effective_user = SimpleNamespace(id=42)
+        update.message = SimpleNamespace(reply_text=AsyncMock())
+        return update
+
+    @pytest.mark.asyncio
+    async def test_starts_empty_group_session(self, mock_context):
+        update = self._command_update()
+
+        await handle_image_group_start_command(update, mock_context)
+
+        session = mock_context.user_data["image_group_session"]
+        assert session["file_ids"] == []
+        text = update.message.reply_text.await_args[0][0]
+        assert "Modo agrupación activado" in text
+        assert "estado de espera" in text
+
+    @pytest.mark.asyncio
+    async def test_keeps_existing_session(self, mock_context):
+        _start_image_group_session(mock_context, ["f1", "f2"], "corr-start")
+        update = self._command_update()
+
+        await handle_image_group_start_command(update, mock_context)
+
+        session = mock_context.user_data["image_group_session"]
+        assert session["file_ids"] == ["f1", "f2"]
+        text = update.message.reply_text.await_args[0][0]
+        assert "Ya tienes el modo de agrupación activo" in text
+        assert "2" in text
