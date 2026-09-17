@@ -1,5 +1,5 @@
-"""Ensure Replicate model refs are version-pinned (unpinned slugs 404)."""
-from bot.voice_clone import OPENVOICE_MODEL, WHISPER_MODEL
+"""Ensure Replicate FreeVC model ref is version-pinned (unpinned slugs 404)."""
+from bot.voice_clone import FREEVC_MODEL, FREEVC_MODEL_TYPE
 
 
 def _assert_pinned(ref: str, owner_name: str) -> None:
@@ -9,9 +9,10 @@ def _assert_pinned(ref: str, owner_name: str) -> None:
     assert all(c in "0123456789abcdef" for c in version), version
 
 
-def test_whisper_model_is_version_pinned():
-    _assert_pinned(WHISPER_MODEL, "openai/whisper")
+def test_freevc_model_is_version_pinned():
+    _assert_pinned(FREEVC_MODEL, "jagilley/free-vc")
 
 
-def test_openvoice_model_is_version_pinned():
-    _assert_pinned(OPENVOICE_MODEL, "chenxwh/openvoice")
+def test_freevc_model_type_is_24khz_enum():
+    # Exact OpenAPI enum from jagilley/free-vc (not "FreeVC (24k)").
+    assert FREEVC_MODEL_TYPE == "FreeVC (24kHz)"

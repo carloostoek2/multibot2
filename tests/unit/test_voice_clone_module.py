@@ -6,11 +6,14 @@ import pytest
 
 from bot.voice_clone import (
     VoiceCloneError,
+    FREEVC_MODEL,
+    FREEVC_MODEL_TYPE,
     has_reference,
     save_reference,
     get_user_ref_path,
     get_voice_refs_root,
     clone_voice_pipeline,
+    run_freevc,
 )
 
 
@@ -50,6 +53,72 @@ class TestClonePipelineGating:
             os.environ.pop("REPLICATE_API_TOKEN", None)
             with pytest.raises(VoiceCloneError, match="REPLICATE_API_TOKEN"):
                 clone_voice_pipeline(src, ref, out, api_token=None)
+
+
+class TestFreeVCPipeline:
+    def test_clone_pipeline_calls_freevc_only(self, tmp_path):
+        src = tmp_path / "src.oga"
+        ref = tmp_path / "ref.mp3"
+        out = tmp_path / "out.mp3"
+        src.write_bytes(b"a")
+        ref.write_bytes(b"b")
+
+        def fake_wav(s, d):
+            Path(d).write_bytes(b"RIFF")
+
+        with patch("bot.voice_clone._convert_to_wav", side_effect=fake_wav), patch(
+            "bot.voice_clone.run_freevc", return_value="https://example.com/out.wav"
+        ) as freevc, patch(
+            "bot.voice_clone.download_url_to_file"
+        ) as download, patch(
+            "bot.voice_clone.ensure_mp3"
+        ) as ensure:
+            def _dl(url, dest):
+                Path(dest).write_bytes(b"raw")
+                return Path(dest)
+
+            def _mp3(s, d):
+                Path(d).write_bytes(b"mp3")
+                return Path(d)
+
+            download.side_effect = _dl
+            ensure.side_effect = _mp3
+
+            result = clone_voice_pipeline(
+                src, ref, out, api_token="r8_test", correlation_id="cid1"
+            )
+
+        assert result == out
+        freevc.assert_called_once()
+        kwargs = freevc.call_args.kwargs
+        assert kwargs["model_type"] == FREEVC_MODEL_TYPE
+        assert kwargs["api_token"] == "r8_test"
+        assert kwargs["correlation_id"] == "cid1"
+
+    def test_run_freevc_passes_pinned_model_and_inputs(self, tmp_path):
+        src = tmp_path / "src.wav"
+        ref = tmp_path / "ref.wav"
+        src.write_bytes(b"src")
+        ref.write_bytes(b"ref")
+
+        mock_replicate = MagicMock()
+        mock_replicate.run.return_value = "https://example.com/converted.wav"
+
+        with patch.dict("sys.modules", {"replicate": mock_replicate}), patch(
+            "bot.voice_clone._open_audio_for_replicate",
+            side_effect=lambda p: open(p, "rb"),
+        ):
+            url = run_freevc(src, ref, api_token="r8_test", correlation_id="x")
+
+        assert url == "https://example.com/converted.wav"
+        mock_replicate.run.assert_called_once()
+        model_arg = mock_replicate.run.call_args.args[0]
+        assert model_arg == FREEVC_MODEL
+        assert ":" in model_arg
+        inputs = mock_replicate.run.call_args.kwargs["input"]
+        assert inputs["model_type"] == "FreeVC (24kHz)"
+        assert "source_audio" in inputs
+        assert "reference_audio" in inputs
 
 
 class TestVoiceRefsDirEnv:
