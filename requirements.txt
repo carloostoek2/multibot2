@@ -15,3 +15,6 @@ beautifulsoup4>=4.12.0
 
 # Optional for Instagram image posts (yt-dlp has limitations with image-only posts)
 gallery-dl>=1.31.0
+
+# Voice cloning (Replicate: Whisper + OpenVoice)
+replicate>=0.34.0

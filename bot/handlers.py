@@ -59,6 +59,13 @@ from bot.audio_joiner import AudioJoiner
 from bot.audio_format_converter import AudioFormatConverter, detect_audio_format, get_supported_audio_formats
 from bot.audio_enhancer import AudioEnhancer
 from bot.audio_effects import AudioEffects
+from bot.voice_clone import (
+    VoiceCloneError,
+    has_reference,
+    save_reference,
+    get_user_ref_path,
+    clone_voice_pipeline,
+)
 from bot.screenshot_processor import ScreenshotProcessor
 from bot.image_processor import (
     ImageProcessor,
@@ -362,6 +369,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/split_audio [duration|parts] <valor> - Divide un audio en segmentos\n"
         "/join_audio - Une múltiples archivos de audio\n"
         "/convert_audio - Convierte un audio a otro formato (MP3, WAV, OGG, AAC, FLAC)\n"
+        "/voz_ref - Guarda un audio/nota de voz como referencia para clonar voz\n"
         "/bass_boost - Aumenta los bajos del audio (intensidad ajustable)\n"
         "/treble_boost - Aumenta los agudos del audio (intensidad ajustable)\n"
         "/equalize - Ecualizador de 3 bandas (bass, mid, treble)\n"
@@ -372,6 +380,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "💡 También puedes usar los menús inline:\n"
         "- Envía un video → Menú con opciones (Nota de Video, Extraer Audio, Merge con Audio, etc.)\n"
         "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)\n"
+        "- Envía una nota de voz → Convertir y normalizar, o Clonar voz\n"
         "- Envía una foto o imagen → Menú con opciones (Comprimir, Convertir, Redimensionar, Naturalizar, Info)\n"
         "- Envía un enlace de video → Menú de descarga con opciones combinadas"
     )
@@ -2923,26 +2932,23 @@ async def handle_screenshot_text_input(update: Update, context: ContextTypes.DEF
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle voice messages by converting them to MP3 format with automatic processing.
+    """Handle voice notes by showing an action menu (no auto-processing).
 
-    Flow: voice note → MP3 → normalize to -16 LUFS (podcast) → bass boost (intensity 4) → send processed audio.
-
-    Args:
-        update: Telegram update object
-        context: Telegram context object
+    Options:
+    1. Convertir y normalizar — existing podcast pipeline (MP3 + -16 LUFS + bass 4).
+    2. Clonar voz — zero-shot clone via Replicate (requires /voz_ref first).
+    3. Cancelar.
     """
     user_id = update.effective_user.id
     correlation_id = str(uuid.uuid4())[:8]
-    logger.info(f"[{correlation_id}] Voice message received from user {user_id} - running podcast pipeline")
+    logger.info(f"[{correlation_id}] Voice message received from user {user_id} - showing menu")
 
-    # Get voice from message
     voice = update.message.voice
     if not voice:
         logger.warning(f"[{correlation_id}] No voice found in message from user {user_id}")
         await update.message.reply_text("No encontré una nota de voz en tu mensaje.")
         return
 
-    # Validate file size before downloading
     if voice.file_size:
         logger.debug(f"[{correlation_id}] Voice file size: {voice.file_size} bytes")
         is_valid, error_msg = validate_file_size(voice.file_size, config.max_incoming_audio_file_size_mb)
@@ -2951,30 +2957,65 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(error_msg)
             return
 
-    # Send "processing" message with cancel button
-    keyboard = [[InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    processing_message = None
-    try:
-        processing_message = await update.message.reply_text(
-            "🎙️ Procesando nota de voz...\n\n"
-            "1️⃣ Convirtiendo a MP3...\n"
-            "⏳ Espera por favor",
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        logger.warning(f"[{correlation_id}] Could not send processing message to user {user_id}: {e}")
-
-    # Store correlation_id for cancel handling
+    context.user_data["voice_menu_file_id"] = voice.file_id
+    context.user_data["voice_menu_correlation_id"] = correlation_id
     context.user_data["voice_pipeline_correlation_id"] = correlation_id
 
-    # Use TempManager as context manager for automatic cleanup
+    keyboard = [
+        [InlineKeyboardButton("🎧 Convertir y normalizar", callback_data=f"voice_menu:convert:{correlation_id}")],
+        [InlineKeyboardButton("🗣️ Clonar voz", callback_data=f"voice_menu:clone:{correlation_id}")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "🎙️ ¿Qué hago con tu nota de voz?\n\n"
+        "Elige una opción:",
+        reply_markup=reply_markup,
+    )
+    logger.info(f"[{correlation_id}] Voice menu displayed to user {user_id}")
+
+
+def _get_voice_menu_keyboard(correlation_id: str) -> InlineKeyboardMarkup:
+    """Inline keyboard for pending voice-note actions."""
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🎧 Convertir y normalizar", callback_data=f"voice_menu:convert:{correlation_id}")],
+            [InlineKeyboardButton("🗣️ Clonar voz", callback_data=f"voice_menu:clone:{correlation_id}")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")],
+        ]
+    )
+
+
+async def _run_voice_podcast_pipeline(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    file_id: str,
+    user_id: int,
+    correlation_id: str,
+    status_message,
+) -> None:
+    """Run the classic podcast pipeline on a voice note file_id.
+
+    Steps (unchanged from previous auto behavior):
+    1. OGA → MP3
+    2. Normalize −16 LUFS (podcast)
+    3. Bass boost intensity 4
+    4. Send processed MP3
+    """
+    reply_markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")]]
+    )
+    context.user_data["voice_pipeline_correlation_id"] = correlation_id
+
+    # Prefer callback message for replies when triggered from a button
+    message = update.callback_query.message if update.callback_query else update.message
+
     with TempManager() as temp_mgr:
         try:
-            # Generate safe filenames
-            input_filename = f"voice_{user_id}_{voice.file_unique_id}.oga"
-            mp3_filename = f"voice_{user_id}_{voice.file_unique_id}.mp3"
+            input_filename = f"voice_{user_id}_{correlation_id}.oga"
+            mp3_filename = f"voice_{user_id}_{correlation_id}.mp3"
             normalized_filename = f"normalized_{user_id}_{correlation_id}.mp3"
             output_filename = f"podcast_{user_id}_{correlation_id}.mp3"
 
@@ -2983,175 +3024,451 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             normalized_path = temp_mgr.get_temp_path(normalized_filename)
             output_path = temp_mgr.get_temp_path(output_filename)
 
-            # Download voice file
             logger.info(f"[{correlation_id}] Downloading voice from user {user_id}")
             try:
-                file = await voice.get_file()
+                file = await context.bot.get_file(file_id)
                 await _download_with_retry(file, input_path, correlation_id=correlation_id)
             except Exception as e:
                 logger.error(f"[{correlation_id}] Failed to download voice for user {user_id}: {e}")
                 raise DownloadError("No pude descargar la nota de voz") from e
 
-            # Validate audio integrity after download
             is_valid, error_msg = validate_audio_file(str(input_path))
             if not is_valid:
                 logger.warning(f"[{correlation_id}] Audio validation failed for user {user_id}: {error_msg}")
                 raise ValidationError(error_msg)
 
-            # Check disk space before processing
             voice_size_mb = Path(input_path).stat().st_size / (1024 * 1024)
-            required_space = estimate_required_space(int(voice_size_mb)) * 3  # 3x for pipeline
+            required_space = estimate_required_space(int(voice_size_mb)) * 3
             has_space, space_error = check_disk_space(required_space)
             if not has_space:
                 logger.warning(f"[{correlation_id}] Disk space check failed for user {user_id}: {space_error}")
                 raise ValidationError(space_error)
 
-            # Step 1: Convert to MP3
             logger.info(f"[{correlation_id}] Converting voice to MP3 for user {user_id}")
             try:
                 loop = asyncio.get_event_loop()
                 converter = VoiceToMp3Converter(str(input_path), str(mp3_path))
                 success = await asyncio.wait_for(
                     loop.run_in_executor(None, converter.process),
-                    timeout=config.PROCESSING_TIMEOUT
+                    timeout=config.PROCESSING_TIMEOUT,
                 )
-
                 if not success:
                     logger.error(f"[{correlation_id}] Voice to MP3 conversion failed for user {user_id}")
                     raise VoiceToMp3Error("No pude convertir la nota de voz a MP3")
-
             except asyncio.TimeoutError as e:
                 logger.error(f"[{correlation_id}] Voice to MP3 conversion timed out for user {user_id}")
                 raise ProcessingTimeoutError("La conversión tardó demasiado") from e
 
-            # Update progress message
             try:
-                await processing_message.edit_text(
+                await status_message.edit_text(
                     "🎙️ Procesando nota de voz...\n\n"
                     "✅ Convertido a MP3\n"
                     "2️⃣ Normalizando a -16 LUFS (podcast)...\n"
                     "⏳ Espera por favor",
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
                 )
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not update message: {e}")
 
-            # Step 2: Normalize to -16 LUFS (podcast preset)
             logger.info(f"[{correlation_id}] Normalizing to -16 LUFS (podcast) for user {user_id}")
             try:
                 loop = asyncio.get_event_loop()
                 effects = AudioEffects(str(mp3_path), str(normalized_path))
                 success = await asyncio.wait_for(
                     loop.run_in_executor(None, effects.normalize, -16.0),
-                    timeout=config.PROCESSING_TIMEOUT
+                    timeout=config.PROCESSING_TIMEOUT,
                 )
-
                 if not success:
                     logger.error(f"[{correlation_id}] Normalization failed for user {user_id}")
                     raise AudioEffectsError("No pude normalizar el audio")
-
             except asyncio.TimeoutError as e:
                 logger.error(f"[{correlation_id}] Normalization timed out for user {user_id}")
                 raise ProcessingTimeoutError("La normalización tardó demasiado") from e
 
-            # Update progress message
             try:
-                await processing_message.edit_text(
+                await status_message.edit_text(
                     "🎙️ Procesando nota de voz...\n\n"
                     "✅ Convertido a MP3\n"
                     "✅ Normalizado a -16 LUFS\n"
                     "3️⃣ Aplicando bass boost (intensidad 4)...\n"
                     "⏳ Espera por favor",
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
                 )
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not update message: {e}")
 
-            # Step 3: Apply bass boost (intensity 4)
             logger.info(f"[{correlation_id}] Applying bass boost (intensity 4) for user {user_id}")
             try:
                 loop = asyncio.get_event_loop()
                 enhancer = AudioEnhancer(str(normalized_path), str(output_path))
                 success = await asyncio.wait_for(
                     loop.run_in_executor(None, lambda: enhancer.bass_boost(4.0)),
-                    timeout=config.PROCESSING_TIMEOUT
+                    timeout=config.PROCESSING_TIMEOUT,
                 )
-
                 if not success:
                     logger.error(f"[{correlation_id}] Bass boost failed for user {user_id}")
                     raise AudioEnhancementError("No pude aplicar el bass boost")
-
             except asyncio.TimeoutError as e:
                 logger.error(f"[{correlation_id}] Bass boost timed out for user {user_id}")
                 raise ProcessingTimeoutError("El bass boost tardó demasiado") from e
 
-            # Update progress message
             try:
-                await processing_message.edit_text(
+                await status_message.edit_text(
                     "🎙️ Procesando nota de voz...\n\n"
                     "✅ Convertido a MP3\n"
                     "✅ Normalizado a -16 LUFS\n"
                     "✅ Bass boost aplicado\n"
                     "📤 Enviando archivo...",
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
                 )
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not update message: {e}")
 
-            # Send as audio file with metadata
             logger.info(f"[{correlation_id}] Sending processed audio to user {user_id}")
             try:
                 with open(output_path, "rb") as audio_file:
-                    await update.message.reply_audio(
+                    await message.reply_audio(
                         audio=audio_file,
                         title="Nota de voz procesada",
                         performer="Podcast Pipeline",
-                        filename=f"voice_{user_id}_processed.mp3"
+                        filename=f"voice_{user_id}_processed.mp3",
                     )
                 logger.info(f"[{correlation_id}] Processed audio sent successfully to user {user_id}")
             except Exception as e:
                 logger.error(f"[{correlation_id}] Failed to send processed audio to user {user_id}: {e}")
                 raise
 
-            # Clean up correlation_id
             context.user_data.pop("voice_pipeline_correlation_id", None)
+            context.user_data.pop("voice_menu_file_id", None)
+            context.user_data.pop("voice_menu_correlation_id", None)
 
-            # Delete processing message on success
-            if processing_message:
+            if status_message:
                 try:
-                    await processing_message.delete()
+                    await status_message.delete()
                 except Exception as e:
                     logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
 
-        except (DownloadError, ValidationError, VoiceToMp3Error, AudioEffectsError, AudioEnhancementError, ProcessingTimeoutError) as e:
-            # Handle known processing errors
+        except (
+            DownloadError,
+            ValidationError,
+            VoiceToMp3Error,
+            AudioEffectsError,
+            AudioEnhancementError,
+            ProcessingTimeoutError,
+        ) as e:
             logger.error(f"[{correlation_id}] Processing error: {e}")
             await handle_processing_error(update, e, user_id)
-
-            # Clean up correlation_id
             context.user_data.pop("voice_pipeline_correlation_id", None)
-
-            # Delete processing message on error
-            if processing_message:
+            if status_message:
                 try:
-                    await processing_message.delete()
-                except Exception as e:
-                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+                    await status_message.delete()
+                except Exception as del_err:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {del_err}")
 
         except Exception as e:
-            # Handle unexpected errors
             logger.exception(f"[{correlation_id}] Unexpected error processing voice for user {user_id}: {e}")
             await handle_processing_error(update, e, user_id)
-
-            # Delete processing message on error
-            if processing_message:
+            if status_message:
                 try:
-                    await processing_message.delete()
-                except Exception as e:
-                    logger.warning(f"[{correlation_id}] Could not delete processing message: {e}")
+                    await status_message.delete()
+                except Exception as del_err:
+                    logger.warning(f"[{correlation_id}] Could not delete processing message: {del_err}")
 
-        # TempManager cleanup happens automatically on context exit
         logger.debug(f"[{correlation_id}] Cleanup completed for user {user_id}")
+
+
+async def _run_voice_clone_pipeline(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    file_id: str,
+    user_id: int,
+    correlation_id: str,
+    status_message,
+) -> None:
+    """Clone the voice note into the user's saved reference voice via Replicate."""
+    reply_markup = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")]]
+    )
+    context.user_data["voice_pipeline_correlation_id"] = correlation_id
+    message = update.callback_query.message if update.callback_query else update.message
+
+    if not config.REPLICATE_API_TOKEN:
+        await status_message.edit_text(
+            "La clonación de voz no está configurada (falta REPLICATE_API_TOKEN). "
+            "Avisa al admin del bot."
+        )
+        return
+
+    if not has_reference(user_id):
+        await status_message.edit_text(
+            "No tienes una voz de referencia guardada.\n\n"
+            "Para guardar una, responde a un audio o nota de voz con:\n"
+            "/voz_ref"
+        )
+        return
+
+    with TempManager() as temp_mgr:
+        try:
+            input_path = temp_mgr.get_temp_path(f"clone_src_{user_id}_{correlation_id}.oga")
+            output_path = temp_mgr.get_temp_path(f"clone_out_{user_id}_{correlation_id}.mp3")
+            ref_path = get_user_ref_path(user_id)
+
+            logger.info(f"[{correlation_id}] Downloading voice for clone, user {user_id}")
+            try:
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to download voice for clone: {e}")
+                raise DownloadError("No pude descargar la nota de voz") from e
+
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                raise ValidationError(error_msg)
+
+            loop = asyncio.get_event_loop()
+
+            try:
+                await status_message.edit_text(
+                    "🗣️ Clonando voz...\n\n"
+                    "1️⃣ Transcribiendo...\n"
+                    "2️⃣ Sintetizando con tu voz de referencia...\n"
+                    "⏳ Espera por favor",
+                    reply_markup=reply_markup,
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update clone progress: {e}")
+
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: clone_voice_pipeline(
+                            input_path,
+                            ref_path,
+                            output_path,
+                            api_token=config.REPLICATE_API_TOKEN,
+                            correlation_id=correlation_id,
+                        ),
+                    ),
+                    timeout=config.VOICE_CLONE_TIMEOUT,
+                )
+            except asyncio.TimeoutError as e:
+                raise ProcessingTimeoutError("La clonación de voz tardó demasiado") from e
+
+            try:
+                await status_message.edit_text(
+                    "🗣️ Clonando voz...\n\n"
+                    "✅ Listo\n"
+                    "📤 Enviando audio...",
+                    reply_markup=reply_markup,
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update clone progress: {e}")
+
+            with open(output_path, "rb") as audio_file:
+                await message.reply_audio(
+                    audio=audio_file,
+                    title="Voz clonada",
+                    performer="OpenVoice",
+                    filename=f"voice_clone_{user_id}.mp3",
+                )
+
+            context.user_data.pop("voice_pipeline_correlation_id", None)
+            context.user_data.pop("voice_menu_file_id", None)
+            context.user_data.pop("voice_menu_correlation_id", None)
+
+            if status_message:
+                try:
+                    await status_message.delete()
+                except Exception as e:
+                    logger.warning(f"[{correlation_id}] Could not delete clone status message: {e}")
+
+        except VoiceCloneError as e:
+            logger.error(f"[{correlation_id}] Voice clone error: {e}")
+            try:
+                await status_message.edit_text(str(e))
+            except Exception:
+                await message.reply_text(str(e))
+            context.user_data.pop("voice_pipeline_correlation_id", None)
+
+        except (DownloadError, ValidationError, ProcessingTimeoutError) as e:
+            logger.error(f"[{correlation_id}] Voice clone processing error: {e}")
+            await handle_processing_error(update, e, user_id)
+            context.user_data.pop("voice_pipeline_correlation_id", None)
+            if status_message:
+                try:
+                    await status_message.delete()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected voice clone error for user {user_id}: {e}")
+            await handle_processing_error(update, e, user_id)
+            if status_message:
+                try:
+                    await status_message.delete()
+                except Exception:
+                    pass
+
+
+async def handle_voice_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Convertir / Clonar choices from the voice-note menu."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    data = query.data or ""
+    parts = data.split(":")
+    if len(parts) != 3 or parts[0] != "voice_menu":
+        logger.warning(f"Invalid voice menu callback data: {data}")
+        return
+
+    action, correlation_id = parts[1], parts[2]
+    file_id = context.user_data.get("voice_menu_file_id")
+    stored_cid = context.user_data.get("voice_menu_correlation_id")
+
+    if not file_id or (stored_cid and stored_cid != correlation_id):
+        await query.edit_message_text(
+            "No encontré la nota de voz pendiente. Envía la nota de voz de nuevo."
+        )
+        return
+
+    if action == "convert":
+        try:
+            await query.edit_message_text(
+                "🎙️ Procesando nota de voz...\n\n"
+                "1️⃣ Convirtiendo a MP3...\n"
+                "⏳ Espera por favor",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")]]
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Could not edit voice menu message: {e}")
+
+        await _run_voice_podcast_pipeline(
+            update,
+            context,
+            file_id=file_id,
+            user_id=user_id,
+            correlation_id=correlation_id,
+            status_message=query.message,
+        )
+        return
+
+    if action == "clone":
+        if not has_reference(user_id):
+            await query.edit_message_text(
+                "No tienes una voz de referencia guardada.\n\n"
+                "Para guardar una, responde a un audio o nota de voz con:\n"
+                "/voz_ref"
+            )
+            return
+
+        if not config.REPLICATE_API_TOKEN:
+            await query.edit_message_text(
+                "La clonación de voz no está configurada (falta REPLICATE_API_TOKEN). "
+                "Avisa al admin del bot."
+            )
+            return
+
+        try:
+            await query.edit_message_text(
+                "🗣️ Clonando voz...\n\n"
+                "⏳ Preparando...",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")]]
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Could not edit voice menu message: {e}")
+
+        await _run_voice_clone_pipeline(
+            update,
+            context,
+            file_id=file_id,
+            user_id=user_id,
+            correlation_id=correlation_id,
+            status_message=query.message,
+        )
+        return
+
+    logger.warning(f"[{correlation_id}] Unknown voice menu action: {action}")
+
+
+async def handle_voz_ref_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Save a replied/attached voice or audio as the user's clone reference.
+
+    Usage: reply to a voice note or audio with /voz_ref, or attach one to the command.
+    """
+    user_id = update.effective_user.id
+    correlation_id = str(uuid.uuid4())[:8]
+    logger.info(f"[{correlation_id}] /voz_ref from user {user_id}")
+
+    message = update.message
+    if not message:
+        return
+
+    # Prefer reply target, then attachments on the command message itself
+    target = message.reply_to_message or message
+    file_obj = None
+    ext = ".oga"
+
+    if target.voice:
+        file_obj = target.voice
+        ext = ".oga"
+    elif target.audio:
+        file_obj = target.audio
+        ext = ".mp3"
+    elif target.document and (
+        (target.document.mime_type and target.document.mime_type.startswith("audio/"))
+        or (target.document.file_name and Path(target.document.file_name).suffix.lower()
+            in {".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".aac"})
+    ):
+        file_obj = target.document
+        name = target.document.file_name or "ref.mp3"
+        ext = Path(name).suffix.lower() or ".mp3"
+
+    if not file_obj:
+        await message.reply_text(
+            "Para guardar tu voz de referencia, responde a un audio o nota de voz con:\n"
+            "/voz_ref\n\n"
+            "También puedes adjuntar el audio al comando."
+        )
+        return
+
+    if getattr(file_obj, "file_size", None):
+        is_valid, error_msg = validate_file_size(file_obj.file_size, config.max_incoming_audio_file_size_mb)
+        if not is_valid:
+            await message.reply_text(error_msg)
+            return
+
+    status = await message.reply_text("💾 Guardando voz de referencia...")
+
+    with TempManager() as temp_mgr:
+        try:
+            input_path = temp_mgr.get_temp_path(f"voz_ref_{user_id}_{correlation_id}{ext}")
+            file = await file_obj.get_file()
+            await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+            is_valid, error_msg = validate_audio_file(str(input_path))
+            if not is_valid:
+                await status.edit_text(error_msg or "El audio no es válido.")
+                return
+
+            save_reference(user_id, input_path)
+            await status.edit_text(
+                "✅ Voz de referencia guardada.\n"
+                "Ya puedes enviar una nota de voz y elegir «Clonar voz»."
+            )
+            logger.info(f"[{correlation_id}] Voice reference saved for user {user_id}")
+        except VoiceCloneError as e:
+            logger.error(f"[{correlation_id}] Failed to save voice ref: {e}")
+            await status.edit_text(str(e))
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error saving voice ref: {e}")
+            await status.edit_text("No pude guardar la voz de referencia. Intenta de nuevo.")
 
 
 async def handle_convert_audio_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6897,8 +7214,10 @@ async def handle_cancel_callback(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data.pop("pipeline_effects", None)
     context.user_data.pop("pipeline_selecting_effect", None)
 
-    # Clear voice pipeline keys
+    # Clear voice pipeline / menu keys
     context.user_data.pop("voice_pipeline_correlation_id", None)
+    context.user_data.pop("voice_menu_file_id", None)
+    context.user_data.pop("voice_menu_correlation_id", None)
 
     # Clear merge keys
     context.user_data.pop("merge_video_file_id", None)
@@ -6936,8 +7255,10 @@ async def handle_voice_cancel_callback(update: Update, context: ContextTypes.DEF
 
     correlation_id = callback_data.split(":")[1]
 
-    # Clear voice pipeline keys
+    # Clear voice pipeline / menu keys
     context.user_data.pop("voice_pipeline_correlation_id", None)
+    context.user_data.pop("voice_menu_file_id", None)
+    context.user_data.pop("voice_menu_correlation_id", None)
 
     await query.edit_message_text("❌ Procesamiento de nota de voz cancelado.")
     logger.info(f"[{correlation_id}] Voice pipeline cancelled by user {user_id}")
