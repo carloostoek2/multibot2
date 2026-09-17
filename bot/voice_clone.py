@@ -5,7 +5,8 @@ Pipeline:
 2. Synthesize the transcript in the reference speaker's voice with
    chenxwh/openvoice (OpenVoice v2, native Spanish support).
 
-Reference audio is stored on disk under data/voice_refs/{user_id}/.
+Reference audio is stored on disk under data/voice_refs/{user_id}/
+(or $VOICE_REFS_DIR/{user_id}/ when that env is set — use a Railway Volume).
 """
 from __future__ import annotations
 
@@ -23,8 +24,8 @@ logger = logging.getLogger(__name__)
 WHISPER_MODEL = "openai/whisper"
 OPENVOICE_MODEL = "chenxwh/openvoice"
 
-# Persist reference clips relative to repo root (or CWD when running the bot)
-VOICE_REFS_ROOT = Path("data") / "voice_refs"
+# Default relative path (local / CWD). Override with VOICE_REFS_DIR for persistent volumes.
+_DEFAULT_VOICE_REFS_DIR = Path("data") / "voice_refs"
 REF_FILENAME = "reference.mp3"
 
 # Default timeouts for Replicate calls (seconds)
@@ -35,9 +36,23 @@ class VoiceCloneError(Exception):
     """Raised when voice cloning fails in a user-facing way."""
 
 
+def get_voice_refs_root() -> Path:
+    """Return the root directory for per-user voice reference clips.
+
+    Honours VOICE_REFS_DIR when set (e.g. /data/voice_refs on a Railway Volume);
+    otherwise uses data/voice_refs relative to the process CWD.
+    """
+    raw = (os.getenv("VOICE_REFS_DIR") or "").strip()
+    return Path(raw) if raw else _DEFAULT_VOICE_REFS_DIR
+
+
+# Back-compat alias (resolved at import; prefer get_voice_refs_root() for runtime).
+VOICE_REFS_ROOT = get_voice_refs_root()
+
+
 def get_user_ref_dir(user_id: int) -> Path:
     """Return the directory that holds this user's voice reference."""
-    return VOICE_REFS_ROOT / str(user_id)
+    return get_voice_refs_root() / str(user_id)
 
 
 def get_user_ref_path(user_id: int) -> Path:
@@ -353,6 +368,7 @@ __all__ = [
     "WHISPER_MODEL",
     "OPENVOICE_MODEL",
     "VOICE_REFS_ROOT",
+    "get_voice_refs_root",
     "get_user_ref_dir",
     "get_user_ref_path",
     "has_reference",

@@ -9,6 +9,7 @@ from bot.voice_clone import (
     has_reference,
     save_reference,
     get_user_ref_path,
+    get_voice_refs_root,
     clone_voice_pipeline,
 )
 
@@ -49,3 +50,13 @@ class TestClonePipelineGating:
             os.environ.pop("REPLICATE_API_TOKEN", None)
             with pytest.raises(VoiceCloneError, match="REPLICATE_API_TOKEN"):
                 clone_voice_pipeline(src, ref, out, api_token=None)
+
+
+class TestVoiceRefsDirEnv:
+    def test_voice_refs_dir_env_overrides_default(self, tmp_path, monkeypatch):
+        root = tmp_path / "persistent" / "voice_refs"
+        monkeypatch.setenv("VOICE_REFS_DIR", str(root))
+        from bot.voice_clone import get_voice_refs_root, get_user_ref_path
+
+        assert get_voice_refs_root() == root
+        assert get_user_ref_path(42) == root / "42" / "reference.mp3"

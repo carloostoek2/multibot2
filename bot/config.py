@@ -114,6 +114,9 @@ class BotConfig:
     # Timeout (seconds) for the full voice-clone Replicate pipeline
     VOICE_CLONE_TIMEOUT: int = 180
 
+    # Directory for per-user voice reference MP3s (Railway Volume path recommended)
+    VOICE_REFS_DIR: Optional[str] = None
+
     def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
         errors = []
@@ -472,6 +475,7 @@ def load_config() -> BotConfig:
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
         REPLICATE_API_TOKEN=os.getenv("REPLICATE_API_TOKEN") or None,
         VOICE_CLONE_TIMEOUT=_int_env("VOICE_CLONE_TIMEOUT", 180),
+        VOICE_REFS_DIR=os.getenv("VOICE_REFS_DIR") or None,
     )
 
 

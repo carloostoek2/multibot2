@@ -47,8 +47,8 @@ RUN pip install --upgrade --force-reinstall \
 # Copy the rest of the application
 COPY . .
 
-# Create temp and local API directories
-RUN mkdir -p /tmp/bot_temp /var/lib/telegram-bot-api /tmp/telegram-bot-api
+# Create temp, local API, and voice-ref directories (VOICE_REFS_DIR may be a volume mount)
+RUN mkdir -p /tmp/bot_temp /var/lib/telegram-bot-api /tmp/telegram-bot-api /data/voice_refs /app/data/voice_refs
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
