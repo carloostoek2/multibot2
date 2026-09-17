@@ -2936,7 +2936,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     Options:
     1. Convertir y normalizar — existing podcast pipeline (MP3 + -16 LUFS + bass 4).
-    2. Clonar voz — zero-shot clone via Replicate (requires /voz_ref first).
+    2. Clonar voz — voice-to-voice FreeVC (requires /voz_ref first; keeps rhythm).
     3. Cancelar.
     """
     user_id = update.effective_user.id
@@ -3186,7 +3186,7 @@ async def _run_voice_clone_pipeline(
     correlation_id: str,
     status_message,
 ) -> None:
-    """Clone the voice note into the user's saved reference voice via Replicate."""
+    """Clone the voice note into the user's saved reference voice via FreeVC."""
     reply_markup = InlineKeyboardMarkup(
         [[InlineKeyboardButton("❌ Cancelar", callback_data=f"voice_cancel:{correlation_id}")]]
     )
@@ -3230,10 +3230,8 @@ async def _run_voice_clone_pipeline(
 
             try:
                 await status_message.edit_text(
-                    "🗣️ Clonando voz...\n\n"
-                    "1️⃣ Transcribiendo...\n"
-                    "2️⃣ Sintetizando con tu voz de referencia...\n"
-                    "⏳ Espera por favor",
+                    "🗣️ Clonando voz (conserva ritmo)...\n\n"
+                    "⏳ Esto puede tardar unos minutos",
                     reply_markup=reply_markup,
                 )
             except Exception as e:
@@ -3270,7 +3268,7 @@ async def _run_voice_clone_pipeline(
                 await message.reply_audio(
                     audio=audio_file,
                     title="Voz clonada",
-                    performer="OpenVoice",
+                    performer="FreeVC",
                     filename=f"voice_clone_{user_id}.mp3",
                 )
 

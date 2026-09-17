@@ -111,8 +111,8 @@ class BotConfig:
     # Optional Replicate API token for zero-shot voice cloning
     REPLICATE_API_TOKEN: Optional[str] = None
 
-    # Timeout (seconds) for the full voice-clone Replicate pipeline
-    VOICE_CLONE_TIMEOUT: int = 180
+    # Timeout (seconds) for FreeVC voice-clone Replicate call (~4 min typical)
+    VOICE_CLONE_TIMEOUT: int = 300
 
     # Directory for per-user voice reference MP3s (Railway Volume path recommended)
     VOICE_REFS_DIR: Optional[str] = None
@@ -474,7 +474,7 @@ def load_config() -> BotConfig:
         LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO"),
         TEMP_DIR=os.getenv("TEMP_DIR") or None,
         REPLICATE_API_TOKEN=os.getenv("REPLICATE_API_TOKEN") or None,
-        VOICE_CLONE_TIMEOUT=_int_env("VOICE_CLONE_TIMEOUT", 180),
+        VOICE_CLONE_TIMEOUT=_int_env("VOICE_CLONE_TIMEOUT", 300),
         VOICE_REFS_DIR=os.getenv("VOICE_REFS_DIR") or None,
     )
 

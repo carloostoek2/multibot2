@@ -11,7 +11,7 @@ class TestReplicateConfigOptional:
     def test_botconfig_accepts_missing_replicate_token(self):
         config = BotConfig(BOT_TOKEN="test-token")
         assert config.REPLICATE_API_TOKEN is None
-        assert config.VOICE_CLONE_TIMEOUT == 180
+        assert config.VOICE_CLONE_TIMEOUT == 300
 
     def test_botconfig_accepts_replicate_token(self):
         config = BotConfig(
