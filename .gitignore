@@ -67,3 +67,6 @@ cookies_codificado.md
 
 # Claude Code memory and worktrees
 .claude/
+
+# User voice cloning references (PII/audio)
+data/voice_refs/

@@ -3,6 +3,9 @@ set -euo pipefail
 
 yt-dlp --update-to nightly || true
 
+# Ensure voice reference dir exists (Railway Volume at /data or local data/voice_refs)
+mkdir -p "${VOICE_REFS_DIR:-/app/data/voice_refs}"
+
 if [[ "${TELEGRAM_LOCAL_MODE:-false}" == "true" ]]; then
   if [[ -z "${TELEGRAM_API_ID:-}" || -z "${TELEGRAM_API_HASH:-}" ]]; then
     echo "TELEGRAM_API_ID and TELEGRAM_API_HASH are required when TELEGRAM_LOCAL_MODE=true"
