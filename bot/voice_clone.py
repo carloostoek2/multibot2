@@ -20,9 +20,15 @@ from urllib.request import urlretrieve
 
 logger = logging.getLogger(__name__)
 
-# Replicate models
-WHISPER_MODEL = "openai/whisper"
-OPENVOICE_MODEL = "chenxwh/openvoice"
+# Replicate models — must pin version hashes.
+# Unpinned "owner/name" hits POST /v1/models/.../predictions and returns 404
+# with replicate>=1.x for these official/community models.
+WHISPER_MODEL = (
+    "openai/whisper:8099696689d249cf8b122d833c36ac3f75505c666a395ca40ef26f68e7d3d16e"
+)
+OPENVOICE_MODEL = (
+    "chenxwh/openvoice:d548923c9d7fc9330a3b7c7f9e2f91b2ee90c83311a351dfcd32af353799223d"
+)
 
 # Default relative path (local / CWD). Override with VOICE_REFS_DIR for persistent volumes.
 _DEFAULT_VOICE_REFS_DIR = Path("data") / "voice_refs"
