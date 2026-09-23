@@ -8,12 +8,14 @@ from bot.voice_clone import (
     VoiceCloneError,
     FREEVC_MODEL,
     FREEVC_MODEL_TYPE,
+    CLONE_EQ_FILTER,
     has_reference,
     save_reference,
     get_user_ref_path,
     get_voice_refs_root,
     clone_voice_pipeline,
     run_freevc,
+    apply_eq_and_convert_to_voice_note,
 )
 
 
@@ -129,3 +131,49 @@ class TestVoiceRefsDirEnv:
 
         assert get_voice_refs_root() == root
         assert get_user_ref_path(42) == root / "42" / "reference.mp3"
+
+
+class TestCloneEqVoiceNote:
+    def test_eq_filter_documents_shelves(self):
+        assert "lowshelf" in CLONE_EQ_FILTER
+        assert "highshelf" in CLONE_EQ_FILTER
+        assert "g=2" in CLONE_EQ_FILTER
+        assert "g=-2" in CLONE_EQ_FILTER
+
+    def test_apply_eq_and_convert_invokes_ffmpeg(self, tmp_path):
+        src = tmp_path / "clone.mp3"
+        dest = tmp_path / "clone.ogg"
+        src.write_bytes(b"mp3")
+
+        with patch("bot.voice_clone.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+            "bot.voice_clone.subprocess.run"
+        ) as run:
+            run.return_value = MagicMock(returncode=0, stderr="")
+
+            def _touch(*args, **kwargs):
+                dest.write_bytes(b"OggS")
+                return MagicMock(returncode=0, stderr="")
+
+            run.side_effect = _touch
+            result = apply_eq_and_convert_to_voice_note(src, dest)
+
+        assert result == dest
+        assert dest.is_file()
+        cmd = run.call_args.args[0]
+        assert cmd[0] == "ffmpeg"
+        assert CLONE_EQ_FILTER in cmd
+        assert "libopus" in cmd
+        assert str(dest) in cmd
+
+    def test_apply_eq_raises_on_ffmpeg_failure(self, tmp_path):
+        src = tmp_path / "clone.mp3"
+        dest = tmp_path / "clone.ogg"
+        src.write_bytes(b"mp3")
+
+        with patch("bot.voice_clone.shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+            "bot.voice_clone.subprocess.run",
+            return_value=MagicMock(returncode=1, stderr="boom"),
+        ):
+            with pytest.raises(VoiceCloneError, match="ecualizar"):
+                apply_eq_and_convert_to_voice_note(src, dest)
+

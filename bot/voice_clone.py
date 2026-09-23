@@ -3,7 +3,8 @@
 Pipeline:
 1. Convert Telegram source (OGG/Opus) and reference to a FreeVC-friendly format (WAV).
 2. Run jagilley/free-vc with model_type FreeVC (24kHz) — changes timbre only.
-3. Download the result and normalize to MP3 for Telegram reply_audio.
+3. Download the result and normalize to MP3.
+4. Post-process (EQ + OGG Opus) for Telegram reply_voice (voice-note bubble).
 
 Reference audio is stored on disk under data/voice_refs/{user_id}/
 (or $VOICE_REFS_DIR/{user_id}/ when that env is set — use a Railway Volume).
@@ -364,10 +365,85 @@ def clone_voice_pipeline(
             os.environ["REPLICATE_API_TOKEN"] = previous
 
 
+# Post-clone EQ for Telegram voice note (mid band left flat):
+# lowshelf @ 150 Hz +2 dB (bass), highshelf @ 4 kHz −2 dB (treble).
+CLONE_EQ_FILTER = "lowshelf=f=150:t=q:w=0.707:g=2,highshelf=f=4000:t=q:w=0.707:g=-2"
+
+
+def apply_eq_and_convert_to_voice_note(src: Path, dest: Path) -> Path:
+    """Apply clone EQ then convert to Telegram voice-note OGG Opus.
+
+    EQ filter (documented above): bass shelf +2 dB @ 150 Hz, treble shelf −2 dB
+    @ 4 kHz, mid unchanged. Output is mono 48 kHz Opus in an OGG container
+    (audio/ogg; codecs=opus) suitable for reply_voice / send_voice.
+
+    Args:
+        src: Cloned audio (typically MP3 from clone_voice_pipeline).
+        dest: Destination .ogg path.
+
+    Returns:
+        Path to the OGG Opus file.
+
+    Raises:
+        VoiceCloneError: If ffmpeg is missing or conversion fails.
+    """
+    src = Path(src)
+    dest = Path(dest)
+    if not src.is_file():
+        raise VoiceCloneError("No encontré el audio clonado para ecualizar.")
+
+    if shutil.which("ffmpeg") is None:
+        raise VoiceCloneError("ffmpeg no está disponible para post-procesar la voz.")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-af",
+        CLONE_EQ_FILTER,
+        "-vn",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "24k",
+        "-ar",
+        "48000",
+        "-ac",
+        "1",
+        "-application",
+        "voip",
+        "-vbr",
+        "on",
+        str(dest),
+    ]
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        logger.error(
+            "ffmpeg EQ/voice-note failed for %s: %s",
+            src,
+            (result.stderr or "")[-500:],
+        )
+        raise VoiceCloneError("No pude ecualizar/convertir la voz clonada.")
+    if not dest.is_file() or dest.stat().st_size == 0:
+        raise VoiceCloneError("No pude ecualizar/convertir la voz clonada.")
+    logger.info("Clone EQ + voice-note ready: %s (filter=%s)", dest, CLONE_EQ_FILTER)
+    return dest
+
+
+
 __all__ = [
     "VoiceCloneError",
     "FREEVC_MODEL",
     "FREEVC_MODEL_TYPE",
+    "CLONE_EQ_FILTER",
     "VOICE_REFS_ROOT",
     "get_voice_refs_root",
     "get_user_ref_dir",
@@ -377,4 +453,5 @@ __all__ = [
     "clear_reference",
     "run_freevc",
     "clone_voice_pipeline",
+    "apply_eq_and_convert_to_voice_note",
 ]

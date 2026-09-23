@@ -65,6 +65,7 @@ from bot.voice_clone import (
     save_reference,
     get_user_ref_path,
     clone_voice_pipeline,
+    apply_eq_and_convert_to_voice_note,
 )
 from bot.screenshot_processor import ScreenshotProcessor
 from bot.image_processor import (
@@ -3273,29 +3274,81 @@ async def _run_voice_clone_pipeline(
                 await status_message.edit_text(
                     "🗣️ Clonando voz...\n\n"
                     "✅ Listo\n"
-                    "📤 Enviando audio...",
+                    "🎛️ Ecualizando y convirtiendo a nota de voz...",
                     reply_markup=reply_markup,
                 )
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not update clone progress: {e}")
 
-            async def _send_cloned_audio():
-                with open(output_path, "rb") as audio_file:
-                    return await message.reply_audio(
-                        audio=audio_file,
-                        title="Voz clonada",
-                        performer="FreeVC",
-                        filename=f"voice_clone_{user_id}.mp3",
-                    )
+            # Prefer EQ + OGG Opus voice note; fall back to original MP3 as audio.
+            voice_note_path = temp_mgr.get_temp_path(
+                f"clone_vn_{user_id}_{correlation_id}.ogg"
+            )
+            send_as_voice = False
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: apply_eq_and_convert_to_voice_note(
+                        Path(output_path), Path(voice_note_path)
+                    ),
+                )
+                send_as_voice = True
+            except Exception as eq_err:
+                logger.warning(
+                    f"[{correlation_id}] Clone EQ/voice-note post-process failed; "
+                    f"falling back to MP3 reply_audio: {eq_err}"
+                )
 
-            await _send_with_retry(
-                _send_cloned_audio,
-                correlation_id=correlation_id,
-                label="reply_audio(voice_clone)",
+            send_status = (
+                "🗣️ Clonando voz...\n\n"
+                "✅ Listo\n"
+                "📤 Enviando nota de voz..."
+                if send_as_voice
+                else (
+                    "🗣️ Clonando voz...\n\n"
+                    "✅ Listo\n"
+                    "📤 Enviando audio..."
+                )
             )
-            logger.info(
-                f"[{correlation_id}] Voice clone audio sent successfully to user {user_id}"
-            )
+            try:
+                await status_message.edit_text(
+                    send_status,
+                    reply_markup=reply_markup,
+                )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not update clone progress: {e}")
+
+            if send_as_voice:
+                async def _send_cloned_voice():
+                    with open(voice_note_path, "rb") as voice_file:
+                        return await message.reply_voice(voice=voice_file)
+
+                await _send_with_retry(
+                    _send_cloned_voice,
+                    correlation_id=correlation_id,
+                    label="reply_voice(voice_clone)",
+                )
+                logger.info(
+                    f"[{correlation_id}] Voice clone note sent successfully to user {user_id}"
+                )
+            else:
+                async def _send_cloned_audio():
+                    with open(output_path, "rb") as audio_file:
+                        return await message.reply_audio(
+                            audio=audio_file,
+                            title="Voz clonada",
+                            performer="FreeVC",
+                            filename=f"voice_clone_{user_id}.mp3",
+                        )
+
+                await _send_with_retry(
+                    _send_cloned_audio,
+                    correlation_id=correlation_id,
+                    label="reply_audio(voice_clone)",
+                )
+                logger.info(
+                    f"[{correlation_id}] Voice clone audio sent successfully to user {user_id}"
+                )
 
             context.user_data.pop("voice_pipeline_correlation_id", None)
             context.user_data.pop("voice_menu_file_id", None)
