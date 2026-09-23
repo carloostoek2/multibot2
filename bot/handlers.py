@@ -3231,11 +3231,23 @@ async def _run_voice_clone_pipeline(
             try:
                 await status_message.edit_text(
                     "🗣️ Clonando voz (conserva ritmo)...\n\n"
-                    "⏳ Esto puede tardar unos minutos",
+                    "⏳ Esto puede tardar 3–5 minutos. No canceles.",
                     reply_markup=reply_markup,
                 )
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not update clone progress: {e}")
+
+            # FreeVC routinely takes 2–4+ min. Railway had VOICE_CLONE_TIMEOUT=180,
+            # which cancelled the handler while Replicate was still running — user saw
+            # timeout, then logs showed "downloading result" with no Telegram send.
+            # Floor at 300s (matches code default / .env.example) so a too-low env
+            # cannot abort a successful clone before send.
+            clone_timeout = max(int(config.VOICE_CLONE_TIMEOUT), 300)
+            if clone_timeout > config.VOICE_CLONE_TIMEOUT:
+                logger.warning(
+                    f"[{correlation_id}] VOICE_CLONE_TIMEOUT={config.VOICE_CLONE_TIMEOUT}s "
+                    f"is below FreeVC floor; using {clone_timeout}s"
+                )
 
             try:
                 await asyncio.wait_for(
@@ -3249,10 +3261,13 @@ async def _run_voice_clone_pipeline(
                             correlation_id=correlation_id,
                         ),
                     ),
-                    timeout=config.VOICE_CLONE_TIMEOUT,
+                    timeout=clone_timeout,
                 )
             except asyncio.TimeoutError as e:
-                raise ProcessingTimeoutError("La clonación de voz tardó demasiado") from e
+                raise ProcessingTimeoutError(
+                    "La clonación de voz tardó demasiado. Prueba con una nota más corta "
+                    "o vuelve a intentar en unos minutos."
+                ) from e
 
             try:
                 await status_message.edit_text(
@@ -3264,13 +3279,23 @@ async def _run_voice_clone_pipeline(
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not update clone progress: {e}")
 
-            with open(output_path, "rb") as audio_file:
-                await message.reply_audio(
-                    audio=audio_file,
-                    title="Voz clonada",
-                    performer="FreeVC",
-                    filename=f"voice_clone_{user_id}.mp3",
-                )
+            async def _send_cloned_audio():
+                with open(output_path, "rb") as audio_file:
+                    return await message.reply_audio(
+                        audio=audio_file,
+                        title="Voz clonada",
+                        performer="FreeVC",
+                        filename=f"voice_clone_{user_id}.mp3",
+                    )
+
+            await _send_with_retry(
+                _send_cloned_audio,
+                correlation_id=correlation_id,
+                label="reply_audio(voice_clone)",
+            )
+            logger.info(
+                f"[{correlation_id}] Voice clone audio sent successfully to user {user_id}"
+            )
 
             context.user_data.pop("voice_pipeline_correlation_id", None)
             context.user_data.pop("voice_menu_file_id", None)
