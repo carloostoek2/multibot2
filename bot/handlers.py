@@ -7114,8 +7114,11 @@ async def _send_images_in_albums(
     image_paths: list,
     correlation_id: str,
     caption_prefix: str = "Imagen",
-) -> None:
+) -> list[str]:
     """Send images grouped in albums of max 10.
+
+    Returns Telegram file_ids of sent images in send order so callers can
+    chain subsequent image-menu actions onto the latest results.
 
     Args:
         update: Telegram update object
@@ -7129,6 +7132,7 @@ async def _send_images_in_albums(
     user_id = update.effective_user.id
     total = len(image_paths)
     album_size = min(config.MAX_IMAGE_BATCH_SIZE, 10)
+    sent_file_ids: list[str] = []
 
     logger.info(f"[{correlation_id}] Sending {total} images in albums to user {user_id}")
 
@@ -7148,9 +7152,16 @@ async def _send_images_in_albums(
                 media_group.append(InputMediaPhoto(media=fh, caption=caption))
 
             if hasattr(update, 'callback_query') and update.callback_query:
-                await update.callback_query.message.reply_media_group(media=media_group)
+                messages = await update.callback_query.message.reply_media_group(media=media_group)
             elif hasattr(update, 'message') and update.message:
-                await update.message.reply_media_group(media=media_group)
+                messages = await update.message.reply_media_group(media=media_group)
+            else:
+                messages = []
+
+            for msg in messages or []:
+                file_id = _extract_sent_image_file_id(msg)
+                if file_id:
+                    sent_file_ids.append(file_id)
 
             logger.info(
                 f"[{correlation_id}] Sent album {album_num}/{total_albums} "
@@ -7163,14 +7174,34 @@ async def _send_images_in_albums(
                 try:
                     with open(path, 'rb') as f:
                         if hasattr(update, 'callback_query') and update.callback_query:
-                            await update.callback_query.message.reply_photo(photo=f)
+                            sent = await update.callback_query.message.reply_photo(photo=f)
                         elif hasattr(update, 'message') and update.message:
-                            await update.message.reply_photo(photo=f)
+                            sent = await update.message.reply_photo(photo=f)
+                        else:
+                            sent = None
+                    file_id = _extract_sent_image_file_id(sent)
+                    if file_id:
+                        sent_file_ids.append(file_id)
                 except Exception as ex:
                     logger.error(f"[{correlation_id}] Failed to send individual image: {ex}")
         finally:
             for fh in file_handles:
                 fh.close()
+
+    return sent_file_ids
+
+
+def _extract_sent_image_file_id(message) -> str | None:
+    """Extract Telegram file_id from a sent photo or document message."""
+    if message is None:
+        return None
+    photo = getattr(message, "photo", None)
+    if photo:
+        return photo[-1].file_id
+    document = getattr(message, "document", None)
+    if document is not None and getattr(document, "file_id", None):
+        return document.file_id
+    return None
 
 
 async def _send_screenshots_in_albums(
@@ -11226,6 +11257,31 @@ def _store_image_menu_context(
     user_data["image_menu_truncated"] = truncated
 
 
+def _promote_image_menu_results(
+    context: ContextTypes.DEFAULT_TYPE,
+    new_file_ids: list[str],
+    *,
+    keep_originals: bool = True,
+) -> None:
+    """Point image-menu file_ids at the last sent results for chaining.
+
+    Optionally snapshot the first originals into image_menu_original_file_ids
+    once so a future undo path can recover them.
+    """
+    if not new_file_ids:
+        return
+    ud = context.user_data
+    if keep_originals and "image_menu_original_file_ids" not in ud:
+        originals = ud.get("image_menu_file_ids") or (
+            [ud["image_menu_file_id"]] if ud.get("image_menu_file_id") else []
+        )
+        if originals:
+            ud["image_menu_original_file_ids"] = list(originals)
+            ud["image_menu_original_file_id"] = originals[0]
+    ud["image_menu_file_ids"] = list(new_file_ids)
+    ud["image_menu_file_id"] = new_file_ids[0]
+
+
 async def _send_image_menu_message(
     application,
     chat,
@@ -12174,13 +12230,14 @@ async def handle_image_compress_callback(update: Update, context: ContextTypes.D
 
             # Send compressed image
             with open(output_path, "rb") as img_file:
-                await query.message.reply_document(
+                sent = await query.message.reply_document(
                     document=img_file,
                     filename=f"comprimida_{correlation_id}.jpg",
                     caption=f"✅ Comprimida al {quality}%\n"
                             f"📦 {_format_size(original_size)} → {_format_size(compressed_size)} "
                             f"({reduction:.0f}% menos)"
                 )
+            _promote_image_menu_results(context, [sent.document.file_id])
 
             reply_markup = _get_image_post_menu_keyboard(correlation_id)
             await query.message.reply_text(
@@ -12277,11 +12334,12 @@ async def handle_image_convert_callback(update: Update, context: ContextTypes.DE
 
             # Send converted image
             with open(output_path, "rb") as img_file:
-                await query.message.reply_document(
+                sent = await query.message.reply_document(
                     document=img_file,
                     filename=f"convertida_{correlation_id}{fmt_info['ext']}",
                     caption=caption
                 )
+            _promote_image_menu_results(context, [sent.document.file_id])
 
             reply_markup = _get_image_post_menu_keyboard(correlation_id)
             await query.message.reply_text(
@@ -12379,11 +12437,12 @@ async def handle_image_resize_callback(update: Update, context: ContextTypes.DEF
 
             # Send resized image
             with open(output_path, "rb") as img_file:
-                await query.message.reply_document(
+                sent = await query.message.reply_document(
                     document=img_file,
                     filename=f"redimensionada_{correlation_id}.jpg",
                     caption=caption
                 )
+            _promote_image_menu_results(context, [sent.document.file_id])
 
             reply_markup = _get_image_post_menu_keyboard(correlation_id)
             await query.message.reply_text(
@@ -12498,20 +12557,22 @@ async def handle_image_enhance_callback(update: Update, context: ContextTypes.DE
 
             caption = f"✅ Mejorada ({profile_label})"
             if count > 1:
-                await _send_images_in_albums(
+                sent_ids = await _send_images_in_albums(
                     update,
                     context,
                     enhanced_paths,
                     correlation_id,
                     caption_prefix=f"Mejorada ({profile_label})",
                 )
+                _promote_image_menu_results(context, sent_ids)
             else:
                 with open(enhanced_paths[0], "rb") as img_file:
-                    await query.message.reply_document(
+                    sent = await query.message.reply_document(
                         document=img_file,
                         filename=f"mejorada_{correlation_id}.jpg",
                         caption=caption,
                     )
+                _promote_image_menu_results(context, [sent.document.file_id])
 
             await query.edit_message_text(
                 f"¡Listo! {count} imagen(es) mejorada(s) con perfil {profile_label}."
@@ -12637,20 +12698,22 @@ async def handle_image_noise_callback(update: Update, context: ContextTypes.DEFA
 
             caption = f"✅ Naturalizada ({strength_label})"
             if count > 1:
-                await _send_images_in_albums(
+                sent_ids = await _send_images_in_albums(
                     update,
                     context,
                     processed_paths,
                     correlation_id,
                     caption_prefix=f"Naturalizada ({strength_label})",
                 )
+                _promote_image_menu_results(context, sent_ids)
             else:
                 with open(processed_paths[0], "rb") as img_file:
-                    await query.message.reply_document(
+                    sent = await query.message.reply_document(
                         document=img_file,
                         filename=f"naturalizada_{correlation_id}.jpg",
                         caption=caption,
                     )
+                _promote_image_menu_results(context, [sent.document.file_id])
 
             await query.edit_message_text(
                 f"¡Listo! {count} imagen(es) naturalizada(s) con intensidad {strength_label}."
