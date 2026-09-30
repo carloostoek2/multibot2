@@ -117,6 +117,9 @@ class BotConfig:
     # Directory for per-user voice reference MP3s (Railway Volume path recommended)
     VOICE_REFS_DIR: Optional[str] = None
 
+    # Directory for per-user settings JSON (Railway Volume path recommended)
+    USER_SETTINGS_DIR: Optional[str] = None
+
     def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
         errors = []
@@ -476,6 +479,7 @@ def load_config() -> BotConfig:
         REPLICATE_API_TOKEN=os.getenv("REPLICATE_API_TOKEN") or None,
         VOICE_CLONE_TIMEOUT=_int_env("VOICE_CLONE_TIMEOUT", 300),
         VOICE_REFS_DIR=os.getenv("VOICE_REFS_DIR") or None,
+        USER_SETTINGS_DIR=os.getenv("USER_SETTINGS_DIR") or None,
     )
 
 

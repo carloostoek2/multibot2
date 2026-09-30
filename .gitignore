@@ -70,3 +70,6 @@ cookies_codificado.md
 
 # User voice cloning references (PII/audio)
 data/voice_refs/
+
+# Per-user bot preferences (/config)
+data/user_settings/

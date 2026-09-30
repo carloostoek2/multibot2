@@ -69,6 +69,7 @@ from bot.handlers import (
     handle_image_compress_callback, handle_image_convert_callback,
     handle_image_resize_callback, handle_image_enhance_callback,
     handle_image_noise_callback,
+    handle_config_command, handle_config_callback,
     # YouTube menu handler
     handle_youtube_menu_callback,
 )
@@ -113,6 +114,8 @@ def main() -> None:
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("config", handle_config_command))
+    application.add_handler(CallbackQueryHandler(handle_config_callback, pattern="^config_toggle:"))
 
     # Download command handler (must be before message handlers)
     application.add_handler(CommandHandler("download", handle_download_command))
