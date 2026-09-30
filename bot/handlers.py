@@ -6,6 +6,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Iterator, TypeVar
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ChatType
@@ -383,7 +384,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "- Envía un audio → Menú con opciones (Nota de Voz, Dividir Audio, Unir Audios, etc.)\n"
         "- Envía una nota de voz → Convertir y normalizar, o Clonar voz\n"
         "- Envía una foto o imagen → Menú con opciones (Comprimir, Convertir, Redimensionar, Naturalizar, Info)\n"
-        "- Envía un enlace de video → Menú de descarga con opciones combinadas"
+        "- Envía un álbum (2–10 fotos) → Pipeline Naturalizar + Mejorar (según /config)\n"
+        "- Envía un enlace de video → Menú de descarga con opciones combinadas\n\n"
+        "⚙️ /config - Activar/desactivar pipeline automático de álbumes"
     )
 
 
@@ -7114,6 +7117,7 @@ async def _send_images_in_albums(
     image_paths: list,
     correlation_id: str,
     caption_prefix: str = "Imagen",
+    chat_id: int | None = None,
 ) -> list[str]:
     """Send images grouped in albums of max 10.
 
@@ -7126,15 +7130,39 @@ async def _send_images_in_albums(
         image_paths: List of paths to image files
         correlation_id: Correlation ID for logging
         caption_prefix: Prefix for album captions (e.g. "Imagen", "Captura")
+        chat_id: Optional chat id fallback when update has no reply target
     """
     from telegram import InputMediaPhoto
 
-    user_id = update.effective_user.id
+    user = getattr(update, "effective_user", None)
+    user_id = getattr(user, "id", None) or "unknown"
     total = len(image_paths)
     album_size = min(config.MAX_IMAGE_BATCH_SIZE, 10)
     sent_file_ids: list[str] = []
+    fallback_chat_id = chat_id
+    if fallback_chat_id is None:
+        chat = getattr(update, "effective_chat", None)
+        fallback_chat_id = getattr(chat, "id", None)
 
     logger.info(f"[{correlation_id}] Sending {total} images in albums to user {user_id}")
+
+    async def _dispatch_media_group(media_group):
+        if hasattr(update, "callback_query") and update.callback_query:
+            return await update.callback_query.message.reply_media_group(media=media_group)
+        if hasattr(update, "message") and update.message:
+            return await update.message.reply_media_group(media=media_group)
+        if fallback_chat_id is not None:
+            return await context.bot.send_media_group(chat_id=fallback_chat_id, media=media_group)
+        return []
+
+    async def _dispatch_photo(photo_file):
+        if hasattr(update, "callback_query") and update.callback_query:
+            return await update.callback_query.message.reply_photo(photo=photo_file)
+        if hasattr(update, "message") and update.message:
+            return await update.message.reply_photo(photo=photo_file)
+        if fallback_chat_id is not None:
+            return await context.bot.send_photo(chat_id=fallback_chat_id, photo=photo_file)
+        return None
 
     for i in range(0, total, album_size):
         album_paths = image_paths[i:i + album_size]
@@ -7151,12 +7179,7 @@ async def _send_images_in_albums(
                 file_handles.append(fh)
                 media_group.append(InputMediaPhoto(media=fh, caption=caption))
 
-            if hasattr(update, 'callback_query') and update.callback_query:
-                messages = await update.callback_query.message.reply_media_group(media=media_group)
-            elif hasattr(update, 'message') and update.message:
-                messages = await update.message.reply_media_group(media=media_group)
-            else:
-                messages = []
+            messages = await _dispatch_media_group(media_group)
 
             for msg in messages or []:
                 file_id = _extract_sent_image_file_id(msg)
@@ -7172,13 +7195,8 @@ async def _send_images_in_albums(
             logger.error(f"[{correlation_id}] Failed to send album {album_num}: {e}")
             for path in album_paths:
                 try:
-                    with open(path, 'rb') as f:
-                        if hasattr(update, 'callback_query') and update.callback_query:
-                            sent = await update.callback_query.message.reply_photo(photo=f)
-                        elif hasattr(update, 'message') and update.message:
-                            sent = await update.message.reply_photo(photo=f)
-                        else:
-                            sent = None
+                    with open(path, "rb") as f:
+                        sent = await _dispatch_photo(f)
                     file_id = _extract_sent_image_file_id(sent)
                     if file_id:
                         sent_file_ids.append(file_id)
@@ -7441,9 +7459,12 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         truncated = context.user_data.get("image_menu_truncated", False)
         reply_markup = _get_image_menu_keyboard(count)
         if count > 1:
+            noise_label = _album_pipeline_noise_label()
+            enhance_label = _album_pipeline_enhance_label()
             menu_text = (
                 f"{count} imágenes recibidas.\n\n"
-                "«Mejorar», «Naturalizar» y «Agrupar» procesan todas las imágenes del álbum. "
+                "«Mejorar», «Naturalizar», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
+                f"Pipeline = Naturalizar ({noise_label}) → Mejorar ({enhance_label}).\n"
                 "Selecciona una acción:"
             )
         else:
@@ -11233,12 +11254,299 @@ async def _handle_postdownload_compress(
 
 IMAGE_BATCH_DEBOUNCE_SECONDS = 1.5
 
+# Album auto-pipeline presets (match existing Naturalizar/Mejorar definitions)
+ALBUM_AUTO_PIPELINE_PREF_KEY = "album_auto_pipeline"
+ALBUM_PIPELINE_NOISE_STRENGTH = 2  # "Sutil" in NOISE_STRENGTH_LEVELS
+ALBUM_PIPELINE_ENHANCE_PROFILE = "equilibrado"  # balanced enhance
+ALBUM_PIPELINE_MIN_IMAGES = 2
+
+
+def _is_album_auto_pipeline_enabled(user_data: dict) -> bool:
+    """Return per-user album auto-pipeline preference (default OFF)."""
+    return bool(user_data.get(ALBUM_AUTO_PIPELINE_PREF_KEY, False))
+
+
+def _set_album_auto_pipeline_enabled(user_data: dict, enabled: bool) -> bool:
+    """Persist album auto-pipeline preference in PTB user_data. Returns new value."""
+    user_data[ALBUM_AUTO_PIPELINE_PREF_KEY] = bool(enabled)
+    return bool(enabled)
+
+
+def _album_pipeline_noise_label() -> str:
+    return NOISE_STRENGTH_LEVELS[ALBUM_PIPELINE_NOISE_STRENGTH]["label"]
+
+
+def _album_pipeline_enhance_label() -> str:
+    return ENHANCEMENT_PROFILES[ALBUM_PIPELINE_ENHANCE_PROFILE]
+
+
+def _format_config_album_auto_text(enabled: bool) -> str:
+    estado = "Activado ✅" if enabled else "Desactivado ⬜"
+    return (
+        "⚙️ *Configuración*\n\n"
+        "*Pipeline automático de álbumes*\n"
+        f"Naturalizar ({_album_pipeline_noise_label()}) → "
+        f"Mejorar ({_album_pipeline_enhance_label()})\n\n"
+        "Solo aplica a álbumes de 2–10 imágenes (no a fotos sueltas ni videos).\n\n"
+        f"Estado: *{estado}*"
+    )
+
+
+def _get_config_keyboard(enabled: bool) -> InlineKeyboardMarkup:
+    toggle_label = "✅ Auto álbum: ON" if enabled else "⬜ Auto álbum: OFF"
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(toggle_label, callback_data="config_toggle:album_auto")]]
+    )
+
+
+async def handle_config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show /config with album auto-pipeline toggle (only option for now)."""
+    enabled = _is_album_auto_pipeline_enabled(context.user_data)
+    await update.message.reply_text(
+        _format_config_album_auto_text(enabled),
+        parse_mode="Markdown",
+        reply_markup=_get_config_keyboard(enabled),
+    )
+
+
+async def handle_config_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /config inline toggles."""
+    query = update.callback_query
+    await query.answer()
+
+    callback_data = query.data or ""
+    if callback_data != "config_toggle:album_auto":
+        await query.edit_message_text("Error: opción de configuración inválida.")
+        return
+
+    current = _is_album_auto_pipeline_enabled(context.user_data)
+    enabled = _set_album_auto_pipeline_enabled(context.user_data, not current)
+    user_id = update.effective_user.id
+    logger.info(
+        f"User {user_id} set album_auto_pipeline={'ON' if enabled else 'OFF'}"
+    )
+    await query.edit_message_text(
+        _format_config_album_auto_text(enabled),
+        parse_mode="Markdown",
+        reply_markup=_get_config_keyboard(enabled),
+    )
+
+
+
 
 def _user_data_key(user_id: int, chat) -> int | tuple[int, int]:
     """Return the PTB user_data key for a user/chat pair."""
     if chat.type == ChatType.PRIVATE:
         return user_id
     return (user_id, chat.id)
+
+
+async def _run_image_album_pipeline(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    file_ids: list[str],
+    user_id: int,
+    correlation_id: str,
+    status_message,
+    chat_id: int | None = None,
+    truncated: bool = False,
+) -> None:
+    """Run album pipeline: Naturalizar (Sutil) → Mejorar (Equilibrado) → send result.
+
+    Mirrors the voice-note podcast pipeline pattern: sequential steps with status
+    updates; only the final album is shown. Intermediate results stay local and
+    final Telegram file_ids are promoted for menu chaining (PR #4).
+    """
+    count = len(file_ids)
+    if count < ALBUM_PIPELINE_MIN_IMAGES:
+        text = "El pipeline automático solo aplica a álbumes de 2–10 imágenes."
+        if status_message is not None:
+            try:
+                await status_message.edit_text(text)
+            except Exception:
+                pass
+        return
+
+    noise_label = _album_pipeline_noise_label()
+    enhance_label = _album_pipeline_enhance_label()
+    strength = ALBUM_PIPELINE_NOISE_STRENGTH
+    profile = ALBUM_PIPELINE_ENHANCE_PROFILE
+
+    chat = getattr(update, "effective_chat", None)
+    if chat is None and status_message is not None:
+        chat = getattr(status_message, "chat", None)
+    if chat is None and chat_id is not None:
+        chat = SimpleNamespace(id=chat_id, type="private")
+    if chat is None:
+        logger.error(f"[{correlation_id}] Album pipeline missing chat for user {user_id}")
+        return
+
+    resolved_chat_id = chat_id if chat_id is not None else chat.id
+
+    # Store menu context so post-pipeline chaining works
+    _store_image_menu_context(
+        context.application,
+        user_id,
+        chat,
+        file_ids,
+        correlation_id,
+        truncated=truncated,
+    )
+    # Keep context.user_data in sync (PTB private chats share this dict;
+    # group chats may use a composite key in application.user_data).
+    context.user_data["image_menu_file_ids"] = list(file_ids)
+    context.user_data["image_menu_file_id"] = file_ids[0]
+    context.user_data["image_menu_correlation_id"] = correlation_id
+    context.user_data["image_menu_truncated"] = truncated
+
+    batch_timeout = min(300, 45 + 25 * count)
+    batch_deadline = time.monotonic() + batch_timeout
+
+    required_space_mb = count * config.max_incoming_file_size_mb * 3
+    has_space, space_error = check_disk_space(required_space_mb)
+    if not has_space:
+        if status_message is not None:
+            await status_message.edit_text(space_error)
+        return
+
+    async def _edit_status(body: str) -> None:
+        if status_message is None:
+            return
+        try:
+            await status_message.edit_text(body)
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Could not update pipeline status: {e}")
+
+    await _edit_status(
+        f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
+        f"1️⃣ Naturalizando ({noise_label})...\n"
+        "⏳ Espera por favor"
+    )
+
+    with TempManager() as temp_mgr:
+        try:
+            loop = asyncio.get_event_loop()
+            naturalized_paths: list[str] = []
+
+            for idx, file_id in enumerate(file_ids, start=1):
+                await _edit_status(
+                    f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
+                    f"1️⃣ Naturalizando {idx}/{count} ({noise_label})...\n"
+                    "⏳ Espera por favor"
+                )
+                input_filename = f"album_pipe_in_{user_id}_{correlation_id}_{idx}.img"
+                natural_filename = f"album_pipe_nat_{user_id}_{correlation_id}_{idx}.jpg"
+                input_path = temp_mgr.get_temp_path(input_filename)
+                natural_path = temp_mgr.get_temp_path(natural_filename)
+
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+                remaining = max(5, batch_deadline - time.monotonic())
+                success, error = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda inp=str(input_path), out=str(natural_path), lvl=strength: (
+                            ImageProcessor.add_noise(inp, out, lvl)
+                        ),
+                    ),
+                    timeout=remaining,
+                )
+                if not success:
+                    raise ImageNoiseError(error or "No pude aplicar el ruido sutil")
+                naturalized_paths.append(str(natural_path))
+
+            await _edit_status(
+                f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
+                f"✅ Naturalizado ({noise_label})\n"
+                f"2️⃣ Mejorando ({enhance_label})...\n"
+                "⏳ Espera por favor"
+            )
+
+            enhanced_paths: list[str] = []
+            for idx, natural_path in enumerate(naturalized_paths, start=1):
+                await _edit_status(
+                    f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
+                    f"✅ Naturalizado ({noise_label})\n"
+                    f"2️⃣ Mejorando {idx}/{count} ({enhance_label})...\n"
+                    "⏳ Espera por favor"
+                )
+                out_filename = f"album_pipe_enh_{user_id}_{correlation_id}_{idx}.jpg"
+                output_path = temp_mgr.get_temp_path(out_filename)
+
+                remaining = max(5, batch_deadline - time.monotonic())
+                success, error = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda inp=natural_path, out=str(output_path), prof=profile: (
+                            ImageProcessor.enhance(inp, out, prof)
+                        ),
+                    ),
+                    timeout=remaining,
+                )
+                if not success:
+                    raise ImageEnhancementError(error or "No pude mejorar la imagen")
+                enhanced_paths.append(str(output_path))
+
+            await _edit_status(
+                f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
+                f"✅ Naturalizado ({noise_label})\n"
+                f"✅ Mejorado ({enhance_label})\n"
+                "📤 Enviando resultado..."
+            )
+
+            caption_prefix = f"Pipeline ({noise_label} → {enhance_label})"
+            sent_ids = await _send_images_in_albums(
+                update,
+                context,
+                enhanced_paths,
+                correlation_id,
+                caption_prefix=caption_prefix,
+                chat_id=resolved_chat_id,
+            )
+            _promote_image_menu_results(context, sent_ids)
+
+            await _edit_status(
+                f"¡Listo! Álbum procesado: Naturalizar ({noise_label}) → "
+                f"Mejorar ({enhance_label})."
+            )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            try:
+                if status_message is not None:
+                    await status_message.reply_text(
+                        "¿Quieres hacer algo más con estas imágenes?",
+                        reply_markup=reply_markup,
+                    )
+                else:
+                    await context.bot.send_message(
+                        chat_id=resolved_chat_id,
+                        text="¿Quieres hacer algo más con estas imágenes?",
+                        reply_markup=reply_markup,
+                    )
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Could not send post-pipeline menu: {e}")
+
+            logger.info(
+                f"[{correlation_id}] Album auto-pipeline completed for user {user_id} "
+                f"({count} images)"
+            )
+
+        except (ImageNoiseError, ImageEnhancementError) as e:
+            logger.error(f"[{correlation_id}] Album pipeline failed: {e}")
+            await _edit_status(f"Error: {get_user_error_message(e)}")
+        except ProcessingTimeoutError as e:
+            logger.error(f"[{correlation_id}] Album pipeline timed out")
+            await _edit_status(f"Error: {get_user_error_message(e)}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Album pipeline timed out")
+            await _edit_status(
+                "Error: El pipeline tardó demasiado. Intenta con menos imágenes o más pequeñas."
+            )
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected album pipeline error: {e}")
+            await _edit_status(DEFAULT_ERROR_MESSAGE)
 
 
 def _store_image_menu_context(
@@ -11298,9 +11606,12 @@ async def _send_image_menu_message(
 
     count = len(file_ids)
     if count > 1:
+        noise_label = _album_pipeline_noise_label()
+        enhance_label = _album_pipeline_enhance_label()
         text = (
             f"{count} imágenes recibidas.\n\n"
-            "«Mejorar», «Naturalizar» y «Agrupar» procesan todas las imágenes del álbum. "
+            "«Mejorar», «Naturalizar», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
+            f"Pipeline = Naturalizar ({noise_label}) → Mejorar ({enhance_label}).\n"
             "Selecciona una acción:"
         )
     else:
@@ -11383,15 +11694,54 @@ async def _schedule_image_batch_menu(
         try:
             await asyncio.sleep(IMAGE_BATCH_DEBOUNCE_SECONDS)
             file_ids = list(session["file_ids"])
-            await _send_image_menu_message(
-                application,
-                session["chat"],
-                session["user_id"],
-                file_ids,
-                session["correlation_id"],
-                reply_to_message_id=session["last_message_id"],
-                truncated=session.get("truncated", False),
-            )
+            truncated = session.get("truncated", False)
+            correlation_id = session["correlation_id"]
+            chat = session["chat"]
+            uid = session["user_id"]
+
+            # Auto pipeline: albums only (2+), never single images
+            user_data = application.user_data[_user_data_key(uid, chat)]
+            if (
+                len(file_ids) >= ALBUM_PIPELINE_MIN_IMAGES
+                and _is_album_auto_pipeline_enabled(user_data)
+            ):
+                status = await application.bot.send_message(
+                    chat_id=chat.id,
+                    text=(
+                        f"🖼️ Álbum recibido ({len(file_ids)} imágenes). "
+                        "Iniciando pipeline automático..."
+                    ),
+                    reply_to_message_id=session["last_message_id"],
+                )
+                # Minimal update-like object for send helpers
+                fake_update = SimpleNamespace(
+                    effective_user=SimpleNamespace(id=uid),
+                    effective_chat=chat,
+                    message=None,
+                    callback_query=None,
+                )
+                # Bind context.user_data to this user's store for promote/store
+                # PTB context already points at the triggering user in private chats.
+                await _run_image_album_pipeline(
+                    fake_update,
+                    context,
+                    file_ids=file_ids,
+                    user_id=uid,
+                    correlation_id=correlation_id,
+                    status_message=status,
+                    chat_id=chat.id,
+                    truncated=truncated,
+                )
+            else:
+                await _send_image_menu_message(
+                    application,
+                    chat,
+                    uid,
+                    file_ids,
+                    correlation_id,
+                    reply_to_message_id=session["last_message_id"],
+                    truncated=truncated,
+                )
         except asyncio.CancelledError:
             cancelled = True
             return
@@ -11431,6 +11781,12 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
     """Generate inline keyboard for image processing menu."""
     if image_count > 1:
         keyboard = [
+            [
+                InlineKeyboardButton(
+                    "⚡ Pipeline (Naturalizar + Mejorar)",
+                    callback_data="image_action:pipeline",
+                ),
+            ],
             [
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
                 InlineKeyboardButton("Naturalizar", callback_data="image_action:noise"),
@@ -11940,14 +12296,37 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
         return
 
-    if len(file_ids) > 1 and action not in ("enhance", "group", "noise"):
+    if len(file_ids) > 1 and action not in ("enhance", "group", "noise", "pipeline"):
         await query.edit_message_text(
-            "Solo «Mejorar», «Naturalizar» y «Agrupar» están disponibles para álbumes. "
+            "Solo «Pipeline», «Mejorar», «Naturalizar» y «Agrupar» están disponibles para álbumes. "
             "Envía una imagen a la vez para otras acciones."
         )
         return
 
     logger.info(f"[{correlation_id}] Image menu action '{action}' selected by user {user_id}")
+
+    if action == "pipeline":
+        pipeline_ids = list(file_ids) if file_ids else ([file_id] if file_id else [])
+        if len(pipeline_ids) < ALBUM_PIPELINE_MIN_IMAGES:
+            await query.edit_message_text(
+                "El pipeline solo aplica a álbumes de 2–10 imágenes. "
+                "Envía un álbum o usa Naturalizar/Mejorar por separado."
+            )
+            return
+        await query.edit_message_text(
+            f"🖼️ Iniciando pipeline ({len(pipeline_ids)} imágenes)..."
+        )
+        await _run_image_album_pipeline(
+            update,
+            context,
+            file_ids=pipeline_ids,
+            user_id=user_id,
+            correlation_id=correlation_id,
+            status_message=query.message,
+            chat_id=query.message.chat_id if query.message else None,
+            truncated=context.user_data.get("image_menu_truncated", False),
+        )
+        return
 
     if action == "group":
         group_file_ids = list(file_ids) if file_ids else [file_id]

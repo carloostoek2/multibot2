@@ -18,14 +18,20 @@ class TestImageBatchMenuKeyboard:
         assert "Agrupar" in labels
         assert "Mejorar Imagen" not in labels
 
-    def test_batch_menu_shows_mejorar_naturalizar_and_agrupar(self):
+    def test_batch_menu_shows_pipeline_mejorar_naturalizar_and_agrupar(self):
         keyboard = _get_image_menu_keyboard(3)
         buttons = [btn for row in keyboard.inline_keyboard for btn in row]
-        assert len(buttons) == 3
+        assert len(buttons) == 4
         labels = [btn.text for btn in buttons]
         callback_data = [btn.callback_data for btn in buttons]
-        assert labels == ["Mejorar", "Naturalizar", "Agrupar"]
+        assert labels == [
+            "⚡ Pipeline (Naturalizar + Mejorar)",
+            "Mejorar",
+            "Naturalizar",
+            "Agrupar",
+        ]
         assert callback_data == [
+            "image_action:pipeline",
             "image_action:enhance",
             "image_action:noise",
             "image_action:group",
