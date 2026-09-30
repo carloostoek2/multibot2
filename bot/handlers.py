@@ -55,6 +55,7 @@ from bot.validators import (
     validate_video_file,
     validate_audio_file,
     check_disk_space,
+    estimate_image_batch_space,
     estimate_required_space,
     ValidationError,
 )
@@ -11421,7 +11422,7 @@ async def _run_image_album_pipeline(
     batch_timeout = min(300, 45 + 25 * count)
     batch_deadline = time.monotonic() + batch_timeout
 
-    required_space_mb = count * config.max_incoming_file_size_mb * 3
+    required_space_mb = estimate_image_batch_space(count, copies=3)
     has_space, space_error = check_disk_space(required_space_mb)
     if not has_space:
         if status_message is not None:
@@ -12894,7 +12895,7 @@ async def handle_image_enhance_callback(update: Update, context: ContextTypes.DE
     batch_timeout = min(180, 30 + 15 * count)
     batch_deadline = time.monotonic() + batch_timeout
 
-    required_space_mb = count * config.max_incoming_file_size_mb * 2
+    required_space_mb = estimate_image_batch_space(count, copies=2)
     has_space, space_error = check_disk_space(required_space_mb)
     if not has_space:
         await query.edit_message_text(space_error)
@@ -13035,7 +13036,7 @@ async def handle_image_noise_callback(update: Update, context: ContextTypes.DEFA
     batch_timeout = min(180, 30 + 15 * count)
     batch_deadline = time.monotonic() + batch_timeout
 
-    required_space_mb = count * config.max_incoming_file_size_mb * 2
+    required_space_mb = estimate_image_batch_space(count, copies=2)
     has_space, space_error = check_disk_space(required_space_mb)
     if not has_space:
         await query.edit_message_text(space_error)
