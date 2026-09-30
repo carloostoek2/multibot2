@@ -46,6 +46,10 @@ from bot.error_handler import (
     DEFAULT_ERROR_MESSAGE,
 )
 from bot.config import config
+from bot.user_settings import (
+    get_album_auto_pipeline,
+    set_album_auto_pipeline,
+)
 from bot.validators import (
     validate_file_size,
     validate_video_file,
@@ -11261,15 +11265,28 @@ ALBUM_PIPELINE_ENHANCE_PROFILE = "equilibrado"  # balanced enhance
 ALBUM_PIPELINE_MIN_IMAGES = 2
 
 
-def _is_album_auto_pipeline_enabled(user_data: dict) -> bool:
-    """Return per-user album auto-pipeline preference (default OFF)."""
-    return bool(user_data.get(ALBUM_AUTO_PIPELINE_PREF_KEY, False))
+def _is_album_auto_pipeline_enabled(user_id: int, user_data: dict | None = None) -> bool:
+    """Return per-user album auto-pipeline preference (default OFF).
+
+    Reads from disk-backed user_settings (survives restarts). Optionally syncs
+    the value into PTB user_data as an in-process cache.
+    """
+    enabled = get_album_auto_pipeline(int(user_id))
+    if user_data is not None:
+        user_data[ALBUM_AUTO_PIPELINE_PREF_KEY] = enabled
+    return enabled
 
 
-def _set_album_auto_pipeline_enabled(user_data: dict, enabled: bool) -> bool:
-    """Persist album auto-pipeline preference in PTB user_data. Returns new value."""
-    user_data[ALBUM_AUTO_PIPELINE_PREF_KEY] = bool(enabled)
-    return bool(enabled)
+def _set_album_auto_pipeline_enabled(
+    user_id: int,
+    enabled: bool,
+    user_data: dict | None = None,
+) -> bool:
+    """Persist album auto-pipeline preference to disk (+ optional user_data cache)."""
+    value = set_album_auto_pipeline(int(user_id), bool(enabled))
+    if user_data is not None:
+        user_data[ALBUM_AUTO_PIPELINE_PREF_KEY] = value
+    return value
 
 
 def _album_pipeline_noise_label() -> str:
@@ -11301,7 +11318,8 @@ def _get_config_keyboard(enabled: bool) -> InlineKeyboardMarkup:
 
 async def handle_config_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show /config with album auto-pipeline toggle (only option for now)."""
-    enabled = _is_album_auto_pipeline_enabled(context.user_data)
+    user_id = update.effective_user.id
+    enabled = _is_album_auto_pipeline_enabled(user_id, context.user_data)
     await update.message.reply_text(
         _format_config_album_auto_text(enabled),
         parse_mode="Markdown",
@@ -11319,9 +11337,9 @@ async def handle_config_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text("Error: opción de configuración inválida.")
         return
 
-    current = _is_album_auto_pipeline_enabled(context.user_data)
-    enabled = _set_album_auto_pipeline_enabled(context.user_data, not current)
     user_id = update.effective_user.id
+    current = _is_album_auto_pipeline_enabled(user_id, context.user_data)
+    enabled = _set_album_auto_pipeline_enabled(user_id, not current, context.user_data)
     logger.info(
         f"User {user_id} set album_auto_pipeline={'ON' if enabled else 'OFF'}"
     )
@@ -11700,10 +11718,11 @@ async def _schedule_image_batch_menu(
             uid = session["user_id"]
 
             # Auto pipeline: albums only (2+), never single images
+            # Preference is disk-backed (survives restarts); sync into user_data cache.
             user_data = application.user_data[_user_data_key(uid, chat)]
             if (
                 len(file_ids) >= ALBUM_PIPELINE_MIN_IMAGES
-                and _is_album_auto_pipeline_enabled(user_data)
+                and _is_album_auto_pipeline_enabled(uid, user_data)
             ):
                 status = await application.bot.send_message(
                     chat_id=chat.id,

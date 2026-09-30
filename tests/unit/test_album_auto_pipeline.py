@@ -53,16 +53,22 @@ def _config_callback_update(data="config_toggle:album_auto"):
 
 
 class TestAlbumAutoPreference:
-    def test_default_is_off(self):
-        assert _is_album_auto_pipeline_enabled({}) is False
-
-    def test_toggle_persists_in_user_data(self):
+    def test_default_is_off(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("USER_SETTINGS_DIR", str(tmp_path))
         ud = {}
-        assert _set_album_auto_pipeline_enabled(ud, True) is True
+        assert _is_album_auto_pipeline_enabled(42, ud) is False
+        assert ud[ALBUM_AUTO_PIPELINE_PREF_KEY] is False
+
+    def test_toggle_persists_to_disk_and_user_data(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("USER_SETTINGS_DIR", str(tmp_path))
+        ud = {}
+        assert _set_album_auto_pipeline_enabled(42, True, ud) is True
         assert ud[ALBUM_AUTO_PIPELINE_PREF_KEY] is True
-        assert _is_album_auto_pipeline_enabled(ud) is True
-        assert _set_album_auto_pipeline_enabled(ud, False) is False
-        assert _is_album_auto_pipeline_enabled(ud) is False
+        assert _is_album_auto_pipeline_enabled(42, {}) is True
+        # Survives "restart": empty user_data still reads disk
+        assert _is_album_auto_pipeline_enabled(42, {}) is True
+        assert _set_album_auto_pipeline_enabled(42, False, ud) is False
+        assert _is_album_auto_pipeline_enabled(42, {}) is False
 
     def test_presets_match_product_definitions(self):
         assert ALBUM_PIPELINE_NOISE_STRENGTH == 2  # Sutil
@@ -72,7 +78,10 @@ class TestAlbumAutoPreference:
 
 class TestConfigCommand:
     @pytest.mark.asyncio
-    async def test_config_command_shows_toggle_off_by_default(self, mock_context):
+    async def test_config_command_shows_toggle_off_by_default(
+        self, mock_context, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("USER_SETTINGS_DIR", str(tmp_path))
         update = _config_update()
         await handle_config_command(update, mock_context)
         text, kwargs = update.message.reply_text.await_args
@@ -83,16 +92,23 @@ class TestConfigCommand:
         assert "OFF" in btn.text
 
     @pytest.mark.asyncio
-    async def test_config_toggle_flips_preference(self, mock_context):
+    async def test_config_toggle_flips_preference_and_disk(
+        self, mock_context, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("USER_SETTINGS_DIR", str(tmp_path))
         update = _config_callback_update()
         await handle_config_callback(update, mock_context)
         assert mock_context.user_data[ALBUM_AUTO_PIPELINE_PREF_KEY] is True
         text, kwargs = update.callback_query.edit_message_text.await_args
         assert "Activado" in text[0]
         assert "ON" in kwargs["reply_markup"].inline_keyboard[0][0].text
+        # Disk file exists and survives empty cache
+        assert (tmp_path / "99.json").is_file()
+        assert _is_album_auto_pipeline_enabled(99, {}) is True
 
         await handle_config_callback(update, mock_context)
         assert mock_context.user_data[ALBUM_AUTO_PIPELINE_PREF_KEY] is False
+        assert _is_album_auto_pipeline_enabled(99, {}) is False
 
 
 class TestAlbumMenuPipelineButton:
@@ -215,8 +231,11 @@ class TestAlbumPipelineRunner:
 
 class TestAlbumAutoBranchOnReceive:
     @pytest.mark.asyncio
-    async def test_auto_on_runs_pipeline_for_album(self, mock_context):
-        mock_context.user_data[ALBUM_AUTO_PIPELINE_PREF_KEY] = True
+    async def test_auto_on_runs_pipeline_for_album(
+        self, mock_context, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("USER_SETTINGS_DIR", str(tmp_path))
+        _set_album_auto_pipeline_enabled(99, True, mock_context.user_data)
         chat = SimpleNamespace(id=1, type="private")
         mock_context.application.user_data = {99: mock_context.user_data}
         status_msg = MagicMock()
@@ -260,7 +279,10 @@ class TestAlbumAutoBranchOnReceive:
         assert run_pipe.await_args.kwargs["file_ids"] == ["p1", "p2"]
 
     @pytest.mark.asyncio
-    async def test_auto_off_shows_menu_for_album(self, mock_context):
+    async def test_auto_off_shows_menu_for_album(
+        self, mock_context, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("USER_SETTINGS_DIR", str(tmp_path))
         chat = SimpleNamespace(id=1, type="private")
         mock_context.application.user_data = {99: mock_context.user_data}
 
