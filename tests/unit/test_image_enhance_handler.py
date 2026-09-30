@@ -53,7 +53,9 @@ class TestHandleImageEnhanceCallback:
         ) as temp_mgr_cls, patch(
             "bot.handlers._download_with_retry", new_callable=AsyncMock
         ), patch(
-            "bot.handlers._send_images_in_albums", new_callable=AsyncMock
+            "bot.handlers._send_images_in_albums",
+            new_callable=AsyncMock,
+            return_value=["sent-a", "sent-b"],
         ) as send_albums, patch(
             "bot.handlers.ImageProcessor.enhance", return_value=(True, None)
         ), patch("bot.handlers.time.monotonic", side_effect=[0, 1, 2, 3, 4, 5]), patch(
@@ -71,6 +73,7 @@ class TestHandleImageEnhanceCallback:
 
         send_albums.assert_awaited_once()
         assert mock_context.bot.get_file.await_count == 2
+        assert mock_context.user_data["image_menu_file_ids"] == ["sent-a", "sent-b"]
 
     @pytest.mark.asyncio
     async def test_enhance_timeout_uses_remaining_budget_after_download(
@@ -162,6 +165,9 @@ class TestHandleImageEnhanceCallback:
             "image_menu_file_id": "f1",
             "image_menu_correlation_id": "corr-single",
         }
+        mock_query_update.callback_query.message.reply_document.return_value = SimpleNamespace(
+            document=SimpleNamespace(file_id="sent-single")
+        )
 
         with patch("bot.handlers.check_disk_space", return_value=(True, None)), patch(
             "bot.handlers.TempManager"
@@ -186,6 +192,8 @@ class TestHandleImageEnhanceCallback:
 
         mock_query_update.callback_query.message.reply_document.assert_awaited_once()
         send_albums.assert_not_awaited()
+        assert mock_context.user_data["image_menu_file_id"] == "sent-single"
+        assert mock_context.user_data["image_menu_original_file_ids"] == ["f1"]
 
     @pytest.mark.asyncio
     async def test_wait_for_timeout_error_surfaces_spanish_message(
