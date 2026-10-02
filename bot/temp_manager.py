@@ -11,6 +11,21 @@ from typing import List, Set, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def work_temp_root() -> str:
+    """Root for working files.
+
+    Prefer TEMP_DIR (set to a directory on the root filesystem) over the
+    system temp directory. Python tempfile does not read TEMP_DIR, and on
+    this host /tmp is a small tmpfs.
+    """
+    configured = os.environ.get("TEMP_DIR")
+    if configured:
+        Path(configured).mkdir(parents=True, exist_ok=True)
+        return configured
+    return tempfile.gettempdir()
+
+
 # Global set to track active TempManager instances
 active_temp_managers: Set['TempManager'] = set()
 
@@ -38,13 +53,13 @@ class TempManager:
         if correlation_id:
             # Crear directorio con correlation_id en el nombre
             prefix = f"videonote_{correlation_id}_"
-            self.temp_dir = tempfile.mkdtemp(prefix=prefix)
+            self.temp_dir = tempfile.mkdtemp(prefix=prefix, dir=work_temp_root())
             # Registrar en el mapa global
             _download_temp_dirs[correlation_id] = self.temp_dir
             logger.debug(f"Created temp directory with correlation_id: {self.temp_dir}")
         else:
             # Crear directorio normal
-            self.temp_dir = tempfile.mkdtemp(prefix="videonote_")
+            self.temp_dir = tempfile.mkdtemp(prefix="videonote_", dir=work_temp_root())
             logger.debug(f"Created temp directory: {self.temp_dir}")
 
         self._tracked_files: List[str] = []
@@ -162,7 +177,7 @@ class TempManager:
 
         # Create new directory
         prefix = f"videonote_dl_{correlation_id}_"
-        temp_dir = tempfile.mkdtemp(prefix=prefix)
+        temp_dir = tempfile.mkdtemp(prefix=prefix, dir=work_temp_root())
         _download_temp_dirs[correlation_id] = temp_dir
 
         logger.debug(f"Created download temp directory: {temp_dir}")
@@ -193,7 +208,7 @@ class TempManager:
                 logger.warning(f"Error cleaning up {dir_path}: {e}")
 
         # Search for any matching directories in temp
-        temp_dir = tempfile.gettempdir()
+        temp_dir = work_temp_root()
         pattern = os.path.join(temp_dir, f"videonote_*{correlation_id}*")
 
         for dir_path in glob.glob(pattern):
@@ -218,7 +233,7 @@ class TempManager:
             List of correlation_ids
         """
         correlation_ids = []
-        temp_dir = tempfile.gettempdir()
+        temp_dir = work_temp_root()
 
         # Buscar directorios de descarga
         pattern = os.path.join(temp_dir, "videonote_dl_*")
@@ -266,7 +281,7 @@ def cleanup_old_temp_directories(max_age_hours: int = 24) -> int:
     Returns:
         Number of directories removed
     """
-    temp_dir = tempfile.gettempdir()
+    temp_dir = work_temp_root()
 
     # Buscar todos los patrones de videonote
     patterns = [

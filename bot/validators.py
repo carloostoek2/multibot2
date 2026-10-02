@@ -159,9 +159,15 @@ def check_disk_space(required_mb: int, path: str = None) -> Tuple[bool, Optional
     """
     logger.debug(f"Checking disk space: required {required_mb}MB on {path}")
 
-    # Use temp directory as default if no path specified
+    # Default to the configured work dir (TEMP_DIR), not the system temp dir.
+    # On the EC2 host /tmp is a ~3.8G tmpfs while TEMP_DIR lives on the root
+    # volume. tempfile.gettempdir() does not honor TEMP_DIR.
     if path is None:
-        path = tempfile.gettempdir()
+        configured = os.environ.get("TEMP_DIR")
+        if configured and os.path.isdir(configured):
+            path = configured
+        else:
+            path = tempfile.gettempdir()
 
     try:
         # Get disk usage statistics
@@ -184,6 +190,29 @@ def check_disk_space(required_mb: int, path: str = None) -> Tuple[bool, Optional
         # If we can't check disk space, log warning but don't fail
         logger.warning(f"Could not check disk space on {path}: {e}")
         return True, None
+
+
+# Per-image ceiling for album/batch preflight. Telegram photos are a few MB;
+# reserving max_incoming_file_size_mb (2000 in local-API mode) per image makes
+# a 5-photo album demand 30GB and false-fail while tens of GB are free.
+IMAGE_BATCH_PER_FILE_MB = 100
+
+
+def estimate_image_batch_space(count: int, copies: int = 2) -> int:
+    """Estimate disk needed for an image batch before sizes are known.
+
+    ``copies`` is the number of files kept per source image (input plus
+    intermediates). The per-file ceiling is IMAGE_BATCH_PER_FILE_MB, not the
+    local-API document cap.
+    """
+    count = max(1, int(count))
+    copies = max(1, int(copies))
+    required = count * IMAGE_BATCH_PER_FILE_MB * copies
+    logger.debug(
+        f"Estimated image batch space: {required}MB "
+        f"({count} images x {copies} copies x {IMAGE_BATCH_PER_FILE_MB}MB)"
+    )
+    return required
 
 
 def estimate_required_space(video_file_size_mb: int) -> int:
@@ -418,5 +447,6 @@ __all__ = [
     "validate_audio_duration",
     "get_audio_duration",
     "check_disk_space",
+    "estimate_image_batch_space",
     "estimate_required_space",
 ]
