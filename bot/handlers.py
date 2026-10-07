@@ -59,6 +59,7 @@ from bot.validators import (
     estimate_required_space,
     ValidationError,
 )
+from bot.time_parser import format_time, parse_time_value
 from bot.audio_processor import VoiceNoteConverter, VoiceToMp3Converter, get_audio_duration
 from bot.audio_splitter import AudioSplitter
 from bot.audio_joiner import AudioJoiner
@@ -727,6 +728,20 @@ DEFAULT_AUDIO_SEGMENT_DURATION = 60
 SPLIT_WAITING_START_TIME = "waiting_start_time"
 SPLIT_WAITING_END_TIME = "waiting_end_time"
 SPLIT_CONFIRMING = "confirming"
+
+# Accepted time formats, shown when asking for a cut point. The plain version
+# goes in error replies (sent without parse_mode, so no markdown escapes can
+# break on the echoed user input); the markdown one goes in the prompts.
+_TIME_FORMATS_PLAIN = (
+    "Formatos aceptados:\n"
+    "• Segundos: 30 o 30.5\n"
+    "• Minutos:segundos: 1:24 o 2:34.5"
+)
+_TIME_FORMATS_MD = (
+    "Formatos aceptados:\n"
+    "• Segundos: `30`, `30.5`\n"
+    "• Minutos:segundos: `1:24`, `2:34.5`"
+)
 
 
 async def handle_split_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2476,14 +2491,11 @@ async def handle_video_split_start(update: Update, context: ContextTypes.DEFAULT
         context.user_data["split_video_session"]["input_path"] = input_path
         context.user_data["split_video_session"]["temp_mgr"] = temp_mgr
 
-        minutes = int(duration // 60)
-        seconds = int(duration % 60)
-
         await query.edit_message_text(
             f"✂️ *Dividir Video*\n\n"
-            f"📊 Duración del video: *{minutes}m {seconds}s*\n\n"
-            f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
-            f"Puede ser un número decimal (ej: 30.5)",
+            f"📊 Duración del video: *{format_time(duration)}*\n\n"
+            f"Envía el tiempo de *inicio*.\n\n"
+            f"{_TIME_FORMATS_MD}",
             parse_mode="Markdown"
         )
 
@@ -2513,12 +2525,9 @@ async def handle_video_split_start_time(update: Update, context: ContextTypes.DE
     correlation_id = session.get("correlation_id", "unknown")
     logger.info(f"[{correlation_id}] Start time input received from user {user_id}")
 
-    try:
-        start_time = float(update.message.text.strip())
-    except (ValueError, AttributeError):
-        await update.message.reply_text(
-            "Por favor envía un número válido (ej: 30 o 30.5)"
-        )
+    start_time, error = parse_time_value(getattr(update.message, "text", None))
+    if error:
+        await update.message.reply_text(f"{error}\n\n{_TIME_FORMATS_PLAIN}")
         return
 
     duration = session.get("duration", 0)
@@ -2530,7 +2539,7 @@ async def handle_video_split_start_time(update: Update, context: ContextTypes.DE
 
     if start_time >= duration:
         await update.message.reply_text(
-            f"El tiempo de inicio debe ser menor a la duración del video ({duration}s)."
+            f"El tiempo de inicio debe ser menor a la duración del video ({format_time(duration)})."
         )
         return
 
@@ -2540,10 +2549,11 @@ async def handle_video_split_start_time(update: Update, context: ContextTypes.DE
 
     remaining = duration - start_time
     await update.message.reply_text(
-        f"✅ Tiempo de inicio: *{start_time}s*\n\n"
-        f"Ahora envía el tiempo *final* en segundos.\n"
-        f"Debe ser mayor a {start_time}s y menor a {duration}s.\n\n"
-        f"Tiempo máximo disponible: *{remaining:.1f}s*",
+        f"✅ Tiempo de inicio: *{format_time(start_time)}*\n\n"
+        f"Ahora envía el tiempo *final*.\n"
+        f"Debe ser mayor a *{format_time(start_time)}* y menor a *{format_time(duration)}*.\n\n"
+        f"Tiempo máximo disponible: *{format_time(remaining)}*\n\n"
+        f"{_TIME_FORMATS_MD}",
         parse_mode="Markdown"
     )
 
@@ -2564,12 +2574,9 @@ async def handle_video_split_end_time(update: Update, context: ContextTypes.DEFA
     correlation_id = session.get("correlation_id", "unknown")
     logger.info(f"[{correlation_id}] End time input received from user {user_id}")
 
-    try:
-        end_time = float(update.message.text.strip())
-    except (ValueError, AttributeError):
-        await update.message.reply_text(
-            "Por favor envía un número válido (ej: 60 o 90.5)"
-        )
+    end_time, error = parse_time_value(getattr(update.message, "text", None))
+    if error:
+        await update.message.reply_text(f"{error}\n\n{_TIME_FORMATS_PLAIN}")
         return
 
     start_time = session.get("start_time", 0)
@@ -2577,13 +2584,13 @@ async def handle_video_split_end_time(update: Update, context: ContextTypes.DEFA
 
     if end_time <= start_time:
         await update.message.reply_text(
-            f"El tiempo final debe ser mayor al tiempo de inicio ({start_time}s)."
+            f"El tiempo final debe ser mayor al tiempo de inicio ({format_time(start_time)})."
         )
         return
 
     if end_time > duration:
         await update.message.reply_text(
-            f"El tiempo final no puede exceder la duración del video ({duration}s)."
+            f"El tiempo final no puede exceder la duración del video ({format_time(duration)})."
         )
         return
 
@@ -2600,8 +2607,8 @@ async def handle_video_split_end_time(update: Update, context: ContextTypes.DEFA
 
     # Send processing message
     processing_message = await update.message.reply_text(
-        f"✂️ Extrayendo segmento de {start_time}s a {end_time}s...\n"
-        f"Duración: {segment_duration:.1f}s"
+        f"✂️ Extrayendo segmento de {format_time(start_time)} a {format_time(end_time)}...\n"
+        f"Duración: {format_time(segment_duration)}"
     )
 
     with TempManager() as temp_mgr:
@@ -2616,7 +2623,7 @@ async def handle_video_split_end_time(update: Update, context: ContextTypes.DEFA
             # Send video segment
             await update.message.reply_video(
                 video=open(output_path, "rb"),
-                caption=f"Segmento extraído ({start_time}s - {end_time}s)"
+                caption=f"Segmento extraído ({format_time(start_time)} - {format_time(end_time)})"
             )
 
             await processing_message.delete()
@@ -2691,14 +2698,11 @@ async def handle_audio_split_start(update: Update, context: ContextTypes.DEFAULT
         context.user_data["split_audio_session"]["input_path"] = input_path
         context.user_data["split_audio_session"]["temp_mgr"] = temp_mgr
 
-        minutes = int(duration // 60)
-        seconds = int(duration % 60)
-
         await query.edit_message_text(
             f"✂️ *Dividir Audio*\n\n"
-            f"📊 Duración del audio: *{minutes}m {seconds}s*\n\n"
-            f"Envía el tiempo de *inicio* en segundos (ej: 30 para 30 segundos).\n\n"
-            f"Puede ser un número decimal (ej: 30.5)",
+            f"📊 Duración del audio: *{format_time(duration)}*\n\n"
+            f"Envía el tiempo de *inicio*.\n\n"
+            f"{_TIME_FORMATS_MD}",
             parse_mode="Markdown"
         )
 
@@ -2727,12 +2731,9 @@ async def handle_audio_split_start_time(update: Update, context: ContextTypes.DE
     correlation_id = session.get("correlation_id", "unknown")
     logger.info(f"[{correlation_id}] Audio start time input received from user {user_id}")
 
-    try:
-        start_time = float(update.message.text.strip())
-    except (ValueError, AttributeError):
-        await update.message.reply_text(
-            "Por favor envía un número válido (ej: 30 o 30.5)"
-        )
+    start_time, error = parse_time_value(getattr(update.message, "text", None))
+    if error:
+        await update.message.reply_text(f"{error}\n\n{_TIME_FORMATS_PLAIN}")
         return
 
     duration = session.get("duration", 0)
@@ -2744,7 +2745,7 @@ async def handle_audio_split_start_time(update: Update, context: ContextTypes.DE
 
     if start_time >= duration:
         await update.message.reply_text(
-            f"El tiempo de inicio debe ser menor a la duración del audio ({duration}s)."
+            f"El tiempo de inicio debe ser menor a la duración del audio ({format_time(duration)})."
         )
         return
 
@@ -2754,10 +2755,11 @@ async def handle_audio_split_start_time(update: Update, context: ContextTypes.DE
 
     remaining = duration - start_time
     await update.message.reply_text(
-        f"✅ Tiempo de inicio: *{start_time}s*\n\n"
-        f"Ahora envía el tiempo *final* en segundos.\n"
-        f"Debe ser mayor a {start_time}s y menor a {duration}s.\n\n"
-        f"Tiempo máximo disponible: *{remaining:.1f}s*",
+        f"✅ Tiempo de inicio: *{format_time(start_time)}*\n\n"
+        f"Ahora envía el tiempo *final*.\n"
+        f"Debe ser mayor a *{format_time(start_time)}* y menor a *{format_time(duration)}*.\n\n"
+        f"Tiempo máximo disponible: *{format_time(remaining)}*\n\n"
+        f"{_TIME_FORMATS_MD}",
         parse_mode="Markdown"
     )
 
@@ -2778,12 +2780,9 @@ async def handle_audio_split_end_time(update: Update, context: ContextTypes.DEFA
     correlation_id = session.get("correlation_id", "unknown")
     logger.info(f"[{correlation_id}] Audio end time input received from user {user_id}")
 
-    try:
-        end_time = float(update.message.text.strip())
-    except (ValueError, AttributeError):
-        await update.message.reply_text(
-            "Por favor envía un número válido (ej: 60 o 90.5)"
-        )
+    end_time, error = parse_time_value(getattr(update.message, "text", None))
+    if error:
+        await update.message.reply_text(f"{error}\n\n{_TIME_FORMATS_PLAIN}")
         return
 
     start_time = session.get("start_time", 0)
@@ -2791,13 +2790,13 @@ async def handle_audio_split_end_time(update: Update, context: ContextTypes.DEFA
 
     if end_time <= start_time:
         await update.message.reply_text(
-            f"El tiempo final debe ser mayor al tiempo de inicio ({start_time}s)."
+            f"El tiempo final debe ser mayor al tiempo de inicio ({format_time(start_time)})."
         )
         return
 
     if end_time > duration:
         await update.message.reply_text(
-            f"El tiempo final no puede exceder la duración del audio ({duration}s)."
+            f"El tiempo final no puede exceder la duración del audio ({format_time(duration)})."
         )
         return
 
@@ -2814,8 +2813,8 @@ async def handle_audio_split_end_time(update: Update, context: ContextTypes.DEFA
 
     # Send processing message
     processing_message = await update.message.reply_text(
-        f"✂️ Extrayendo segmento de {start_time}s a {end_time}s...\n"
-        f"Duración: {segment_duration:.1f}s"
+        f"✂️ Extrayendo segmento de {format_time(start_time)} a {format_time(end_time)}...\n"
+        f"Duración: {format_time(segment_duration)}"
     )
 
     with TempManager() as temp_mgr:
@@ -2830,7 +2829,7 @@ async def handle_audio_split_end_time(update: Update, context: ContextTypes.DEFA
             # Send audio segment
             await update.message.reply_audio(
                 audio=open(output_path, "rb"),
-                caption=f"Segmento extraído ({start_time}s - {end_time}s)"
+                caption=f"Segmento extraído ({format_time(start_time)} - {format_time(end_time)})"
             )
 
             await processing_message.delete()
@@ -6994,7 +6993,7 @@ async def handle_screenshot_callback(update: Update, context: ContextTypes.DEFAU
             "✏️ *Modo Manual*\n\n"
             "Ingresa los tiempos exactos para las capturas.\n\n"
             "Formatos aceptados:\n"
-            "• Minutos:segundos → `1:30`, `3:45`\n"
+            "• Minutos:segundos → `1:30`, `3:45`, `2:34.5`\n"
             "• Segundos → `85`, `160`\n"
             "• Combinados → `1:30, 85, 3:45`\n\n"
             "Ejemplo: `1:25, 2:40, 5:10`",
@@ -7249,7 +7248,7 @@ async def _send_screenshots_in_albums(
 async def _parse_screenshot_times(text: str) -> tuple[list[float], str]:
     """Parse screenshot timestamps from user input.
 
-    Supports formats:
+    Supports formats (each one parsed by ``parse_time_value``):
     - MM:SS or M:SS -> 1:30, 3:45
     - Seconds only -> 85, 160
     - Mixed/combined -> 1:30, 85, 3:45
@@ -7260,30 +7259,17 @@ async def _parse_screenshot_times(text: str) -> tuple[list[float], str]:
     Returns:
         Tuple of (list of timestamps in seconds, error message or empty string)
     """
-    timestamps = []
+    timestamps: list[float] = []
     parts = text.replace(' ', '').split(',')
 
     for part in parts:
         if not part:
             continue
 
-        if ':' in part:
-            # Format: MM:SS or M:SS
-            try:
-                if part.count(':') == 1:
-                    minutes, seconds = part.split(':')
-                    ts = int(minutes) * 60 + int(seconds)
-                else:
-                    return [], f"Formato inválido: {part}. Usa M:SS o MM:SS"
-                timestamps.append(ts)
-            except ValueError:
-                return [], f"No pude entender el tiempo: {part}"
-        else:
-            # Format: seconds only
-            try:
-                timestamps.append(int(part))
-            except ValueError:
-                return [], f"No pude entender el número: {part}"
+        ts, error = parse_time_value(part)
+        if error:
+            return [], error
+        timestamps.append(ts)
 
     if not timestamps:
         return [], "No se encontraron tiempos válidos. Usa el formato: 1:30, 85, 3:45"
