@@ -38,6 +38,77 @@ logger = logging.getLogger(__name__)
 _last_instagram_download_end: float = 0.0
 _instagram_delay_lock = asyncio.Lock()
 
+# Bot-wide gate that serializes whole Instagram downloads (inter-download delay
+# + the yt-dlp/gallery-dl request + the completion mark). With concurrent update
+# processing enabled, several handlers can reach the IG path at once; without
+# this gate they would all compute their delay from the same
+# ``_last_instagram_download_end`` and fire in parallel.
+_instagram_download_gate = asyncio.Lock()
+
+# How often waiters re-check their cancel predicate while queued or sleeping.
+_IG_CANCEL_POLL_SECONDS = 1.0
+
+
+def instagram_gate_busy() -> bool:
+    """Return True if another Instagram download currently holds the gate."""
+    return _instagram_download_gate.locked()
+
+
+async def acquire_instagram_gate(is_cancelled) -> bool:
+    """Wait (FIFO) for the Instagram download gate, honouring cancellation.
+
+    Args:
+        is_cancelled: Zero-arg callable polled every ``_IG_CANCEL_POLL_SECONDS``.
+
+    Returns:
+        True if the gate was acquired (caller MUST call
+        ``release_instagram_gate()``), False if cancelled while queued.
+    """
+    acquire = asyncio.ensure_future(_instagram_download_gate.acquire())
+    try:
+        while True:
+            done, _ = await asyncio.wait({acquire}, timeout=_IG_CANCEL_POLL_SECONDS)
+            if done:
+                acquire.result()
+                return True
+            if is_cancelled():
+                acquire.cancel()
+                try:
+                    await acquire
+                except asyncio.CancelledError:
+                    return False
+                # Acquired in the same instant the cancel arrived: give it back.
+                _instagram_download_gate.release()
+                return False
+    except BaseException:
+        # Outer task cancelled (e.g. shutdown): never leak the gate.
+        if acquire.done() and not acquire.cancelled() and acquire.exception() is None:
+            _instagram_download_gate.release()
+        else:
+            acquire.cancel()
+        raise
+
+
+def release_instagram_gate() -> None:
+    """Release the Instagram download gate acquired via ``acquire_instagram_gate``."""
+    _instagram_download_gate.release()
+
+
+async def sleep_unless_cancelled(seconds: float, is_cancelled) -> bool:
+    """Sleep ``seconds`` in short slices, returning False early if cancelled.
+
+    Slices are counted (not wall-clock based) so tests that patch
+    ``asyncio.sleep`` with a no-op still terminate immediately.
+    """
+    remaining = float(seconds)
+    while remaining > 0:
+        if is_cancelled():
+            return False
+        step = min(remaining, _IG_CANCEL_POLL_SECONDS)
+        await asyncio.sleep(step)
+        remaining -= step
+    return not is_cancelled()
+
 
 def _get_instagram_delay_config() -> tuple[float, float]:
     """Read inter-download delay range from config, with fallback defaults."""

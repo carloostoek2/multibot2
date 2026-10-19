@@ -38,6 +38,7 @@ class TestTelegramClient:
         mock_builder.write_timeout.return_value = mock_builder
         mock_builder.pool_timeout.return_value = mock_builder
         mock_builder.media_write_timeout.return_value = mock_builder
+        mock_builder.concurrent_updates.return_value = mock_builder
         mock_builder.post_init.return_value = mock_builder
         mock_builder.build.return_value = MagicMock()
         mock_builder_cls.return_value = mock_builder
@@ -46,6 +47,7 @@ class TestTelegramClient:
             create_application()
 
         mock_builder.post_init.assert_called_once()
+        mock_builder.concurrent_updates.assert_called_once()
         mock_builder.token.assert_called_once_with("test-token")
         mock_builder.base_url.assert_not_called()
         mock_builder.local_mode.assert_not_called()
@@ -67,6 +69,7 @@ class TestTelegramClient:
         mock_builder.write_timeout.return_value = mock_builder
         mock_builder.pool_timeout.return_value = mock_builder
         mock_builder.media_write_timeout.return_value = mock_builder
+        mock_builder.concurrent_updates.return_value = mock_builder
         mock_builder.post_init.return_value = mock_builder
         mock_builder.build.return_value = MagicMock()
         mock_builder_cls.return_value = mock_builder
@@ -75,6 +78,7 @@ class TestTelegramClient:
             create_application()
 
         mock_builder.post_init.assert_called_once()
+        mock_builder.concurrent_updates.assert_called_once()
         mock_builder.base_url.assert_called_once_with("http://127.0.0.1:8081/bot")
         mock_builder.base_file_url.assert_called_once_with("http://127.0.0.1:8081/file/bot")
         mock_builder.local_mode.assert_called_once_with(True)
