@@ -18,3 +18,5 @@ gallery-dl>=1.31.0
 
 # Voice cloning (Replicate: FreeVC 24kHz)
 replicate>=0.34.0
+# Seed-VC HTTP backend (sync client; also a replicate dependency)
+httpx>=0.24.0

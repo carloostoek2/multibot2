@@ -1,0 +1,28 @@
+# PROPOSED (not installed) ~/.config/systemd/user/multibot2-local-api.service
+# telegram-bot-api (Bot API 10.3) reads TELEGRAM_API_ID / TELEGRAM_API_HASH from env
+# when --api-id/--api-hash are omitted, so secrets stay out of argv (/proc/*/cmdline, ps).
+# Create first:  install -m 600 /dev/null ~/.config/multibot2/local-api.env
+#   TELEGRAM_API_ID=<id>
+#   TELEGRAM_API_HASH=<hash>
+[Unit]
+Description=Multibot2 Local Telegram Bot API (127.0.0.1:8081)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/multibot2/local-api.env
+Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/bin/mkdir -p %h/data/multibot2/telegram-bot-api %h/data/multibot2/telegram-bot-api-tmp
+ExecStart=%h/bin/telegram-bot-api --local --dir=%h/data/multibot2/telegram-bot-api --temp-dir=%h/data/multibot2/telegram-bot-api-tmp --http-port=8081 --http-ip-address=127.0.0.1 --verbosity=1
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=multibot2-local-api
+UMask=0077
+
+[Install]
+WantedBy=default.target

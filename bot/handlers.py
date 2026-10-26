@@ -72,6 +72,8 @@ from bot.voice_clone import (
     save_reference,
     get_user_ref_path,
     clone_voice_pipeline,
+    resolve_backend as resolve_voice_clone_backend,
+    BACKEND_SEEDVC as VOICE_CLONE_BACKEND_SEEDVC,
     apply_eq_and_convert_to_voice_note,
 )
 from bot.screenshot_processor import ScreenshotProcessor
@@ -3290,7 +3292,12 @@ async def _run_voice_clone_pipeline(
     context.user_data["voice_pipeline_correlation_id"] = correlation_id
     message = update.callback_query.message if update.callback_query else update.message
 
-    if not config.REPLICATE_API_TOKEN:
+    # Resolve backend once (blocking: reads url.txt + ≤3 s health check).
+    clone_backend = await asyncio.get_event_loop().run_in_executor(None, resolve_voice_clone_backend)
+    use_seedvc = clone_backend == VOICE_CLONE_BACKEND_SEEDVC
+    logger.info(f"[{correlation_id}] Voice clone backend: {clone_backend}")
+
+    if not use_seedvc and not config.REPLICATE_API_TOKEN:
         await status_message.edit_text(
             "La clonación de voz no está configurada (falta REPLICATE_API_TOKEN). "
             "Avisa al admin del bot."
@@ -3328,7 +3335,11 @@ async def _run_voice_clone_pipeline(
             try:
                 await status_message.edit_text(
                     "🗣️ Clonando voz (conserva ritmo)...\n\n"
-                    "⏳ Esto puede tardar 3–5 minutos. No canceles.",
+                    (
+                        "⏳ Esto debería tardar menos de un minuto. No canceles."
+                        if use_seedvc
+                        else "⏳ Esto puede tardar 3–5 minutos. No canceles."
+                    ),
                     reply_markup=reply_markup,
                 )
             except Exception as e:
@@ -3356,6 +3367,7 @@ async def _run_voice_clone_pipeline(
                             output_path,
                             api_token=config.REPLICATE_API_TOKEN,
                             correlation_id=correlation_id,
+                            backend=clone_backend,
                         ),
                     ),
                     timeout=clone_timeout,
@@ -3535,13 +3547,6 @@ async def handle_voice_menu_callback(update: Update, context: ContextTypes.DEFAU
                 "No tienes una voz de referencia guardada.\n\n"
                 "Para guardar una, responde a un audio o nota de voz con:\n"
                 "/voz_ref"
-            )
-            return
-
-        if not config.REPLICATE_API_TOKEN:
-            await query.edit_message_text(
-                "La clonación de voz no está configurada (falta REPLICATE_API_TOKEN). "
-                "Avisa al admin del bot."
             )
             return
 

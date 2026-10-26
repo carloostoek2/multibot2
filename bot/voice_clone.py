@@ -38,6 +38,17 @@ REF_FILENAME = "reference.mp3"
 DEFAULT_CLONE_TIMEOUT = 300
 
 
+# --- Seed-VC (self-hosted HTTP backend, e.g. Colab tunnel) -------------------
+DEFAULT_SEEDVC_URL_FILE = "/home/ubuntu/seedvc-colab/url.txt"
+DEFAULT_SEEDVC_API_KEY_FILE = "/home/ubuntu/seedvc-colab/api_key"
+SEEDVC_CONVERT_TIMEOUT = 120.0
+SEEDVC_HEALTH_TIMEOUT = 3.0
+BACKEND_SEEDVC = "seedvc"
+BACKEND_REPLICATE = "replicate"
+BACKEND_AUTO = "auto"
+_VALID_BACKENDS = (BACKEND_SEEDVC, BACKEND_REPLICATE, BACKEND_AUTO)
+
+
 class VoiceCloneError(Exception):
     """Raised when voice cloning fails in a user-facing way."""
 
@@ -266,6 +277,122 @@ def run_freevc(
     return _extract_output_url(output)
 
 
+def _read_text_file(path: str | Path) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def get_seedvc_url() -> str:
+    """Read Seed-VC base URL fresh on every call (empty = backend off)."""
+    url = _read_text_file(os.getenv("SEEDVC_URL_FILE") or DEFAULT_SEEDVC_URL_FILE)
+    url = url.splitlines()[0].strip() if url else ""
+    return url.rstrip("/")
+
+
+def _get_seedvc_api_key() -> str:
+    return _read_text_file(os.getenv("SEEDVC_API_KEY_FILE") or DEFAULT_SEEDVC_API_KEY_FILE)
+
+
+def _http_client(timeout: float):
+    """Factory for the sync HTTP client (patched in tests)."""
+    import httpx
+
+    return httpx.Client(timeout=timeout, follow_redirects=True)
+
+
+def seedvc_health(timeout: float = SEEDVC_HEALTH_TIMEOUT) -> bool:
+    """True if Seed-VC URL is configured and GET /health reports the model loaded."""
+    url = get_seedvc_url()
+    if not url:
+        return False
+    try:
+        with _http_client(timeout) as client:
+            resp = client.get(f"{url}/health", headers={"X-API-Key": _get_seedvc_api_key()})
+        if resp.status_code != 200:
+            return False
+        data = resp.json()
+        return bool(data.get("ok")) and bool(data.get("model_loaded"))
+    except Exception as exc:  # network, JSON, timeout
+        logger.info("Seed-VC health check failed: %s", type(exc).__name__)
+        return False
+
+
+def get_configured_backend() -> str:
+    value = (os.getenv("VOICE_CLONE_BACKEND") or BACKEND_AUTO).strip().lower()
+    if value not in _VALID_BACKENDS:
+        logger.warning("Invalid VOICE_CLONE_BACKEND=%r; using auto", value)
+        return BACKEND_AUTO
+    return value
+
+
+def resolve_backend() -> str:
+    """Effective backend: 'seedvc' or 'replicate'. Blocking (health check ≤3 s)."""
+    configured = get_configured_backend()
+    if configured == BACKEND_AUTO:
+        return BACKEND_SEEDVC if seedvc_health() else BACKEND_REPLICATE
+    return configured
+
+
+def run_seedvc_http(
+    source_wav: str | Path,
+    reference_path: str | Path,
+    *,
+    output_path: Optional[str | Path] = None,
+    diffusion_steps: int = 10,
+    pitch_shift: int = 0,
+    timeout: float = SEEDVC_CONVERT_TIMEOUT,
+    correlation_id: Optional[str] = None,
+) -> str:
+    """Convert via Seed-VC HTTP server (POST {URL}/convert).
+
+    Returns the local path (str) of the converted WAV; the caller treats it the
+    same way as the downloaded Replicate result.
+    """
+    cid = correlation_id or "no-cid"
+    source_wav = Path(source_wav)
+    reference_path = Path(reference_path)
+    url = get_seedvc_url()
+    if not url:
+        raise VoiceCloneError("Seed-VC no está disponible (sin URL configurada).")
+    if not source_wav.is_file():
+        raise VoiceCloneError("No encontré el audio de origen.")
+    if not reference_path.is_file():
+        raise VoiceCloneError("No tienes una voz de referencia guardada.")
+    out = Path(output_path) if output_path else source_wav.with_name(f"{source_wav.stem}_seedvc.wav")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    logger.info("[%s] Seed-VC convert steps=%s pitch=%s", cid, diffusion_steps, pitch_shift)
+    try:
+        with open(source_wav, "rb") as sf, open(reference_path, "rb") as rf, _http_client(timeout) as client:
+            resp = client.post(
+                f"{url}/convert",
+                headers={"X-API-Key": _get_seedvc_api_key()},
+                files={
+                    "source": (source_wav.name, sf, "audio/wav"),
+                    "reference": (reference_path.name, rf, "audio/wav"),
+                },
+                data={"diffusion_steps": str(int(diffusion_steps)), "pitch_shift": str(int(pitch_shift))},
+            )
+    except Exception as exc:
+        logger.warning("[%s] Seed-VC request failed: %s", cid, type(exc).__name__)
+        raise VoiceCloneError(f"Seed-VC no respondió ({type(exc).__name__}).") from exc
+
+    if resp.status_code == 401:
+        raise VoiceCloneError("Seed-VC rechazó la clave (401): revisa SEEDVC_API_KEY_FILE.")
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("error") or resp.text[:200]
+        except Exception:
+            detail = resp.text[:200]
+        raise VoiceCloneError(f"Seed-VC falló (HTTP {resp.status_code}): {detail}")
+    if not resp.content:
+        raise VoiceCloneError("Seed-VC devolvió un audio vacío.")
+    out.write_bytes(resp.content)
+    return str(out)
+
+
 def download_url_to_file(url: str, dest_path: str | Path) -> Path:
     """Download a remote audio URL to dest_path."""
     dest_path = Path(dest_path)
@@ -295,6 +422,7 @@ def clone_voice_pipeline(
     *,
     api_token: Optional[str] = None,
     correlation_id: Optional[str] = None,
+    backend: Optional[str] = None,
 ) -> Path:
     """Full FreeVC pipeline: convert → FreeVC 24kHz → download → MP3 on disk.
 
@@ -304,12 +432,23 @@ def clone_voice_pipeline(
         output_path: Destination MP3 path.
         api_token: Optional Replicate token (falls back to env).
         correlation_id: Optional id for log lines.
+        backend: 'seedvc' | 'replicate' | 'auto' | None (None → resolve from env).
+            'auto' tries Seed-VC first and falls back to Replicate on failure.
+            Explicit 'seedvc' never falls back (errors surface to the user/admin).
 
     Returns:
         Path to the output MP3.
     """
     cid = correlation_id or "no-cid"
-    token = _require_replicate_token(api_token or os.getenv("REPLICATE_API_TOKEN"))
+    configured = get_configured_backend()
+    if backend is None:
+        backend = resolve_backend()
+    allow_fallback = configured == BACKEND_AUTO
+    if backend == BACKEND_AUTO:
+        backend = BACKEND_SEEDVC if seedvc_health() else BACKEND_REPLICATE
+    token = (api_token or os.getenv("REPLICATE_API_TOKEN") or "").strip()
+    if backend == BACKEND_REPLICATE:
+        token = _require_replicate_token(token)
     source_audio_path = Path(source_audio_path)
     reference_path = Path(reference_path)
     output_path = Path(output_path)
@@ -321,7 +460,8 @@ def clone_voice_pipeline(
     ref_wav = work_dir / f"{output_path.stem}_ref.wav"
 
     previous = os.environ.get("REPLICATE_API_TOKEN")
-    os.environ["REPLICATE_API_TOKEN"] = token
+    if token:
+        os.environ["REPLICATE_API_TOKEN"] = token
     try:
         logger.info("[%s] Voice clone: converting source to WAV", cid)
         _convert_to_wav(source_audio_path, src_wav)
@@ -329,19 +469,38 @@ def clone_voice_pipeline(
         logger.info("[%s] Voice clone: converting reference to WAV", cid)
         _convert_to_wav(reference_path, ref_wav)
 
-        logger.info("[%s] Voice clone: running FreeVC (%s)", cid, FREEVC_MODEL_TYPE)
-        audio_url = run_freevc(
-            src_wav,
-            ref_wav,
-            api_token=token,
-            model_type=FREEVC_MODEL_TYPE,
-            correlation_id=cid,
-        )
-        logger.info("[%s] Voice clone: downloading result", cid)
+        raw_path: Optional[Path] = None
+        if backend == BACKEND_SEEDVC:
+            logger.info("[%s] Voice clone: running Seed-VC", cid)
+            try:
+                raw_path = Path(
+                    run_seedvc_http(
+                        src_wav,
+                        ref_wav,
+                        output_path=output_path.with_suffix(".raw.wav"),
+                        correlation_id=cid,
+                    )
+                )
+            except VoiceCloneError as exc:
+                if not allow_fallback or not token:
+                    raise
+                logger.warning("[%s] Seed-VC failed (%s); falling back to Replicate", cid, exc)
+                raw_path = None
 
-        raw_suffix = Path(audio_url.split("?", 1)[0]).suffix or ".wav"
-        raw_path = output_path.with_suffix(".raw" + raw_suffix)
-        download_url_to_file(audio_url, raw_path)
+        if raw_path is None:
+            logger.info("[%s] Voice clone: running FreeVC (%s)", cid, FREEVC_MODEL_TYPE)
+            audio_url = run_freevc(
+                src_wav,
+                ref_wav,
+                api_token=_require_replicate_token(token),
+                model_type=FREEVC_MODEL_TYPE,
+                correlation_id=cid,
+            )
+            logger.info("[%s] Voice clone: downloading result", cid)
+
+            raw_suffix = Path(audio_url.split("?", 1)[0]).suffix or ".wav"
+            raw_path = output_path.with_suffix(".raw" + raw_suffix)
+            download_url_to_file(audio_url, raw_path)
 
         if raw_path.suffix.lower() != ".mp3":
             ensure_mp3(raw_path, output_path)
