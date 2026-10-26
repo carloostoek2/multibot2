@@ -72,7 +72,8 @@ from bot.voice_clone import (
     save_reference,
     get_user_ref_path,
     clone_voice_pipeline,
-    resolve_backend as resolve_voice_clone_backend,
+    resolve_backend_ondemand as resolve_voice_clone_backend_ondemand,
+    SEEDVC_STARTING_MESSAGE as VOICE_CLONE_SEEDVC_STARTING_MESSAGE,
     BACKEND_SEEDVC as VOICE_CLONE_BACKEND_SEEDVC,
     apply_eq_and_convert_to_voice_note,
 )
@@ -3292,8 +3293,15 @@ async def _run_voice_clone_pipeline(
     context.user_data["voice_pipeline_correlation_id"] = correlation_id
     message = update.callback_query.message if update.callback_query else update.message
 
-    # Resolve backend once (blocking: reads url.txt + ≤3 s health check).
-    clone_backend = await asyncio.get_event_loop().run_in_executor(None, resolve_voice_clone_backend)
+    # Resolve backend once. May request an on-demand Seed-VC start and poll up to
+    # SEEDVC_START_WAIT s; all blocking I/O runs in the executor.
+    async def _notify_seedvc_starting() -> None:
+        await status_message.edit_text(VOICE_CLONE_SEEDVC_STARTING_MESSAGE, reply_markup=reply_markup)
+
+    clone_backend = await resolve_voice_clone_backend_ondemand(
+        on_starting=_notify_seedvc_starting,
+        has_replicate_token=bool(config.REPLICATE_API_TOKEN),
+    )
     use_seedvc = clone_backend == VOICE_CLONE_BACKEND_SEEDVC
     logger.info(f"[{correlation_id}] Voice clone backend: {clone_backend}")
 

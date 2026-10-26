@@ -11,12 +11,14 @@ Reference audio is stored on disk under data/voice_refs/{user_id}/
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 from urllib.request import urlretrieve
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,20 @@ DEFAULT_SEEDVC_URL_FILE = "/home/ubuntu/seedvc-colab/url.txt"
 DEFAULT_SEEDVC_API_KEY_FILE = "/home/ubuntu/seedvc-colab/api_key"
 SEEDVC_CONVERT_TIMEOUT = 120.0
 SEEDVC_HEALTH_TIMEOUT = 3.0
+# On-demand daemon (seedvc-ondemand.service): touch start_request, read state.
+DEFAULT_SEEDVC_START_REQUEST_FILE = "/home/ubuntu/seedvc-colab/start_request"
+DEFAULT_SEEDVC_STATE_FILE = "/home/ubuntu/seedvc-colab/state"
+DEFAULT_SEEDVC_START_WAIT = 150.0  # max wait for model_loaded after requesting start
+DEFAULT_SEEDVC_POLL_INTERVAL = 5.0
+# 'down' right after touching start_request is normal until the daemon's next
+# loop flips it to 'starting'; give it this grace before falling back.
+DEFAULT_SEEDVC_DOWN_GRACE = 15.0
+SEEDVC_STATE_STARTING = "starting"
+SEEDVC_STATE_UP = "up"
+SEEDVC_STATE_DOWN = "down"
+SEEDVC_STATE_STOPPING = "stopping"
+SEEDVC_STATE_COOLDOWN = "cooldown"
+SEEDVC_STARTING_MESSAGE = "🔌 Arrancando el motor de voz (~2 min)…"
 BACKEND_SEEDVC = "seedvc"
 BACKEND_REPLICATE = "replicate"
 BACKEND_AUTO = "auto"
@@ -333,6 +349,95 @@ def resolve_backend() -> str:
     if configured == BACKEND_AUTO:
         return BACKEND_SEEDVC if seedvc_health() else BACKEND_REPLICATE
     return configured
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name) or default)
+    except ValueError:
+        logger.warning("Invalid %s; using %s", name, default)
+        return default
+
+
+def request_seedvc_start() -> None:
+    """Ask the on-demand daemon to start Seed-VC (idempotent; daemon dedups)."""
+    path = Path(os.getenv("SEEDVC_START_REQUEST_FILE") or DEFAULT_SEEDVC_START_REQUEST_FILE)
+    try:
+        path.touch()
+    except OSError as exc:
+        logger.warning("Could not touch Seed-VC start_request: %s", type(exc).__name__)
+
+
+def read_seedvc_state() -> str:
+    """One word from the daemon: down|starting|up|stopping|cooldown ('' if unknown)."""
+    value = _read_text_file(os.getenv("SEEDVC_STATE_FILE") or DEFAULT_SEEDVC_STATE_FILE)
+    return value.split()[0].lower() if value else ""
+
+
+async def resolve_backend_ondemand(
+    *,
+    on_starting: Optional[Callable[[], Awaitable[None]]] = None,
+    has_replicate_token: Optional[bool] = None,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> str:
+    """Effective backend, starting Seed-VC on demand. Never blocks the event loop.
+
+    auto: ready → seedvc; cooldown/stopping (or down past a short grace) → replicate
+          when a token exists; otherwise wait up to SEEDVC_START_WAIT for
+          model_loaded, then replicate (the start keeps going in background).
+    seedvc: same start + wait, but never falls back; returns 'seedvc' anyway so
+          the pipeline surfaces a clear error if it still is not up.
+    """
+    configured = get_configured_backend()
+    if configured == BACKEND_REPLICATE:
+        return BACKEND_REPLICATE
+    loop = asyncio.get_running_loop()
+
+    async def healthy() -> bool:
+        return await loop.run_in_executor(None, seedvc_health)
+
+    if await healthy():
+        return BACKEND_SEEDVC
+
+    if has_replicate_token is None:
+        has_replicate_token = bool((os.getenv("REPLICATE_API_TOKEN") or "").strip())
+    can_fallback = configured == BACKEND_AUTO and has_replicate_token
+    fallback = BACKEND_REPLICATE if configured == BACKEND_AUTO else BACKEND_SEEDVC
+
+    await loop.run_in_executor(None, request_seedvc_start)
+    max_wait = _float_env("SEEDVC_START_WAIT", DEFAULT_SEEDVC_START_WAIT)
+    interval = max(0.1, _float_env("SEEDVC_POLL_INTERVAL", DEFAULT_SEEDVC_POLL_INTERVAL))
+    down_grace = _float_env("SEEDVC_DOWN_GRACE", DEFAULT_SEEDVC_DOWN_GRACE)
+    start = clock()
+    notified = False
+    while True:
+        state = await loop.run_in_executor(None, read_seedvc_state)
+        elapsed = clock() - start
+        if can_fallback and (
+            state in (SEEDVC_STATE_COOLDOWN, SEEDVC_STATE_STOPPING)
+            or (state == SEEDVC_STATE_DOWN and elapsed >= down_grace)
+        ):
+            logger.info("Seed-VC state=%s; using Replicate", state)
+            return BACKEND_REPLICATE
+        if state == SEEDVC_STATE_COOLDOWN and configured == BACKEND_SEEDVC:
+            logger.warning("Seed-VC in cooldown and backend=seedvc; will error out")
+            return BACKEND_SEEDVC
+        if not notified and on_starting is not None and state in (
+            SEEDVC_STATE_STARTING, SEEDVC_STATE_DOWN, SEEDVC_STATE_UP, ""
+        ):
+            notified = True
+            try:
+                await on_starting()
+            except Exception as exc:  # UI update must never break the clone
+                logger.warning("Seed-VC starting notice failed: %s", exc)
+        if elapsed >= max_wait:
+            logger.info("Seed-VC not ready after %.0fs (state=%s); fallback=%s", elapsed, state, fallback)
+            return fallback
+        await sleep(min(interval, max(0.0, max_wait - elapsed)) or interval)
+        if await healthy():
+            logger.info("Seed-VC ready after %.0fs", clock() - start)
+            return BACKEND_SEEDVC
 
 
 def run_seedvc_http(
