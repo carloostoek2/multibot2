@@ -3335,7 +3335,7 @@ async def _run_voice_clone_pipeline(
             try:
                 await status_message.edit_text(
                     "🗣️ Clonando voz (conserva ritmo)...\n\n"
-                    (
+                    + (
                         "⏳ Esto debería tardar menos de un minuto. No canceles."
                         if use_seedvc
                         else "⏳ Esto puede tardar 3–5 minutos. No canceles."
