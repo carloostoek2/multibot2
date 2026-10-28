@@ -1,6 +1,6 @@
 """Unit tests for handle_back_callback image menu restoration."""
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -30,11 +30,12 @@ class TestHandleBackCallbackImage:
         mock_context.user_data["image_menu_file_ids"] = ["f1", "f2", "f3"]
         mock_context.user_data["image_menu_file_id"] = "f1"
 
-        await handle_back_callback(update, mock_context)
+        with patch("bot.handlers.candid_available", return_value=True):
+            await handle_back_callback(update, mock_context)
 
         text, kwargs = update.callback_query.edit_message_text.await_args
         assert "3 imágenes recibidas" in text[0]
-        assert "«Mejorar», «Naturalizar», «Agrupar» y «Pipeline»" in text[0]
+        assert "«Mejorar», «Naturalizar», «Fotográfico», «Agrupar» y «Pipeline»" in text[0]
         assert "Naturalizar (Sutil)" in text[0]
         assert "Mejorar (Equilibrado)" in text[0]
         keyboard = kwargs["reply_markup"].inline_keyboard
@@ -43,6 +44,7 @@ class TestHandleBackCallbackImage:
             "⚡ Pipeline (Naturalizar + Mejorar)",
             "Mejorar",
             "Naturalizar",
+            "📷 Fotográfico",
             "Agrupar",
         ]
 

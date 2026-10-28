@@ -97,3 +97,33 @@ class TestSendImagesInAlbums:
             )
 
         assert file_ids == ["id0", "id1", "id2"]
+
+    @pytest.mark.asyncio
+    async def test_documents_mode_uses_document_media_and_document_fallback(
+        self, mock_context, tmp_path
+    ):
+        from telegram import InputMediaDocument
+
+        update = _callback_update()
+        update.callback_query.message.reply_document = AsyncMock(
+            return_value=SimpleNamespace(document=SimpleNamespace(file_id="doc-1"))
+        )
+        path = tmp_path / "fotografica_1.jpg"
+        path.write_bytes(b"img")
+        update.callback_query.message.reply_media_group.side_effect = RuntimeError(
+            "album failed"
+        )
+
+        with patch("builtins.open", mock_open(read_data=b"img")):
+            file_ids = await _send_images_in_albums(
+                update,
+                mock_context,
+                [str(path)],
+                "corr-doc",
+                as_documents=True,
+            )
+
+        media = update.callback_query.message.reply_media_group.await_args.kwargs["media"]
+        assert isinstance(media[0], InputMediaDocument)
+        update.callback_query.message.reply_document.assert_awaited_once()
+        assert file_ids == ["doc-1"]

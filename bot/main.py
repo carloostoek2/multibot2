@@ -68,7 +68,7 @@ from bot.handlers import (
     handle_image_group_start_command,
     handle_image_compress_callback, handle_image_convert_callback,
     handle_image_resize_callback, handle_image_enhance_callback,
-    handle_image_noise_callback,
+    handle_image_noise_callback, handle_image_candid_callback,
     handle_config_command, handle_config_callback,
     # YouTube menu handler
     handle_youtube_menu_callback,
@@ -217,6 +217,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_image_resize_callback, pattern="^image_resize:"))
     application.add_handler(CallbackQueryHandler(handle_image_enhance_callback, pattern="^image_enhance:"))
     application.add_handler(CallbackQueryHandler(handle_image_noise_callback, pattern="^image_noise:"))
+    application.add_handler(CallbackQueryHandler(handle_image_candid_callback, pattern="^image_candid:"))
     application.add_handler(CallbackQueryHandler(handle_image_menu_callback, pattern="^image_action:"))
     application.add_handler(CallbackQueryHandler(handle_image_group_callback, pattern="^image_group_action:"))
     application.add_handler(CommandHandler("s", handle_image_group_s_caption_command))

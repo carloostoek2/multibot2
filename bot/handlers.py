@@ -49,6 +49,19 @@ from bot.config import config
 from bot.user_settings import (
     get_album_auto_pipeline,
     set_album_auto_pipeline,
+    get_image_candid_preset,
+    set_image_candid_preset,
+    get_image_candid_delivery,
+    set_image_candid_delivery,
+    CANDID_DELIVERY_MODES,
+)
+from bot.candid_engine import (
+    CandidError,
+    CandidUnavailableError,
+    PRESET_LABELS as CANDID_PRESET_LABELS,
+    PRESET_NAMES as CANDID_PRESET_NAMES,
+    apply_effect as apply_candid_effect,
+    is_available as candid_available,
 )
 from bot.validators import (
     validate_file_size,
@@ -7224,6 +7237,7 @@ async def _send_images_in_albums(
     correlation_id: str,
     caption_prefix: str = "Imagen",
     chat_id: int | None = None,
+    as_documents: bool = False,
 ) -> list[str]:
     """Send images grouped in albums of max 10.
 
@@ -7237,8 +7251,10 @@ async def _send_images_in_albums(
         correlation_id: Correlation ID for logging
         caption_prefix: Prefix for album captions (e.g. "Imagen", "Captura")
         chat_id: Optional chat id fallback when update has no reply target
+        as_documents: Send as documents to avoid Telegram photo recompression
+            (required for effects whose grain/detail would be destroyed)
     """
-    from telegram import InputMediaPhoto
+    from telegram import InputMediaDocument, InputMediaPhoto
 
     user = getattr(update, "effective_user", None)
     user_id = getattr(user, "id", None) or "unknown"
@@ -7270,6 +7286,21 @@ async def _send_images_in_albums(
             return await context.bot.send_photo(chat_id=fallback_chat_id, photo=photo_file)
         return None
 
+    async def _dispatch_document(document_file, filename: str):
+        if hasattr(update, "callback_query") and update.callback_query:
+            return await update.callback_query.message.reply_document(
+                document=document_file, filename=filename
+            )
+        if hasattr(update, "message") and update.message:
+            return await update.message.reply_document(
+                document=document_file, filename=filename
+            )
+        if fallback_chat_id is not None:
+            return await context.bot.send_document(
+                chat_id=fallback_chat_id, document=document_file, filename=filename
+            )
+        return None
+
     for i in range(0, total, album_size):
         album_paths = image_paths[i:i + album_size]
         album_num = (i // album_size) + 1
@@ -7283,7 +7314,16 @@ async def _send_images_in_albums(
                 caption = f"{caption_prefix} {global_idx}/{total}" if j == 0 else None
                 fh = open(path, "rb")
                 file_handles.append(fh)
-                media_group.append(InputMediaPhoto(media=fh, caption=caption))
+                if as_documents:
+                    media_group.append(
+                        InputMediaDocument(
+                            media=fh,
+                            caption=caption,
+                            filename=Path(path).name,
+                        )
+                    )
+                else:
+                    media_group.append(InputMediaPhoto(media=fh, caption=caption))
 
             messages = await _dispatch_media_group(media_group)
 
@@ -7301,8 +7341,12 @@ async def _send_images_in_albums(
             logger.error(f"[{correlation_id}] Failed to send album {album_num}: {e}")
             for path in album_paths:
                 try:
-                    with open(path, "rb") as f:
-                        sent = await _dispatch_photo(f)
+                    if as_documents:
+                        with open(path, "rb") as f:
+                            sent = await _dispatch_document(f, Path(path).name)
+                    else:
+                        with open(path, "rb") as f:
+                            sent = await _dispatch_photo(f)
                     file_id = _extract_sent_image_file_id(sent)
                     if file_id:
                         sent_file_ids.append(file_id)
@@ -7556,7 +7600,7 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             enhance_label = _album_pipeline_enhance_label()
             menu_text = (
                 f"{count} imágenes recibidas.\n\n"
-                "«Mejorar», «Naturalizar», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
+                "«Mejorar», «Naturalizar», «Fotográfico», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
                 f"Pipeline = Naturalizar ({noise_label}) → Mejorar ({enhance_label}).\n"
                 "Selecciona una acción:"
             )
@@ -11658,7 +11702,7 @@ async def _send_image_menu_message(
         enhance_label = _album_pipeline_enhance_label()
         text = (
             f"{count} imágenes recibidas.\n\n"
-            "«Mejorar», «Naturalizar», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
+            "«Mejorar», «Naturalizar», «Fotográfico», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
             f"Pipeline = Naturalizar ({noise_label}) → Mejorar ({enhance_label}).\n"
             "Selecciona una acción:"
         )
@@ -11826,8 +11870,76 @@ def _get_image_noise_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def _get_image_candid_keyboard(
+    current_preset: str, delivery: str
+) -> InlineKeyboardMarkup:
+    """Inline keyboard for «Fotográfico» delivery and intensity selection.
+
+    The user's last preset and delivery mode are marked with a check.
+    """
+    def label(preset: str) -> str:
+        mark = " ✓" if preset == current_preset else ""
+        return f"{CANDID_PRESET_LABELS[preset]}{mark}"
+
+    document_mark = " ✓" if delivery == "document" else ""
+    photo_mark = " ✓" if delivery == "photo" else ""
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                f"📄 Archivo PNG{document_mark}",
+                callback_data="image_candid:delivery:document",
+            ),
+            InlineKeyboardButton(
+                f"🖼️ Imagen{photo_mark}",
+                callback_data="image_candid:delivery:photo",
+            ),
+        ],
+        [
+            InlineKeyboardButton(label("subtle"), callback_data="image_candid:subtle"),
+            InlineKeyboardButton(label("medium"), callback_data="image_candid:medium"),
+            InlineKeyboardButton(label("strong"), callback_data="image_candid:strong"),
+        ],
+        [
+            InlineKeyboardButton("← Volver", callback_data="back:image"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="cancel"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def _image_candid_menu_text(delivery: str) -> str:
+    """Text for the «Fotográfico» submenu."""
+    if delivery == "document":
+        delivery_line = (
+            "Entrega actual: 📄 Archivo PNG (sin recompresión de Telegram)."
+        )
+    else:
+        delivery_line = (
+            "Entrega actual: 🖼️ Imagen (Telegram la recomprime; el efecto se suaviza)."
+        )
+    return (
+        "📷 Fotográfico\n\n"
+        "Aplica la cadena de defectos de una foto real: grano, aberración "
+        "cromática, viñeteo, halación, curva de tono y compresión JPEG. "
+        "Cada imagen recibe parámetros distintos.\n\n"
+        f"{delivery_line}\n\n"
+        "Intensidad:\n"
+        "• Sutil — móvil moderno, apenas se nota\n"
+        "• Media — snapshot casual (recomendado)\n"
+        "• Fuerte — compacta analógica, grano y viñeteo marcados"
+    )
+
+
 def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
     """Generate inline keyboard for image processing menu."""
+    candid_row = []
+    if candid_available():
+        candid_row = [
+            InlineKeyboardButton("📷 Fotográfico", callback_data="image_action:candid"),
+            InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
+        ]
+
     if image_count > 1:
         keyboard = [
             [
@@ -11840,7 +11952,7 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
                 InlineKeyboardButton("Naturalizar", callback_data="image_action:noise"),
             ],
-            [
+            candid_row or [
                 InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
@@ -11858,7 +11970,7 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("Mejorar", callback_data="image_action:enhance"),
                 InlineKeyboardButton("Naturalizar", callback_data="image_action:noise"),
             ],
-            [
+            candid_row or [
                 InlineKeyboardButton("Agrupar", callback_data="image_action:group"),
             ],
         ]
@@ -12345,10 +12457,10 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text("Error: no se encontró la imagen. Intenta de nuevo.")
         return
 
-    if len(file_ids) > 1 and action not in ("enhance", "group", "noise", "pipeline"):
+    if len(file_ids) > 1 and action not in ("enhance", "group", "noise", "pipeline", "candid"):
         await query.edit_message_text(
-            "Solo «Pipeline», «Mejorar», «Naturalizar» y «Agrupar» están disponibles para álbumes. "
-            "Envía una imagen a la vez para otras acciones."
+            "Solo «Pipeline», «Mejorar», «Naturalizar», «Fotográfico» y «Agrupar» están "
+            "disponibles para álbumes. Envía una imagen a la vez para otras acciones."
         )
         return
 
@@ -12510,6 +12622,20 @@ async def handle_image_menu_callback(update: Update, context: ContextTypes.DEFAU
             "• 3 - balance natural\n"
             "• 4-5 - más textura, sin estilo vintage",
             reply_markup=reply_markup
+        )
+
+    elif action == "candid":
+        if not candid_available():
+            await query.edit_message_text(
+                "El efecto fotográfico no está disponible en este servidor: "
+                "falta ImageMagick 7 (magick)."
+            )
+            return
+        current_preset = get_image_candid_preset(user_id)
+        delivery = get_image_candid_delivery(user_id)
+        await query.edit_message_text(
+            _image_candid_menu_text(delivery),
+            reply_markup=_get_image_candid_keyboard(current_preset, delivery),
         )
 
     elif action == "info":
@@ -13169,6 +13295,213 @@ async def handle_image_noise_callback(update: Update, context: ContextTypes.DEFA
             )
         except Exception as e:
             logger.exception(f"[{correlation_id}] Unexpected error applying noise: {e}")
+            await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
+
+
+async def handle_image_candid_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle «Fotográfico» intensity selection (supports batch albums).
+
+    Applies the candid photographic chain (ImageMagick 7 + G'MIC) to every
+    image in the current menu context. The chosen preset is persisted per user
+    so the next menu opens with it marked.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    callback_data = query.data or ""
+
+    parts = callback_data.split(":")
+
+    # Delivery toggle: persist and re-render the submenu without processing.
+    if len(parts) >= 3 and parts[1] == "delivery":
+        mode = parts[2]
+        if mode not in CANDID_DELIVERY_MODES:
+            await query.edit_message_text("Error: modo de entrega inválido.")
+            return
+        try:
+            set_image_candid_delivery(user_id, mode)
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Could not persist candid delivery mode: {exc}")
+        current_preset = get_image_candid_preset(user_id)
+        await query.edit_message_text(
+            _image_candid_menu_text(mode),
+            reply_markup=_get_image_candid_keyboard(current_preset, mode),
+        )
+        return
+
+    try:
+        preset = parts[1]
+    except IndexError:
+        await query.edit_message_text("Error: intensidad inválida.")
+        return
+
+    if preset not in CANDID_PRESET_NAMES:
+        await query.edit_message_text(f"Intensidad '{preset}' no soportada.")
+        return
+
+    if not candid_available():
+        await query.edit_message_text(
+            "El efecto fotográfico no está disponible en este servidor: "
+            "falta ImageMagick 7 (magick)."
+        )
+        return
+
+    delivery = get_image_candid_delivery(user_id)
+    is_document = delivery == "document"
+    output_ext = ".png" if is_document else ".jpg"
+
+    file_ids = context.user_data.get("image_menu_file_ids")
+    if not file_ids:
+        single_id = context.user_data.get("image_menu_file_id")
+        file_ids = [single_id] if single_id else []
+
+    correlation_id = context.user_data.get("image_menu_correlation_id", str(uuid.uuid4())[:8])
+
+    if not file_ids:
+        await query.edit_message_text("Error: no se encontraron imágenes. Intenta de nuevo.")
+        return
+
+    # Persist the selection immediately: survives restarts and is applied even
+    # if this batch later fails.
+    try:
+        set_image_candid_preset(user_id, preset)
+    except (OSError, ValueError) as exc:
+        logger.warning(f"[{correlation_id}] Could not persist candid preset: {exc}")
+
+    preset_label = CANDID_PRESET_LABELS[preset]
+    count = len(file_ids)
+    # ~8 s per image at 2 MP on the server; albums get a larger budget.
+    batch_timeout = min(300, 60 + 20 * count)
+    batch_deadline = time.monotonic() + batch_timeout
+
+    required_space_mb = estimate_image_batch_space(count, copies=3)
+    has_space, space_error = check_disk_space(required_space_mb)
+    if not has_space:
+        await query.edit_message_text(space_error)
+        return
+
+    logger.info(
+        f"[{correlation_id}] Applying candid effect to {count} image(s) "
+        f"(preset={preset}, delivery={delivery}) for user {user_id}"
+    )
+    await query.edit_message_text(
+        f"Aplicando fotográfico a {count} imagen(es) ({preset_label})...\n"
+        "Puede tardar unos segundos por imagen."
+    )
+
+    with TempManager() as temp_mgr:
+        try:
+            processed_paths = []
+            loop = asyncio.get_event_loop()
+
+            for idx, file_id in enumerate(file_ids, start=1):
+                if count > 1:
+                    try:
+                        await query.edit_message_text(
+                            f"Fotográfico {idx}/{count} ({preset_label})..."
+                        )
+                    except Exception:
+                        pass
+
+                input_filename = f"image_candid_input_{user_id}_{correlation_id}_{idx}.img"
+                output_filename = (
+                    f"fotografica_{user_id}_{correlation_id}_{idx}{output_ext}"
+                )
+                input_path = temp_mgr.get_temp_path(input_filename)
+                output_path = temp_mgr.get_temp_path(output_filename)
+
+                file = await context.bot.get_file(file_id)
+                await _download_with_retry(file, input_path, correlation_id=correlation_id)
+
+                remaining_timeout = batch_deadline - time.monotonic()
+                if remaining_timeout <= 0:
+                    raise ProcessingTimeoutError(
+                        "El efecto fotográfico tardó demasiado. "
+                        "Intenta con menos imágenes o más pequeñas."
+                    )
+                remaining_timeout = max(10, remaining_timeout)
+
+                await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda inp=str(input_path), out=str(output_path), sel=preset: (
+                            apply_candid_effect(inp, out, preset=sel)
+                        ),
+                    ),
+                    timeout=remaining_timeout,
+                )
+
+                processed_paths.append(str(output_path))
+
+            if is_document:
+                caption = f"✅ Fotográfica ({preset_label}) — archivo PNG"
+            else:
+                caption = f"✅ Fotográfica ({preset_label}) — imagen"
+
+            if count > 1:
+                sent_ids = await _send_images_in_albums(
+                    update,
+                    context,
+                    processed_paths,
+                    correlation_id,
+                    caption_prefix=f"Fotográfica ({preset_label})",
+                    as_documents=is_document,
+                )
+                _promote_image_menu_results(context, sent_ids)
+            elif is_document:
+                with open(processed_paths[0], "rb") as img_file:
+                    sent = await query.message.reply_document(
+                        document=img_file,
+                        filename=f"fotografica_{correlation_id}.png",
+                        caption=caption,
+                    )
+                file_id = _extract_sent_image_file_id(sent)
+                if file_id:
+                    _promote_image_menu_results(context, [file_id])
+            else:
+                with open(processed_paths[0], "rb") as img_file:
+                    sent = await query.message.reply_photo(
+                        photo=img_file,
+                        caption=caption,
+                    )
+                file_id = _extract_sent_image_file_id(sent)
+                if file_id:
+                    _promote_image_menu_results(context, [file_id])
+
+            final_mode = "archivo PNG" if is_document else "imagen"
+            await query.edit_message_text(
+                f"¡Listo! {count} imagen(es) con acabado fotográfico "
+                f"({preset_label}, {final_mode})."
+            )
+
+            reply_markup = _get_image_post_menu_keyboard(correlation_id)
+            await query.message.reply_text(
+                "¿Quieres hacer algo más con estas imágenes?",
+                reply_markup=reply_markup,
+            )
+            logger.info(
+                f"[{correlation_id}] Candid effect applied for user {user_id} "
+                f"(delivery={delivery})"
+            )
+
+        except CandidUnavailableError as e:
+            logger.error(f"[{correlation_id}] Candid unavailable: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except CandidError as e:
+            logger.error(f"[{correlation_id}] Candid effect failed: {e}")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except ProcessingTimeoutError as e:
+            logger.error(f"[{correlation_id}] Candid effect timed out")
+            await query.edit_message_text(f"Error: {get_user_error_message(e)}")
+        except asyncio.TimeoutError:
+            logger.error(f"[{correlation_id}] Candid effect timed out")
+            await query.edit_message_text(
+                "Error: El efecto fotográfico tardó demasiado. "
+                "Intenta con menos imágenes o más pequeñas."
+            )
+        except Exception as e:
+            logger.exception(f"[{correlation_id}] Unexpected error applying candid: {e}")
             await query.edit_message_text(DEFAULT_ERROR_MESSAGE)
 
 

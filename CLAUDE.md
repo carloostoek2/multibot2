@@ -82,6 +82,7 @@ class XxxProcessor:
 - `bot/audio_effects.py` — `AudioEffects`: denoise, compress, normalize, stereo_3d, pitch_shift (method chaining with intermediate temp files)
 - `bot/audio_enhancer.py` — `AudioEnhancer`: bass boost, treble boost, 3-band EQ
 - `bot/image_processor.py` — `ImageProcessor`: Pillow-based operations (enhance, noise, etc.)
+- `bot/candid_engine.py` — `apply_effect()`: photographic chain for the «Fotográfico» action (ImageMagick 7 + optional G'MIC film grain). Ported from `ai-candid/candid.py`; requires system `magick`, optional `gmic`. Per-user preset and delivery mode (PNG document vs Telegram photo) persist in `bot/user_settings.py`.
 - `bot/video_processor.py`, `bot/video_merger.py`, `bot/format_processor.py`, `bot/audio_processor.py`
 - `bot/screenshot_processor.py`, `bot/validators.py`
 

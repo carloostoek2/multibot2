@@ -5,6 +5,8 @@ FROM python:3.11-slim
 # Install system dependencies (ffmpeg, curl/unzip for Deno, nodejs as fallback)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    imagemagick \
+    gmic \
     curl \
     unzip \
     nodejs \
