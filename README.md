@@ -13,6 +13,8 @@ Este bot recibe videos de cualquier formato y los convierte automáticamente en 
 - Límite automático de 60 segundos
 - Sin audio (formato video note)
 
+Historial de cambios: [CHANGELOG.md](CHANGELOG.md).
+
 ## Requisitos
 
 Antes de comenzar, asegúrate de tener:
