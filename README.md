@@ -91,6 +91,18 @@ Edita el archivo `.env` y reemplaza `your_bot_token_here` con tu token:
 BOT_TOKEN=tu_token_aqui
 ```
 
+### 4. Clonación de voz (opcional)
+
+«Clonar voz» puede usar un servidor Seed-VC propio por HTTP o FreeVC en Replicate:
+
+- `VOICE_CLONE_BACKEND`: `auto` (por defecto; Seed-VC si `/health` responde con el modelo cargado y, si no, Replicate), `seedvc` (sin respaldo) o `replicate`.
+- `REPLICATE_API_TOKEN`: solo hace falta si se usa Replicate.
+- `SEEDVC_URL_FILE` y `SEEDVC_API_KEY_FILE`: archivos con la URL base y la clave de Seed-VC (por defecto `/home/ubuntu/seedvc-colab/url.txt` y `/home/ubuntu/seedvc-colab/api_key`). Se leen en cada clonación; URL vacía = Seed-VC apagado.
+- Arranque bajo demanda: `SEEDVC_START_REQUEST_FILE` y `SEEDVC_STATE_FILE` (por defecto `start_request` y `state` en `/home/ubuntu/seedvc-colab/`), `SEEDVC_START_WAIT` (150 s), `SEEDVC_POLL_INTERVAL` (5 s) y `SEEDVC_DOWN_GRACE` (15 s).
+- `VOICE_CLONE_TIMEOUT`: plazo de la clonación; el bot nunca usa menos de 300 s.
+
+Detalle en `CHANGELOG.md` (2026-09-23 y 2026-10-26).
+
 ## Ejecución
 
 Para iniciar el bot:
