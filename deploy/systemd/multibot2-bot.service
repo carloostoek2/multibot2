@@ -1,0 +1,30 @@
+[Unit]
+Description=Multibot2 Telegram Bot
+After=network-online.target multibot2-local-api.service
+Wants=network-online.target
+# Soft dependency: local API should be up when TELEGRAM_LOCAL_MODE=true
+Wants=multibot2-local-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/repos/multibot2
+EnvironmentFile=%h/repos/multibot2/.env
+Environment=VIRTUAL_ENV=%h/repos/multibot2/.venv
+Environment=PATH=%h/repos/multibot2/.venv/bin:%h/.deno/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Environment=VOICE_REFS_DIR=%h/data/multibot2/voice_refs
+Environment=USER_SETTINGS_DIR=%h/data/multibot2/user_settings
+Environment=TEMP_DIR=%h/data/multibot2/tmp
+Environment=TMPDIR=%h/data/multibot2/tmp
+ExecStartPre=/usr/bin/mkdir -p %h/data/multibot2/voice_refs %h/data/multibot2/user_settings %h/data/multibot2/tmp
+ExecStart=%h/repos/multibot2/.venv/bin/python run.py
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+KillSignal=SIGINT
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=multibot2-bot
+
+[Install]
+WantedBy=default.target
