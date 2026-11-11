@@ -28,7 +28,7 @@ class TestImageBatchMenuKeyboard:
         labels = [btn.text for btn in buttons]
         callback_data = [btn.callback_data for btn in buttons]
         assert labels == [
-            "⚡ Pipeline (Naturalizar + Mejorar)",
+            "⚡ Pipeline (Mejorar + Fotográfico)",
             "Mejorar",
             "Naturalizar",
             "📷 Fotográfico",

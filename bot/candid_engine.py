@@ -1,6 +1,7 @@
 """Motor fotográfico «candid» para el bot.
 
-Portado de ``ai-candid/candid.py`` (commit 721e12f). Aplica la cadena de
+Portado de ``ai-candid/candid.py`` (cadena con grano por luminancia, tamaño
+de grano, ruido de croma en sombras y enfoque de ISP). Aplica la cadena de
 defectos de una foto real: aberración cromática, caída de nitidez, viñeteo,
 halación, curva de tono imperfecta, grano de sensor/película y compresión JPEG
 real. Cada imagen muestrea parámetros distintos dentro del preset.
@@ -34,6 +35,10 @@ GMIC = "gmic"
 MAX_INPUT_PIXELS = 40_000_000
 
 DEFAULT_PRESET = "medium"
+
+# Grain size multiplier for images delivered as Telegram photos: Telegram
+# downsamples and recompresses them, and fine grain would vanish.
+PHOTO_COARSE = 1.5
 
 PRESET_LABELS = {
     "subtle": "Sutil",
@@ -77,7 +82,10 @@ class Preset:
     halo_sigma: tuple[float, float]  # radio de la halación
     halo_level: tuple[float, float]  # umbral de altas luces para la halación
     vignette: tuple[float, float]  # profundidad del viñeteo (0-1)
-    grain: tuple[float, float]  # amplitud del ruido (motor ImageMagick)
+    grain: tuple[float, float]  # σ del grano de luminancia en medios tonos (0-1, motor ImageMagick)
+    grain_size: tuple[float, float]  # tamaño del grano en px (el ruido se genera a 1/size y se amplía)
+    chroma_noise: tuple[float, float]  # σ del ruido de color, solo en sombras (ambos motores)
+    sharpen: tuple[float, float]  # cantidad del enfoque de ISP (unsharp) tras la caída óptica
     grain_stock: tuple[int, int]  # película G'MIC: 0 Orwo, 1 TMAX400, 2 TMAX3200, 3 TRI-X
     grain_opacity: tuple[float, float]  # opacidad del grano G'MIC
     grain_scale: tuple[float, float]  # tamaño del grano G'MIC (menor = más grueso)
@@ -92,7 +100,8 @@ PRESETS: dict[str, Preset] = {
         blur=(0.15, 0.40), clip=(0.3, 0.8), contrast=(0.0, 1.2),
         saturation=(97.0, 102.0), cast=(0.6, 1.8),
         halo_sigma=(6.0, 10.0), halo_level=(88.0, 94.0),
-        vignette=(0.04, 0.08), grain=(0.015, 0.035),
+        vignette=(0.04, 0.08), grain=(0.008, 0.012), grain_size=(1.3, 1.6),
+        chroma_noise=(0.003, 0.005), sharpen=(0.30, 0.45),
         grain_stock=(1, 1), grain_opacity=(0.05, 0.09), grain_scale=(110.0, 150.0),
         quality=(84, 92), double_pass=False,
     ),
@@ -102,7 +111,8 @@ PRESETS: dict[str, Preset] = {
         blur=(0.25, 0.55), clip=(0.8, 1.8), contrast=(1.2, 3.0),
         saturation=(90.0, 98.0), cast=(1.5, 3.5),
         halo_sigma=(10.0, 16.0), halo_level=(82.0, 90.0),
-        vignette=(0.10, 0.18), grain=(0.040, 0.075),
+        vignette=(0.10, 0.18), grain=(0.014, 0.022), grain_size=(1.5, 2.0),
+        chroma_noise=(0.005, 0.009), sharpen=(0.40, 0.60),
         grain_stock=(0, 1), grain_opacity=(0.10, 0.18), grain_scale=(90.0, 130.0),
         quality=(86, 92), double_pass=False,
     ),
@@ -112,7 +122,8 @@ PRESETS: dict[str, Preset] = {
         blur=(0.40, 0.80), clip=(1.5, 3.5), contrast=(2.5, 5.0),
         saturation=(78.0, 90.0), cast=(3.0, 6.0),
         halo_sigma=(16.0, 26.0), halo_level=(74.0, 84.0),
-        vignette=(0.18, 0.32), grain=(0.080, 0.150),
+        vignette=(0.18, 0.32), grain=(0.024, 0.036), grain_size=(1.8, 2.6),
+        chroma_noise=(0.008, 0.014), sharpen=(0.15, 0.30),
         grain_stock=(2, 3), grain_opacity=(0.20, 0.32), grain_scale=(70.0, 110.0),
         quality=(64, 74), double_pass=True,
     ),
@@ -170,6 +181,53 @@ def sample_scale(
     return effective, effective / base
 
 
+# Desviación típica que deja `+noise Gaussian` con -attenuate 1 tras ampliarse
+# con filtro Gaussian (medido: ~0.045 para cualquier ampliación >= 1.2x).
+NOISE_STD_PER_ATTENUATE = 0.045
+
+
+def masked_noise(
+    out_w: int, out_h: int, std: float, size: float, mask: list[str], mono: bool
+) -> list[str]:
+    """Ruido con tamaño de grano, modulado por una máscara de luminancia.
+
+    Espera la imagen de trabajo sola en la lista y la deja sola de nuevo. El
+    ruido se genera a 1/size de la resolución y se amplía con filtro Gaussian:
+    así cada grano ocupa varios píxeles, como el grano real, en vez de ser
+    ruido blanco de un píxel. Donde la máscara es negra el ruido es neutro.
+    """
+    size = max(1.2, size)
+    noise_w = max(1, round(out_w / size))
+    noise_h = max(1, round(out_h / size))
+    attenuate = std / NOISE_STD_PER_ATTENUATE
+    noise = ["-size", f"{noise_w}x{noise_h}", "xc:gray50"]
+    if mono:
+        noise += ["-colorspace", "Gray"]
+    noise += [
+        "-attenuate", f"{attenuate:.4f}", "+noise", "Gaussian",
+        "-filter", "Gaussian", "-resize", f"{out_w}x{out_h}!",
+    ]
+    return [
+        "(", "-clone", "0", "-colorspace", "Gray", *mask, ")",  # 1: máscara
+        "(", "-size", f"{out_w}x{out_h}", "xc:gray50", ")",  # 2: neutro
+        "(", *noise, ")",  # 3: ruido
+        "(", "-clone", "2,3,1", "-compose", "Over", "-composite", ")",
+        "-delete", "1-3",
+        "-compose", "Mathematics", "-define", "compose:args=0,1,1,-0.5", "-composite",
+    ]
+
+
+# Fracción del grano de luminancia que se mantiene bajo el grano de G'MIC.
+GMIC_BASE_GRAIN = 0.6
+
+
+# Máscaras de luminancia (entrada: L en 0-1).
+# Grano: pleno en sombras y medios tonos, se apaga en altas luces (1 - 0.8·L²).
+GRAIN_MASK = ["-function", "polynomial", "-0.8,0,1"]
+# Ruido de color: solo en sombras ((1 - L)²), donde el sensor tiene poca señal.
+SHADOW_MASK = ["-negate", "-evaluate", "pow", "2"]
+
+
 def build_command(
     src: Path,
     dst: Path,
@@ -180,8 +238,13 @@ def build_command(
     ratio: float,
     include_grain: bool = True,
     quality: int | None = None,
+    coarse: float = 1.0,
 ) -> list[str]:
-    """Construye el comando de ImageMagick que aplica la cadena completa."""
+    """Construye el comando de ImageMagick que aplica la cadena completa.
+
+    `coarse` multiplica el tamaño del grano (útil si la imagen se va a reescalar
+    después, p. ej. al enviarla como foto de Telegram).
+    """
     width, height = size
     cmd = [MAGICK, str(src), "-auto-orient", "+repage", "-alpha", "off", "-strip"]
 
@@ -223,6 +286,10 @@ def build_command(
 
     # 4. Óptica: caída de nitidez (escala con la resolución de salida).
     cmd += ["-gaussian-blur", f"0x{rng.uniform(*preset.blur) * ratio:.2f}"]
+    # 4b. Enfoque de ISP: los móviles reenfocan tras la óptica. Devuelve
+    # micro-contraste a los bordes; el umbral deja intactas las zonas planas
+    # (piel), que reciben su textura del grano.
+    cmd += ["-unsharp", f"0x{0.9 * ratio:.2f}+{rng.uniform(*preset.sharpen):.2f}+0.03"]
 
     # 5. Curva de tono: recorte de extremos, contraste fílmico, color.
     low, high = rng.uniform(*preset.clip), rng.uniform(*preset.clip)
@@ -250,13 +317,18 @@ def build_command(
         "-compose", "Multiply", "-composite",
     ]
 
-    # 8. Ruido de sensor (solo con el motor ImageMagick; G'MIC añade el suyo).
-    if include_grain:
-        cmd += [
-            "(", "+clone", "-fill", "gray50", "-colorize", "100%",
-            "-attenuate", f"{rng.uniform(*preset.grain):.4f}", "+noise", "Gaussian", ")",
-            "-compose", "Mathematics", "-define", "compose:args=0,1,1,-0.5", "-composite",
-        ]
+    # 8. Grano de luminancia: monocromo, con tamaño y más fuerte en sombras/medios
+    # que en altas luces. Con G'MIC se aplica igual, al GMIC_BASE_GRAIN de su
+    # fuerza: G'MIC aporta el carácter de película, pero su grano es plano en
+    # tono y por sí solo deja la piel casi lisa.
+    grain_std = rng.uniform(*preset.grain) * (1.0 if include_grain else GMIC_BASE_GRAIN)
+    grain_size = rng.uniform(*preset.grain_size) * ratio * coarse
+    cmd += masked_noise(out_w, out_h, grain_std, grain_size, GRAIN_MASK, mono=True)
+
+    # 8b. Ruido de color en sombras (ambos motores): manchas de croma suaves,
+    # más grandes que el grano de luminancia, como en un sensor real.
+    cmd += masked_noise(out_w, out_h, rng.uniform(*preset.chroma_noise),
+                        grain_size * 1.6, SHADOW_MASK, mono=False)
 
     # 9. Compresión JPEG real: submuestreo de croma y calidad de cámara.
     if dst.suffix.lower() in {".jpg", ".jpeg"}:
@@ -273,12 +345,14 @@ def build_gmic_command(
     rng: random.Random,
     ratio: float = 1.0,
     quality: int | None = None,
+    coarse: float = 1.0,
 ) -> list[str]:
     """Grano de película real (G'MIC) y codificación JPEG en un solo paso."""
     stock = rng.randint(*preset.grain_stock)
     opacity = rng.uniform(*preset.grain_opacity)
     # El grano es físico: a más resolución, más píxeles por grano.
-    scale = rng.uniform(*preset.grain_scale) * ratio
+    # En G'MIC una escala menor da grano más grueso.
+    scale = rng.uniform(*preset.grain_scale) * ratio / coarse
     jpeg_quality = quality if quality is not None else rng.randint(*preset.quality)
     # Parámetros: stock, mezcla (1 = Grain Merge), opacidad, escala, nitidez,
     # grano coloreado y los cinco ajustes de tono. La calidad va en 0-100.
@@ -299,6 +373,7 @@ def process_one(
     engine: str,
     upscale: float | None = None,
     quality: int | None = None,
+    coarse: float = 1.0,
 ) -> Path:
     """Procesa una imagen. Devuelve la ruta escrita."""
     width, height = image_size(src)
@@ -313,11 +388,11 @@ def process_one(
             # ImageMagick aplica óptica y tono; G'MIC añade el grano de película.
             staged = tmp / "stage.png"
             run(build_command(src, staged, preset, (width, height), rng, scale, ratio,
-                              include_grain=False, quality=quality))
-            run(build_gmic_command(staged, current, preset, rng, ratio, quality))
+                              include_grain=False, quality=quality, coarse=coarse))
+            run(build_gmic_command(staged, current, preset, rng, ratio, quality, coarse))
         else:
             run(build_command(src, current, preset, (width, height), rng, scale, ratio,
-                              quality=quality))
+                              quality=quality, coarse=coarse))
 
         if keep_jpeg_history and preset.double_pass:
             second = tmp / "pass2.jpg"
@@ -340,6 +415,7 @@ def apply_effect(
     preset: str = DEFAULT_PRESET,
     seed: int | None = None,
     engine: str = "auto",
+    coarse: float | None = None,
 ) -> Path:
     """Apply the candid effect to one image and return the written path.
 
@@ -351,6 +427,9 @@ def apply_effect(
         preset: One of ``subtle``, ``medium`` or ``strong``.
         seed: Optional seed for reproducible output.
         engine: ``auto``, ``gmic`` or ``imagemagick``.
+        coarse: Grain size multiplier. Defaults to ``PHOTO_COARSE`` for
+            ``.jpg`` output (Telegram downsamples/recompresses photos, which
+            wipes fine grain) and 1.0 for lossless ``.png`` delivery.
 
     Raises:
         CandidUnavailableError: ImageMagick 7 is missing.
@@ -387,13 +466,16 @@ def apply_effect(
 
     actual_seed = seed if seed is not None else random.randrange(2**32)
     selected_engine = engine
+    if coarse is None:
+        coarse = PHOTO_COARSE if dst.suffix.lower() in {".jpg", ".jpeg"} else 1.0
+    grain_coarse = coarse
     if selected_engine == "auto":
         selected_engine = "gmic" if gmic_available() else "imagemagick"
 
     try:
         return process_one(
             src, dst, PRESETS[preset], random.Random(actual_seed),
-            keep_jpeg_history=True, engine=selected_engine,
+            keep_jpeg_history=True, engine=selected_engine, coarse=grain_coarse,
         )
     except RuntimeError as exc:
         if selected_engine != "gmic":
@@ -405,7 +487,7 @@ def apply_effect(
         try:
             return process_one(
                 src, dst, PRESETS[preset], random.Random(actual_seed),
-                keep_jpeg_history=True, engine="imagemagick",
+                keep_jpeg_history=True, engine="imagemagick", coarse=grain_coarse,
             )
         except RuntimeError as retry_exc:
             raise CandidProcessingError(str(retry_exc)) from retry_exc
@@ -417,6 +499,7 @@ __all__ = [
     "CandidUnavailableError",
     "DEFAULT_PRESET",
     "MAX_INPUT_PIXELS",
+    "PHOTO_COARSE",
     "PRESET_LABELS",
     "PRESET_NAMES",
     "PRESETS",

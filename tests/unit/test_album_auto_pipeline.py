@@ -72,7 +72,7 @@ class TestAlbumAutoPreference:
 
     def test_presets_match_product_definitions(self):
         assert ALBUM_PIPELINE_NOISE_STRENGTH == 2  # Sutil
-        assert ALBUM_PIPELINE_ENHANCE_PROFILE == "equilibrado"
+        assert ALBUM_PIPELINE_ENHANCE_PROFILE == "suave"
         assert ALBUM_PIPELINE_MIN_IMAGES == 2
 
 
@@ -114,23 +114,22 @@ class TestConfigCommand:
 class TestAlbumMenuPipelineButton:
     def test_album_keyboard_includes_pipeline(self):
         labels = [b.text for row in _get_image_menu_keyboard(4).inline_keyboard for b in row]
-        assert "⚡ Pipeline (Naturalizar + Mejorar)" in labels
+        assert "⚡ Pipeline (Mejorar + Fotográfico)" in labels
 
     def test_single_image_keyboard_omits_pipeline(self):
         labels = [b.text for row in _get_image_menu_keyboard(1).inline_keyboard for b in row]
-        assert "⚡ Pipeline (Naturalizar + Mejorar)" not in labels
+        assert "⚡ Pipeline (Mejorar + Fotográfico)" not in labels
 
 
 class TestAlbumPipelineRunner:
-    @pytest.mark.asyncio
-    async def test_pipeline_naturalize_then_enhance_then_send(self, mock_context):
+    async def _run_pipeline(self, mock_context, *, candid: bool):
+        """Run the pipeline with processors mocked; return (order, mocks, status)."""
         chat = SimpleNamespace(id=1, type="private")
         mock_context.application.user_data = {99: mock_context.user_data}
         status = MagicMock()
         status.edit_text = AsyncMock()
         status.reply_text = AsyncMock()
         status.chat = chat
-
         update = SimpleNamespace(
             effective_user=SimpleNamespace(id=99),
             effective_chat=chat,
@@ -138,45 +137,31 @@ class TestAlbumPipelineRunner:
             callback_query=None,
         )
 
-        noise = MagicMock(return_value=(True, None))
-        enhance = MagicMock(return_value=(True, None))
-
-        async def fake_wait_for(coro, timeout=None):
-            # run_in_executor already scheduled; call the wrapped lambda via result
-            # Prefer invoking the submitted callable when possible.
-            if asyncio.isfuture(coro):
-                # Cancel real executor work; invoke patched processors via call tracking below
-                coro.cancel()
-                # Infer step from call order using a side channel
-                return (True, None)
-            return await coro
-
-        call_order = []
+        order: list[str] = []
+        enhance = MagicMock(side_effect=lambda *a: order.append("enhance") or (True, None))
+        noise = MagicMock(side_effect=lambda *a: order.append("noise") or (True, None))
+        candid_fx = MagicMock(side_effect=lambda *a, **k: order.append("candid") or a[1])
 
         def fake_run_in_executor(executor, fn):
-            result = fn()
-            call_order.append(result)
             fut = asyncio.get_running_loop().create_future()
-            fut.set_result(result)
+            fut.set_result(fn())
             return fut
 
         with patch("bot.handlers.check_disk_space", return_value=(True, None)), patch(
             "bot.handlers.TempManager"
         ) as temp_mgr_cls, patch(
             "bot.handlers._download_with_retry", new_callable=AsyncMock
-        ), patch(
-            "bot.handlers.ImageProcessor.add_noise", noise
-        ), patch(
+        ), patch("bot.handlers.ImageProcessor.add_noise", noise), patch(
             "bot.handlers.ImageProcessor.enhance", enhance
+        ), patch("bot.handlers.apply_candid_effect", candid_fx), patch(
+            "bot.handlers.candid_available", return_value=candid
         ), patch(
-            "bot.handlers.time.monotonic", return_value=0
-        ), patch(
+            "bot.handlers.get_image_candid_preset", return_value="medium"
+        ), patch("bot.handlers.time.monotonic", return_value=0), patch(
             "bot.handlers._send_images_in_albums",
             new_callable=AsyncMock,
             return_value=["sent1", "sent2"],
-        ) as send_albums, patch(
-            "bot.handlers.asyncio.get_event_loop"
-        ) as get_loop:
+        ) as send_albums, patch("bot.handlers.asyncio.get_event_loop") as get_loop:
             loop = MagicMock()
             loop.run_in_executor.side_effect = fake_run_in_executor
             get_loop.return_value = loop
@@ -196,16 +181,37 @@ class TestAlbumPipelineRunner:
                 status_message=status,
                 chat_id=1,
             )
+        return order, enhance, noise, candid_fx, send_albums, status
 
-        assert noise.call_count == 2
-        assert enhance.call_count == 2
+    @pytest.mark.asyncio
+    async def test_pipeline_enhance_then_candid_then_send(self, mock_context):
+        order, enhance, noise, candid_fx, send_albums, status = await self._run_pipeline(
+            mock_context, candid=True
+        )
+        # Texture goes last: nothing may sharpen/recolor the grain afterwards.
+        assert order == ["enhance", "enhance", "candid", "candid"]
         for call in enhance.call_args_list:
-            assert call.args[2] == "equilibrado"
-        for call in noise.call_args_list:
-            assert call.args[2] == 2
+            assert call.args[2] == "suave"
+        for call in candid_fx.call_args_list:
+            assert call.kwargs["preset"] == "medium"
+            assert call.args[1].endswith(".jpg")
+        noise.assert_not_called()
         send_albums.assert_awaited_once()
         assert mock_context.user_data["image_menu_file_ids"] == ["sent1", "sent2"]
-        assert "¡Listo!" in status.edit_text.await_args_list[-1].args[0]
+        final = status.edit_text.await_args_list[-1].args[0]
+        assert "¡Listo!" in final and "Fotográfico Media" in final
+
+    @pytest.mark.asyncio
+    async def test_pipeline_falls_back_to_noise_without_candid(self, mock_context):
+        order, _enhance, noise, candid_fx, send_albums, status = await self._run_pipeline(
+            mock_context, candid=False
+        )
+        assert order == ["enhance", "enhance", "noise", "noise"]
+        for call in noise.call_args_list:
+            assert call.args[2] == 2
+        candid_fx.assert_not_called()
+        send_albums.assert_awaited_once()
+        assert "Naturalizar Sutil" in status.edit_text.await_args_list[-1].args[0]
 
     @pytest.mark.asyncio
     async def test_pipeline_rejects_single_image(self, mock_context):

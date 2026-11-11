@@ -8,7 +8,7 @@ import os
 from io import BytesIO
 from typing import Tuple, Optional, Dict, Any
 
-from PIL import Image, ImageEnhance, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageEnhance, ImageOps, ImageStat
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,13 @@ NOISE_STRENGTH_LEVELS = {
     4: {"label": "Notable", "amplitude": 8.0},
     5: {"label": "Marcado", "amplitude": 11.0},
 }
+
+
+# Grain shape for add_noise: size in px and σ calibration. The legacy per-pixel
+# implementation produced σ ≈ 0.7·amplitude; keep the same perceived levels.
+GRAIN_SIZE = 1.6
+GRAIN_SIGMA_PER_AMPLITUDE = 0.7
+GRAIN_UPSAMPLE_GAIN = 1.5
 
 
 class ImageProcessingError(Exception):
@@ -120,26 +127,31 @@ class ImageProcessor:
 
     @staticmethod
     def _apply_monochromatic_noise(img: Image.Image, amplitude: float) -> Image.Image:
-        """Blend fine monochromatic noise into an RGB image.
+        """Blend organic monochromatic grain into an RGB image.
 
-        Uses luminance-only offsets so color stays natural while breaking
-        overly smooth AI-generated surfaces.
+        Luminance-only offsets keep color natural. Two things make it read as
+        grain instead of digital noise:
+          - Grain size: noise is generated at 1/GRAIN_SIZE resolution and
+            upsampled, so each grain spans a few pixels.
+          - Tone response: full strength in shadows/midtones, fading in
+            highlights (weight = 1 - 0.8·L²), like film and real sensors.
         """
         rgb = img.convert("RGB")
         width, height = rgb.size
-        noise = Image.effect_noise((width, height), 128)
-        noise_bytes = noise.tobytes()
-        rgb_bytes = bytearray(rgb.tobytes())
-        scale = amplitude / 128.0
-
-        for pixel_idx in range(width * height):
-            offset = (noise_bytes[pixel_idx] - 128) * scale
-            base = pixel_idx * 3
-            for channel in range(3):
-                value = int(rgb_bytes[base + channel] + offset)
-                rgb_bytes[base + channel] = max(0, min(255, value))
-
-        return Image.frombytes("RGB", (width, height), bytes(rgb_bytes))
+        noise_w = max(1, round(width / GRAIN_SIZE))
+        noise_h = max(1, round(height / GRAIN_SIZE))
+        # Upsampling smooths the noise; GRAIN_UPSAMPLE_GAIN restores its σ.
+        sigma = amplitude * GRAIN_SIGMA_PER_AMPLITUDE * GRAIN_UPSAMPLE_GAIN
+        noise = Image.effect_noise((noise_w, noise_h), sigma).resize(
+            (width, height), Image.Resampling.BICUBIC
+        )
+        mask = rgb.convert("L").point(
+            [round(255 * (1 - 0.8 * (v / 255) ** 2)) for v in range(256)]
+        )
+        neutral = Image.new("L", (width, height), 128)
+        grain = Image.composite(noise, neutral, mask)
+        grain_rgb = Image.merge("RGB", (grain, grain, grain))
+        return ImageChops.add(rgb, grain_rgb, scale=1.0, offset=-128)
 
     @staticmethod
     def compress(

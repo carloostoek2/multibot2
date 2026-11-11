@@ -172,3 +172,30 @@ class TestRealPipeline:
         apply_effect(source, destination, preset="subtle", seed=5, engine="gmic")
 
         assert destination.is_file() and destination.stat().st_size > 0
+
+
+class TestGrainCoarseness:
+    """Photos are downsampled by Telegram, so .jpg output gets coarser grain."""
+
+    @pytest.mark.parametrize(
+        ("suffix", "expected"),
+        [(".jpg", candid_engine.PHOTO_COARSE), (".png", 1.0)],
+    )
+    def test_default_coarse_depends_on_delivery(self, tmp_path, suffix, expected):
+        source = _make_image(tmp_path / "in.jpg")
+        seen: list[float] = []
+
+        def fake_process(src, dst, preset, rng, keep_jpeg_history, engine, **kwargs):
+            seen.append(kwargs["coarse"])
+            return dst
+
+        with patch.object(candid_engine, "process_one", side_effect=fake_process):
+            apply_effect(source, tmp_path / f"out{suffix}", engine="imagemagick")
+        assert seen == [expected]
+
+    def test_imagemagick_chain_runs_end_to_end(self, tmp_path):
+        if not candid_engine.is_available():
+            pytest.skip("ImageMagick 7 not installed")
+        source = _make_image(tmp_path / "in.jpg")
+        out = apply_effect(source, tmp_path / "out.jpg", engine="imagemagick", seed=1)
+        assert out.is_file() and out.stat().st_size > 0

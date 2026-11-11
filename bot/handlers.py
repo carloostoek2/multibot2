@@ -7596,12 +7596,12 @@ async def handle_back_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         truncated = context.user_data.get("image_menu_truncated", False)
         reply_markup = _get_image_menu_keyboard(count)
         if count > 1:
-            noise_label = _album_pipeline_noise_label()
+            texture_label = _album_pipeline_texture_label(user_id)
             enhance_label = _album_pipeline_enhance_label()
             menu_text = (
                 f"{count} imágenes recibidas.\n\n"
                 "«Mejorar», «Naturalizar», «Fotográfico», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
-                f"Pipeline = Naturalizar ({noise_label}) → Mejorar ({enhance_label}).\n"
+                f"Pipeline = Mejorar ({enhance_label}) → {texture_label}.\n"
                 "Selecciona una acción:"
             )
         else:
@@ -11334,8 +11334,11 @@ IMAGE_BATCH_DEBOUNCE_SECONDS = 1.5
 
 # Album auto-pipeline presets (match existing Naturalizar/Mejorar definitions)
 ALBUM_AUTO_PIPELINE_PREF_KEY = "album_auto_pipeline"
+# Fallback texture when the candid engine (ImageMagick) is unavailable.
 ALBUM_PIPELINE_NOISE_STRENGTH = 2  # "Sutil" in NOISE_STRENGTH_LEVELS
-ALBUM_PIPELINE_ENHANCE_PROFILE = "equilibrado"  # balanced enhance
+# Gentle enhance applied *before* the texture step: no saturation push and
+# minimal sharpening, so nothing re-sharpens or re-plastifies the grain.
+ALBUM_PIPELINE_ENHANCE_PROFILE = "suave"
 ALBUM_PIPELINE_MIN_IMAGES = 2
 
 
@@ -11367,6 +11370,14 @@ def _album_pipeline_noise_label() -> str:
     return NOISE_STRENGTH_LEVELS[ALBUM_PIPELINE_NOISE_STRENGTH]["label"]
 
 
+def _album_pipeline_texture_label(user_id: int) -> str:
+    """Label of the texture step: candid preset, or noise level as fallback."""
+    if candid_available():
+        preset = get_image_candid_preset(user_id)
+        return f"Fotográfico {CANDID_PRESET_LABELS[preset]}"
+    return f"Naturalizar {_album_pipeline_noise_label()}"
+
+
 def _album_pipeline_enhance_label() -> str:
     return ENHANCEMENT_PROFILES[ALBUM_PIPELINE_ENHANCE_PROFILE]
 
@@ -11376,8 +11387,8 @@ def _format_config_album_auto_text(enabled: bool) -> str:
     return (
         "⚙️ *Configuración*\n\n"
         "*Pipeline automático de álbumes*\n"
-        f"Naturalizar ({_album_pipeline_noise_label()}) → "
-        f"Mejorar ({_album_pipeline_enhance_label()})\n\n"
+        f"Mejorar ({_album_pipeline_enhance_label()}) → "
+        "Fotográfico (tu intensidad guardada)\n\n"
         "Solo aplica a álbumes de 2–10 imágenes (no a fotos sueltas ni videos).\n\n"
         f"Estado: *{estado}*"
     )
@@ -11444,7 +11455,10 @@ async def _run_image_album_pipeline(
     chat_id: int | None = None,
     truncated: bool = False,
 ) -> None:
-    """Run album pipeline: Naturalizar (Sutil) → Mejorar (Equilibrado) → send result.
+    """Run album pipeline: Mejorar (Suave) → Fotográfico (user preset) → send result.
+
+    Texture goes last so no later step sharpens or re-saturates the grain. If
+    ImageMagick is missing, the texture step falls back to Naturalizar (Sutil).
 
     Mirrors the voice-note podcast pipeline pattern: sequential steps with status
     updates; only the final album is shown. Intermediate results stay local and
@@ -11460,7 +11474,6 @@ async def _run_image_album_pipeline(
                 pass
         return
 
-    noise_label = _album_pipeline_noise_label()
     enhance_label = _album_pipeline_enhance_label()
     strength = ALBUM_PIPELINE_NOISE_STRENGTH
     profile = ALBUM_PIPELINE_ENHANCE_PROFILE
@@ -11510,27 +11523,30 @@ async def _run_image_album_pipeline(
         except Exception as e:
             logger.warning(f"[{correlation_id}] Could not update pipeline status: {e}")
 
-    await _edit_status(
-        f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
-        f"1️⃣ Naturalizando ({noise_label})...\n"
-        "⏳ Espera por favor"
-    )
+    use_candid = candid_available()
+    candid_preset = get_image_candid_preset(user_id) if use_candid else None
+    texture_label = _album_pipeline_texture_label(user_id)
+
+    def _status(lines: list[str], tail: str = "⏳ Espera por favor") -> str:
+        return f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n" + "\n".join(lines) + f"\n{tail}"
+
+    await _edit_status(_status([f"1️⃣ Mejorando ({enhance_label})..."]))
 
     with TempManager() as temp_mgr:
         try:
             loop = asyncio.get_event_loop()
-            naturalized_paths: list[str] = []
+            enhanced_paths: list[str] = []
 
+            # Step 1: gentle enhance on the clean source. Done first so the
+            # texture step is last and nothing sharpens or recolors the grain.
             for idx, file_id in enumerate(file_ids, start=1):
                 await _edit_status(
-                    f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
-                    f"1️⃣ Naturalizando {idx}/{count} ({noise_label})...\n"
-                    "⏳ Espera por favor"
+                    _status([f"1️⃣ Mejorando {idx}/{count} ({enhance_label})..."])
                 )
                 input_filename = f"album_pipe_in_{user_id}_{correlation_id}_{idx}.img"
-                natural_filename = f"album_pipe_nat_{user_id}_{correlation_id}_{idx}.jpg"
+                enh_filename = f"album_pipe_enh_{user_id}_{correlation_id}_{idx}.png"
                 input_path = temp_mgr.get_temp_path(input_filename)
-                natural_path = temp_mgr.get_temp_path(natural_filename)
+                enh_path = temp_mgr.get_temp_path(enh_filename)
 
                 file = await context.bot.get_file(file_id)
                 await _download_with_retry(file, input_path, correlation_id=correlation_id)
@@ -11539,39 +11555,7 @@ async def _run_image_album_pipeline(
                 success, error = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda inp=str(input_path), out=str(natural_path), lvl=strength: (
-                            ImageProcessor.add_noise(inp, out, lvl)
-                        ),
-                    ),
-                    timeout=remaining,
-                )
-                if not success:
-                    raise ImageNoiseError(error or "No pude aplicar el ruido sutil")
-                naturalized_paths.append(str(natural_path))
-
-            await _edit_status(
-                f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
-                f"✅ Naturalizado ({noise_label})\n"
-                f"2️⃣ Mejorando ({enhance_label})...\n"
-                "⏳ Espera por favor"
-            )
-
-            enhanced_paths: list[str] = []
-            for idx, natural_path in enumerate(naturalized_paths, start=1):
-                await _edit_status(
-                    f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
-                    f"✅ Naturalizado ({noise_label})\n"
-                    f"2️⃣ Mejorando {idx}/{count} ({enhance_label})...\n"
-                    "⏳ Espera por favor"
-                )
-                out_filename = f"album_pipe_enh_{user_id}_{correlation_id}_{idx}.jpg"
-                output_path = temp_mgr.get_temp_path(out_filename)
-
-                remaining = max(5, batch_deadline - time.monotonic())
-                success, error = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        lambda inp=natural_path, out=str(output_path), prof=profile: (
+                        lambda inp=str(input_path), out=str(enh_path), prof=profile: (
                             ImageProcessor.enhance(inp, out, prof)
                         ),
                     ),
@@ -11579,20 +11563,55 @@ async def _run_image_album_pipeline(
                 )
                 if not success:
                     raise ImageEnhancementError(error or "No pude mejorar la imagen")
-                enhanced_paths.append(str(output_path))
+                enhanced_paths.append(str(enh_path))
 
-            await _edit_status(
-                f"🖼️ Pipeline de álbum ({count} imágenes)...\n\n"
-                f"✅ Naturalizado ({noise_label})\n"
-                f"✅ Mejorado ({enhance_label})\n"
-                "📤 Enviando resultado..."
-            )
+            done_enhance = f"✅ Mejorado ({enhance_label})"
+            await _edit_status(_status([done_enhance, f"2️⃣ Texturizando ({texture_label})..."]))
 
-            caption_prefix = f"Pipeline ({noise_label} → {enhance_label})"
+            # Step 2: organic texture. Candid chain (grain, optics, tone, JPEG
+            # history) when available; luminance-aware noise otherwise.
+            final_paths: list[str] = []
+            for idx, enh_path in enumerate(enhanced_paths, start=1):
+                await _edit_status(_status([
+                    done_enhance, f"2️⃣ Texturizando {idx}/{count} ({texture_label})...",
+                ]))
+                out_filename = f"album_pipe_out_{user_id}_{correlation_id}_{idx}.jpg"
+                output_path = temp_mgr.get_temp_path(out_filename)
+
+                remaining = max(5, batch_deadline - time.monotonic())
+                if use_candid:
+                    await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda inp=enh_path, out=str(output_path), sel=candid_preset: (
+                                apply_candid_effect(inp, out, preset=sel)
+                            ),
+                        ),
+                        timeout=remaining,
+                    )
+                else:
+                    success, error = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda inp=enh_path, out=str(output_path), lvl=strength: (
+                                ImageProcessor.add_noise(inp, out, lvl)
+                            ),
+                        ),
+                        timeout=remaining,
+                    )
+                    if not success:
+                        raise ImageNoiseError(error or "No pude aplicar el ruido sutil")
+                final_paths.append(str(output_path))
+
+            await _edit_status(_status(
+                [done_enhance, f"✅ Texturizado ({texture_label})"], "📤 Enviando resultado..."
+            ))
+
+            caption_prefix = f"Pipeline ({enhance_label} → {texture_label})"
             sent_ids = await _send_images_in_albums(
                 update,
                 context,
-                enhanced_paths,
+                final_paths,
                 correlation_id,
                 caption_prefix=caption_prefix,
                 chat_id=resolved_chat_id,
@@ -11600,8 +11619,8 @@ async def _run_image_album_pipeline(
             _promote_image_menu_results(context, sent_ids)
 
             await _edit_status(
-                f"¡Listo! Álbum procesado: Naturalizar ({noise_label}) → "
-                f"Mejorar ({enhance_label})."
+                f"¡Listo! Álbum procesado: Mejorar ({enhance_label}) → "
+                f"{texture_label}."
             )
 
             reply_markup = _get_image_post_menu_keyboard(correlation_id)
@@ -11625,7 +11644,7 @@ async def _run_image_album_pipeline(
                 f"({count} images)"
             )
 
-        except (ImageNoiseError, ImageEnhancementError) as e:
+        except (ImageNoiseError, ImageEnhancementError, CandidError) as e:
             logger.error(f"[{correlation_id}] Album pipeline failed: {e}")
             await _edit_status(f"Error: {get_user_error_message(e)}")
         except ProcessingTimeoutError as e:
@@ -11698,12 +11717,12 @@ async def _send_image_menu_message(
 
     count = len(file_ids)
     if count > 1:
-        noise_label = _album_pipeline_noise_label()
+        texture_label = _album_pipeline_texture_label(user_id)
         enhance_label = _album_pipeline_enhance_label()
         text = (
             f"{count} imágenes recibidas.\n\n"
             "«Mejorar», «Naturalizar», «Fotográfico», «Agrupar» y «Pipeline» procesan todas las imágenes del álbum.\n"
-            f"Pipeline = Naturalizar ({noise_label}) → Mejorar ({enhance_label}).\n"
+            f"Pipeline = Mejorar ({enhance_label}) → {texture_label}.\n"
             "Selecciona una acción:"
         )
     else:
@@ -11944,7 +11963,7 @@ def _get_image_menu_keyboard(image_count: int = 1) -> InlineKeyboardMarkup:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "⚡ Pipeline (Naturalizar + Mejorar)",
+                    "⚡ Pipeline (Mejorar + Fotográfico)",
                     callback_data="image_action:pipeline",
                 ),
             ],

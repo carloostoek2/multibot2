@@ -36,12 +36,11 @@ class TestHandleBackCallbackImage:
         text, kwargs = update.callback_query.edit_message_text.await_args
         assert "3 imágenes recibidas" in text[0]
         assert "«Mejorar», «Naturalizar», «Fotográfico», «Agrupar» y «Pipeline»" in text[0]
-        assert "Naturalizar (Sutil)" in text[0]
-        assert "Mejorar (Equilibrado)" in text[0]
+        assert "Pipeline = Mejorar (Suave) → Fotográfico" in text[0]
         keyboard = kwargs["reply_markup"].inline_keyboard
         labels = [btn.text for row in keyboard for btn in row]
         assert labels == [
-            "⚡ Pipeline (Naturalizar + Mejorar)",
+            "⚡ Pipeline (Mejorar + Fotográfico)",
             "Mejorar",
             "Naturalizar",
             "📷 Fotográfico",
