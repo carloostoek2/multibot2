@@ -7,6 +7,34 @@ La idea no es listar cada modificación del código, sino dejar constancia de la
 ---
 
 
+El grano de «Fotográfico» depende de la luz, tiene tamaño y va al final del pipeline de álbum — 2026-11-11
+
+El grano anterior era ruido de un píxel con la misma fuerza en todo el tono, y el de G'MIC por sí solo dejaba la piel casi lisa. Además, en el pipeline de álbum Mejorar corría después de la textura, así que podía volver a afilar el grano.
+
+- **Grano de luminancia con tamaño:** monocromo, generado a menor resolución y ampliado para que cada grano ocupe varios píxeles. Es pleno en sombras y medios tonos y se apaga en altas luces (máscara `1 - 0.8·L²`). Los presets Sutil, Media y Fuerte ganan rangos de `grain_size`, `chroma_noise` y `sharpen`.
+- **Ruido de croma solo en sombras**, más grueso que el grano de luminancia, con los dos motores.
+- **Enfoque de ISP** (`-unsharp`) después de la caída óptica. Con G'MIC, el grano de ImageMagick se mantiene al 60 % (`GMIC_BASE_GRAIN`) y G'MIC solo aporta el carácter de película.
+- **Grano más grueso en entrega como foto de Telegram:** con salida `.jpg` el tamaño se multiplica por 1.5 (`PHOTO_COARSE`), porque Telegram reescala y recomprime; en PNG se queda en 1.0.
+- **Pipeline de álbum:** ahora es Mejorar (`suave`) → Fotográfico con el preset guardado del usuario, con la textura al final. Si ImageMagick no está, el segundo paso cae a Naturalizar.
+- `ImageProcessor.add_noise` (Naturalizar) usa el mismo enfoque: grano de 1.6 px y máscara de luminancia, sin el bucle por píxel.
+- Commit directo [`ca2ffc6`](https://github.com/carloostoek2/multibot2/commit/ca2ffc6fc7471e22893b0f87df5a612262c12896).
+
+---
+
+
+Nueva acción «📷 Fotográfico» con efecto candid y entrega configurable — 2026-10-28
+
+Esta acción porta al bot la cadena fotográfica de `ai-candid/candid.py`, que da a una imagen el aspecto de una foto real (óptica, tono, balance de blancos imperfecto, historial JPEG y grano).
+
+- **`bot/candid_engine.py`:** cadena con ImageMagick 7 y grano de película con G'MIC; si G'MIC no está, usa el grano de ImageMagick. Rechaza entradas de más de 40 MP (`MAX_INPUT_PIXELS`).
+- **Menú de imágenes:** «📷 Fotográfico» con presets Sutil, Media (por defecto) y Fuerte. El preset se guarda por usuario (`image_candid_preset`).
+- **Entrega:** como archivo PNG, sin la recompresión de Telegram (por defecto), o como imagen normal. El modo se guarda por usuario (`image_candid_delivery`: `document` o `photo`). En modo PNG los álbumes se envían como `InputMediaDocument`.
+- La imagen Docker instala `imagemagick` y `gmic`.
+- Commit directo [`71d6d38`](https://github.com/carloostoek2/multibot2/commit/71d6d38c19e57497edf423e0f9b45940f0b2438f).
+
+---
+
+
 Clonar voz usa Seed-VC propio, lo arranca bajo demanda y cae a FreeVC si no está — 2026-10-26
 
 FreeVC en Replicate tarda de 3 a 5 minutos por nota. Ahora el bot puede usar un servidor Seed-VC propio por HTTP (por ejemplo, detrás de un túnel de Colab), que debería tardar menos de un minuto, y Replicate queda como respaldo.
